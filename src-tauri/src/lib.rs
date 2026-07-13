@@ -2,6 +2,7 @@
 // 按大纲 commands/ + storage/ + tts/ + tray.rs + hotkey.rs 模块逐步填充。
 
 pub mod storage;
+pub mod tts;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

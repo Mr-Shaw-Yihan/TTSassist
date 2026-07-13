@@ -35,6 +35,7 @@ pub fn load_settings(data_dir: &Path) -> Settings {
             playback_volume: v.get("playback_volume").and_then(|x| x.as_f64()).map(|x| x as f32).unwrap_or(default.playback_volume),
             hotkey_show_window: v.get("hotkey_show_window").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.hotkey_show_window),
             engine_category: v.get("engine_category").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.engine_category),
+            mimo_api_key: v.get("mimo_api_key").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.mimo_api_key),
         },
         Err(_) => default,
     }
@@ -54,6 +55,7 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "playback_volume" => if let Some(v) = value.as_f64() { s.playback_volume = v as f32 },
         "hotkey_show_window" => if let Some(v) = value.as_str() { s.hotkey_show_window = v.to_string() },
         "engine_category" => if let Some(v) = value.as_str() { s.engine_category = v.to_string() },
+        "mimo_api_key" => if let Some(v) = value.as_str() { s.mimo_api_key = v.to_string() },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;
@@ -91,7 +93,7 @@ mod tests {
         std::fs::write(d.join("settings.json"), r#"{"playback_volume":0.1}"#).unwrap();
         let s = load_settings(&d);
         assert!((s.playback_volume - 0.1).abs() < 1e-6, "保留写下的");
-        assert_eq!(s.tts_engine, "mimotts", "缺失字段用默认");
+        assert_eq!(s.tts_engine, "mimo", "缺失字段用默认");
         assert_eq!(s.hotkey_show_window, "Alt+V");
     }
 

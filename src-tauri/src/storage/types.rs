@@ -44,16 +44,19 @@ pub struct Settings {
     pub hotkey_show_window: String,
     /// 引擎类别 "remote" / "local"
     pub engine_category: String,
+    /// MiMo TTS API Key（明文存，settings.json 中的 mimo_api_key）
+    pub mimo_api_key: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            tts_engine: "mimotts".to_string(),
+            tts_engine: "mimo".to_string(),
             tts_model: "default".to_string(),
             playback_volume: 0.8,
             hotkey_show_window: "Alt+V".to_string(),
             engine_category: "remote".to_string(),
+            mimo_api_key: String::new(),
         }
     }
 }
@@ -102,7 +105,7 @@ mod tests {
     #[test]
     fn settings_默认值合理() {
         let s = Settings::default();
-        assert_eq!(s.tts_engine, "mimotts");
+        assert_eq!(s.tts_engine, "mimo");
         assert!((s.playback_volume - 0.8).abs() < 1e-6);
         assert_eq!(s.hotkey_show_window, "Alt+V");
     }
