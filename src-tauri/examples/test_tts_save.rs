@@ -20,6 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let rt = tokio::runtime::Runtime::new()?;
     let rel_path = rt.block_on(async {
+        use voiceassist_lib::tts::traits::TTSEngine;  // ← 导入 trait
         let params = voiceassist_lib::tts::traits::TTSParams::new("你好，这是一段测试语音。欢迎使用 VoiceAssist！");
         engine.generate(params).await
     })?;

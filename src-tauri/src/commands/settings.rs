@@ -1,0 +1,45 @@
+// 设置相关命令：读设置、更新单键。
+
+use tauri::{AppHandle, State};
+use crate::commands::AppState;
+use crate::storage::types::Settings;
+use crate::sync::{notify_changed, EVENT_SETTINGS_CHANGED};
+
+/// 读取当前设置（全部字段）。
+#[tauri::command]
+pub fn get_settings(state: State<'_, AppState>) -> Result<Settings, String> {
+    state
+        .settings
+        .read()
+        .map(|s| s.clone())
+        .map_err(|e| format!("读取设置失败: {e}"))
+}
+
+/// 更新单个设置键。
+///
+/// 同时写文件 + 更新内存中的 AppState（两者保持一致）。
+/// value 为 serde_json::Value 以支持多种字段类型（字符串/数字）。
+#[tauri::command]
+pub fn update_setting(
+    key: String,
+    value: serde_json::Value,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<Settings, String> {
+    let data_dir = &state.data_dir;
+
+    // 先写文件（确保持久化优先）
+    let settings = crate::storage::settings::update_setting(data_dir, &key, value)
+        .map_err(|e| format!("保存设置失败: {e}"))?;
+
+    // 再更新内存（读写锁）
+    let mut guard = state
+        .settings
+        .write()
+        .map_err(|e| format!("更新内存设置失败: {e}"))?;
+    *guard = settings.clone();
+
+    notify_changed(&app, EVENT_SETTINGS_CHANGED);
+
+    Ok(settings)
+}
