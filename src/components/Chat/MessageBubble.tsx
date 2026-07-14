@@ -8,11 +8,15 @@ import { getAudioUrl, deleteMessage, addFavorite } from "../../services/invoke";
 interface Props {
   message: Message;
   volume: number;
+  /** 播放速度（HTMLAudioElement.playbackRate） */
+  playbackRate: number;
   onDeleted: (id: string) => void;
   onFavorited: () => void;
+  /** 父级负责的自动播放触发器（可选） */
+  autoPlaySignal?: number;
 }
 
-export function MessageBubble({ message, volume, onDeleted, onFavorited }: Props) {
+export function MessageBubble({ message, volume, playbackRate, onDeleted, onFavorited }: Props) {
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -26,12 +30,13 @@ export function MessageBubble({ message, volume, onDeleted, onFavorited }: Props
     return () => { cancelled = true; };
   }, [message.audio_path]);
 
-  // 应用音量
+  // 应用音量与播放速度
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.volume = volume;
+      audioRef.current.playbackRate = playbackRate;
     }
-  }, [volume, audioUrl]);
+  }, [volume, playbackRate, audioUrl]);
 
   function play() {
     audioRef.current?.play().catch(() => {/* 用户可能的拒绝权限，忽略 */});

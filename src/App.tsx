@@ -6,7 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { InputBox } from "./components/Chat/InputBox";
 import { MessageBubble } from "./components/Chat/MessageBubble";
-import { VolumeSlider } from "./components/Chat/VolumeSlider";
+import { Toolbar } from "./components/Chat/VolumeSlider";
 import { ApiKeyModal } from "./components/Settings/ApiKeyModal";
 import { useSettingsStore } from "./stores/settingsStore";
 import {
@@ -81,11 +81,15 @@ function App() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  // 音量
+  // 播放音量与播放速度
   const volume = settings?.playback_volume ?? 0.8;
+  const playbackRate = settings?.playback_rate ?? 1.0;
   useEffect(() => {
-    if (playingRef.current) playingRef.current.volume = volume;
-  }, [volume]);
+    if (playingRef.current) {
+      playingRef.current.volume = volume;
+      playingRef.current.playbackRate = playbackRate;
+    }
+  }, [volume, playbackRate]);
 
   // 没配 key 头部也提示
   const needKey = !settings?.mimo_api_key;
@@ -96,6 +100,7 @@ function App() {
     const url = await getAudioUrl(relPath);
     const a = new Audio(url);
     a.volume = volume;
+    a.playbackRate = playbackRate;
     a.play().catch(() => { /* 用户首次播放可能被忽略 */ });
     playingRef.current = a;
   }
@@ -104,8 +109,8 @@ function App() {
     const msg = await generateTTS(text);
     // 立即加气泡（不等事件回来），双保险
     setMessages((prev) => [...prev, msg]);
-    // 自动播放
-    playAudio(msg.audio_path);
+    // 自动播放延迟 0.2 秒，给"已发出"的感知缓冲
+    setTimeout(() => playAudio(msg.audio_path), 200);
   }
 
   return (
@@ -154,6 +159,7 @@ function App() {
               key={m.id}
               message={m}
               volume={volume}
+              playbackRate={playbackRate}
               onDeleted={(id) => setMessages((prev) => prev.filter((x) => x.id !== id))}
               onFavorited={() => { /* P1 阶段收藏夹可见 */ }}
             />
@@ -161,9 +167,9 @@ function App() {
         )}
       </main>
 
-      {/* 工具栏（含音量） */}
+      {/* 工具栏（音量/播放速度/合成语速） */}
       <div className="border-t bg-white px-4 py-2">
-        <VolumeSlider />
+        <Toolbar />
       </div>
 
       {/* 输入框 */}

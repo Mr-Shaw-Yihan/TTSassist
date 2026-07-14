@@ -24,4 +24,6 @@ export interface Settings {
   hotkey_show_window: string;
   engine_category: string;
   mimo_api_key: string;
+  playback_rate: number;
+  tts_speed: number;
 }

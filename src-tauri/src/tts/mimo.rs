@@ -36,11 +36,18 @@ impl MimoEngine {
     }
 
     /// 构造请求体 JSON（抽象为 pub(crate) 方便测试）。
-    fn build_request_body(model: &str, text: &str, voice: Option<&str>) -> serde_json::Value {
+    ///
+    /// `instruction` 为风格指令（user 消息内容），None 或空时留空。
+    fn build_request_body(
+        model: &str,
+        text: &str,
+        voice: Option<&str>,
+        instruction: Option<&str>,
+    ) -> serde_json::Value {
         serde_json::json!({
             "model": model,
             "messages": [
-                { "role": "user", "content": "" },  // 首版不留指令，留空
+                { "role": "user", "content": instruction.unwrap_or("") },
                 { "role": "assistant", "content": text }
             ],
             "audio": {
@@ -83,7 +90,7 @@ impl TTSEngine for MimoEngine {
         let _created = now_iso();
 
         // 3. 构造请求体
-        let body = Self::build_request_body(&self.model, params.text, params.voice);
+        let body = Self::build_request_body(&self.model, params.text, params.voice, params.instruction);
 
         // 4. 发起 HTTP 请求
         let client = reqwest::Client::builder()
@@ -140,7 +147,7 @@ mod tests {
 
     #[test]
     fn build请求体_文本放assistant() {
-        let body = MimoEngine::build_request_body("mimo-v2.5-tts", "你好世界", Some("冰糖"));
+        let body = MimoEngine::build_request_body("mimo-v2.5-tts", "你好世界", Some("冰糖"), None);
         assert_eq!(body["model"], "mimo-v2.5-tts");
         assert_eq!(body["messages"][0]["role"], "user");
         assert_eq!(body["messages"][0]["content"], "");
@@ -152,8 +159,20 @@ mod tests {
 
     #[test]
     fn build请求体_默认音色() {
-        let body = MimoEngine::build_request_body("mimo-v2.5-tts", "x", None);
+        let body = MimoEngine::build_request_body("mimo-v2.5-tts", "x", None, None);
         assert_eq!(body["audio"]["voice"], DEFAULT_VOICE);
+    }
+
+    #[test]
+    fn build请求体_带风格指令() {
+        let body = MimoEngine::build_request_body(
+            "mimo-v2.5-tts",
+            "你好",
+            None,
+            Some("请以约 1.3 倍速度朗读"),
+        );
+        assert_eq!(body["messages"][0]["content"], "请以约 1.3 倍速度朗读");
+        assert_eq!(body["messages"][1]["content"], "你好");
     }
 
     #[test]

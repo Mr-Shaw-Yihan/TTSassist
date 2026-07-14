@@ -36,6 +36,8 @@ pub fn load_settings(data_dir: &Path) -> Settings {
             hotkey_show_window: v.get("hotkey_show_window").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.hotkey_show_window),
             engine_category: v.get("engine_category").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.engine_category),
             mimo_api_key: v.get("mimo_api_key").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.mimo_api_key),
+            playback_rate: v.get("playback_rate").and_then(|x| x.as_f64()).map(|x| x as f32).unwrap_or(default.playback_rate),
+            tts_speed: v.get("tts_speed").and_then(|x| x.as_f64()).map(|x| x as f32).unwrap_or(default.tts_speed),
         },
         Err(_) => default,
     }
@@ -56,6 +58,8 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "hotkey_show_window" => if let Some(v) = value.as_str() { s.hotkey_show_window = v.to_string() },
         "engine_category" => if let Some(v) = value.as_str() { s.engine_category = v.to_string() },
         "mimo_api_key" => if let Some(v) = value.as_str() { s.mimo_api_key = v.to_string() },
+        "playback_rate" => if let Some(v) = value.as_f64() { s.playback_rate = v as f32 },
+        "tts_speed" => if let Some(v) = value.as_f64() { s.tts_speed = v as f32 },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;

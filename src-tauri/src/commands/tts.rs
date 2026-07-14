@@ -19,7 +19,7 @@ pub async fn generate_tts(
     let data_dir = state.data_dir.clone();
 
     // 1. 读设置（放在代码块内，确保锁在 .await 前释放）
-    let (api_key, tts_engine, voice_string) = {
+    let (api_key, tts_engine, voice_string, tts_speed) = {
         let s = state
             .settings
             .read()
@@ -34,7 +34,7 @@ pub async fn generate_tts(
             v => Some(v.to_string()),
         };
 
-        (s.mimo_api_key.clone(), s.tts_engine.clone(), voice)
+        (s.mimo_api_key.clone(), s.tts_engine.clone(), voice, s.tts_speed)
     }; // ← settings 读锁在此释放
 
     // 2. 构建引擎（首版只支持 mimo）
@@ -43,18 +43,26 @@ pub async fn generate_tts(
     }
     let engine = MimoEngine::new(api_key, data_dir.clone());
 
-    // 3. TTS 生成
+    // 3. 合成语速指令（伪精确：拖到 1.3x 即塞"请以约 1.3 倍速度朗读"）
+    //    1.0（正常）不塞指令，保持默认音色自然度。
+    let instruction: Option<String> = if (tts_speed - 1.0).abs() > 0.01 {
+        Some(format!("请以约 {tts_speed} 倍速度朗读"))
+    } else {
+        None
+    };
+
+    // 4. TTS 生成
     let params = TTSParams {
         text: &text,
         voice: voice_string.as_deref(),
-        instruction: None,
+        instruction: instruction.as_deref(),
     };
     let audio_path = engine
         .generate(params)
         .await
         .map_err(|e| format!("{e}"))?;
 
-    // 4. 保存消息记录
+    // 5. 保存消息记录
     let message = Message {
         id: gen_id("m"),
         content: text,

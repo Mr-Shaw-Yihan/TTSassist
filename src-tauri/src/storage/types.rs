@@ -34,7 +34,7 @@ pub struct Favorite {
 /// 设置（settings.json 的完整结构）
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Settings {
-    /// 当前引擎名（如 "mimotts"）
+    /// 当前引擎名（如 "mimo"）
     pub tts_engine: String,
     /// 引擎内的模型/音色 id
     pub tts_model: String,
@@ -46,6 +46,10 @@ pub struct Settings {
     pub engine_category: String,
     /// MiMo TTS API Key（明文存，settings.json 中的 mimo_api_key）
     pub mimo_api_key: String,
+    /// 播放速度 0.5~2.0（前端 HTMLAudioElement.playbackRate，精确控制）
+    pub playback_rate: f32,
+    /// 合成语速 0.5~2.0（塞进 MiMo user 消息，伪精确：模型按自然语言理解）
+    pub tts_speed: f32,
 }
 
 impl Default for Settings {
@@ -57,6 +61,8 @@ impl Default for Settings {
             hotkey_show_window: "Alt+V".to_string(),
             engine_category: "remote".to_string(),
             mimo_api_key: String::new(),
+            playback_rate: 1.0,
+            tts_speed: 1.0,
         }
     }
 }
