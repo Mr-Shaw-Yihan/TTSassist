@@ -5,6 +5,7 @@
 //
 // AppState 通过 Tauri 的 manage() 注入，命令通过 State<'_, AppState> 访问。
 
+pub mod audio;
 pub mod favorite;
 pub mod message;
 pub mod settings;
