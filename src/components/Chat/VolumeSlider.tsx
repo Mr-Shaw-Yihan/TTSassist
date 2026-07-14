@@ -1,10 +1,150 @@
-// 工具栏：播放音量 + 播放速度 + 合成语速
-// 大纲 4.5：播放音量/速度由前端 HTMLAudioElement 控制；
-//          合成语速塞进 MiMo user 消息（伪精确）。
+// 悬浮音量控件：默认一个小球，hover 展开音量+播放速度滑块卡片，
+// 长按 300ms 进入拖拽模式（卡片收回），松开停在新位置。位置限定在窗口内。
+// 大纲 4.6.2
 
+import { useRef, useState, useEffect } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
 
-/** 单个滑块（音量/速度共用） */
+const BALL_SIZE = 36;          // 球直径 px
+const DRAG_DELAY_MS = 300;     // 长按超过此时长判定为拖拽
+const EDGE = 4;                // 离窗口边最小距离
+
+export function FloatingBall() {
+  const settings = useSettingsStore((s) => s.settings);
+  const patch = useSettingsStore((s) => s.patch);
+  const volume = settings?.playback_volume ?? 0.8;
+  const rate = settings?.playback_rate ?? 1.0;
+
+  // 球位置（左上角坐标）。默认顶部居中。
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  // 是否展开滑块卡片
+  const [expanded, setExpanded] = useState(false);
+  // 是否处于拖拽中
+  const draggingRef = useRef(false);
+  const pressTimerRef = useRef<number | null>(null);
+  const dragOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
+  const ballRef = useRef<HTMLDivElement | null>(null);
+
+  // 默认顶部居中：首次布局时根据窗口宽度算
+  useEffect(() => {
+    if (pos === null) {
+      const w = window.innerWidth;
+      setPos({ x: Math.max(EDGE, Math.floor(w / 2 - BALL_SIZE / 2)), y: EDGE });
+    }
+  }, [pos]);
+
+  // 拖拽时全局监听 mousemove/mouseup
+  useEffect(() => {
+    if (!draggingRef.current) return;
+    function onMove(e: MouseEvent) {
+      if (!draggingRef.current) return;
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      const x = Math.min(w - BALL_SIZE - EDGE, Math.max(EDGE, e.clientX - dragOffsetRef.current.dx));
+      const y = Math.min(h - BALL_SIZE - EDGE, Math.max(EDGE, e.clientY - dragOffsetRef.current.dy));
+      setPos({ x, y });
+    }
+    function onUp() {
+      draggingRef.current = false;
+      if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }
+      setExpanded(false); // 松开后不论 hover 与否先收回，等下次 mouseenter 触发展开
+      document.body.style.userSelect = "";
+    }
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+    document.body.style.userSelect = "none";
+    return () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.userSelect = "";
+    };
+  }, [draggingRef.current]);
+
+  function onMouseDown(e: React.MouseEvent) {
+    // 仅响应主鼠标键
+    if (e.button !== 0) return;
+    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+    dragOffsetRef.current = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
+    // 300ms 后进入拖拽
+    pressTimerRef.current = window.setTimeout(() => {
+      draggingRef.current = true;
+      setExpanded(false); // 长按时收回卡片
+    }, DRAG_DELAY_MS);
+  }
+
+  function onMouseUp() {
+    if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }
+    // 短按不触发拖拽，此时由 mouseenter/mouseleave 控制 expanded
+  }
+
+  function onMouseEnter() {
+    // 拖拽中不处理
+    if (draggingRef.current) return;
+    setExpanded(true);
+  }
+
+  function onMouseLeave() {
+    if (draggingRef.current) return;
+    setExpanded(false);
+  }
+
+  if (pos === null) return null;
+
+  return (
+    <div
+      className="absolute z-30"
+      style={{ left: pos.x, top: pos.y, width: BALL_SIZE, height: BALL_SIZE }}
+    >
+      {/* 卡片：球右侧展开两个滑块 */}
+      {expanded && (
+        <div
+          className="absolute left-[44px] top-0 flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3 shadow-lg"
+          onMouseEnter={() => setExpanded(true)}
+          onMouseLeave={() => setExpanded(false)}
+        >
+          <Slider
+            icon="🔊"
+            value={volume}
+            min={0}
+            max={1}
+            step={0.05}
+            format={(v) => `${Math.round(v * 100)}%`}
+            onChange={(v) => patch("playback_volume", v)}
+          />
+          <Slider
+            icon="⚡"
+            value={rate}
+            min={0.5}
+            max={2}
+            step={0.1}
+            format={(v) => `${v.toFixed(1)}x`}
+            onChange={(v) => patch("playback_rate", v)}
+          />
+        </div>
+      )}
+
+      {/* 球本身 */}
+      <div
+        ref={ballRef}
+        onMouseDown={onMouseDown}
+        onMouseUp={onMouseUp}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
+        className={[
+          "flex cursor-grab items-center justify-center rounded-full",
+          "bg-blue-500/85 text-white shadow-md",
+          draggingRef.current ? "cursor-grabbing scale-110" : "",
+          "transition-transform",
+        ].join(" ")}
+        style={{ width: BALL_SIZE, height: BALL_SIZE }}
+        title="鼠标移上去展开调节；长按可拖动"
+      >
+        <span className="text-base select-none">🔊</span>
+      </div>
+    </div>
+  );
+}
+
 function Slider({
   icon,
   value,
@@ -32,91 +172,9 @@ function Slider({
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="w-20 accent-blue-500"
+        className="w-24 accent-blue-500"
       />
-      <span className="w-9 text-xs tabular-nums text-gray-500">{format(value)}</span>
-    </div>
-  );
-}
-
-/** 合成语速四档分段控件（底层存数值，UI 呈现档位名） */
-const TTS_SPEED_PRESETS: { label: string; value: number }[] = [
-  { label: "慢", value: 0.6 },
-  { label: "正常", value: 1.0 },
-  { label: "稍快", value: 1.3 },
-  { label: "快", value: 1.7 },
-];
-
-function TtsSpeedPicker({
-  value,
-  onChange,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-}) {
-  // 取最近的档位作为当前选中项（防止读入非档位值时无高亮）
-  const activeIdx = TTS_SPEED_PRESETS.reduce(
-    (best, cur, idx) =>
-      Math.abs(cur.value - value) < Math.abs(TTS_SPEED_PRESETS[best].value - value)
-        ? idx
-        : best,
-    0,
-  );
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-sm">🚀</span>
-      <div className="flex overflow-hidden rounded-md border border-gray-200">
-        {TTS_SPEED_PRESETS.map((p, idx) => (
-          <button
-            key={p.label}
-            onClick={() => onChange(p.value)}
-            className={[
-              "px-2 py-0.5 text-xs",
-              idx === activeIdx
-                ? "bg-blue-500 text-white"
-                : "bg-white text-gray-600 hover:bg-blue-50",
-              idx > 0 ? "border-l border-gray-200" : "",
-            ].join(" ")}
-          >
-            {p.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-export function Toolbar() {
-  const settings = useSettingsStore((s) => s.settings);
-  const patch = useSettingsStore((s) => s.patch);
-  const volume = settings?.playback_volume ?? 0.8;
-  const rate = settings?.playback_rate ?? 1.0;
-  const ttsSpeed = settings?.tts_speed ?? 1.0;
-
-  return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-gray-600">
-      <Slider
-        icon="🔊"
-        value={volume}
-        min={0}
-        max={1}
-        step={0.05}
-        format={(v) => `${Math.round(v * 100)}%`}
-        onChange={(v) => patch("playback_volume", v)}
-      />
-      <Slider
-        icon="⚡"
-        value={rate}
-        min={0.5}
-        max={2}
-        step={0.1}
-        format={(v) => `${v.toFixed(1)}x`}
-        onChange={(v) => patch("playback_rate", v)}
-      />
-      <TtsSpeedPicker
-        value={ttsSpeed}
-        onChange={(v) => patch("tts_speed", v)}
-      />
+      <span className="w-10 text-xs tabular-nums text-gray-500">{format(value)}</span>
     </div>
   );
 }

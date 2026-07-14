@@ -1,12 +1,12 @@
-// 主界面：消息列表 + 工具栏 + 输入框 + 设置
+// 主界面：消息列表 + 悬浮球音量控件 + 输入框 + 设置
 // 大纲 4.1-4.6 端到端打通 MVP。
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { InputBox } from "./components/Chat/InputBox";
 import { MessageBubble } from "./components/Chat/MessageBubble";
-import { Toolbar } from "./components/Chat/VolumeSlider";
+import { FloatingBall } from "./components/Chat/VolumeSlider";
 import { ApiKeyModal } from "./components/Settings/ApiKeyModal";
 import { useSettingsStore } from "./stores/settingsStore";
 import {
@@ -21,10 +21,14 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [showApiKey, setShowApiKey] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [playingId, setPlayingId] = useState<string | null>(null);
   const settings = useSettingsStore((s) => s.settings);
   const setSettings = useSettingsStore((s) => s.setSettings);
 
+  // 全局唯一播放元素（互斥播放）
   const playingRef = useRef<HTMLAudioElement | null>(null);
+  // 记录当前正在播放的 audio_path，用于 ended 回调判断是否还是这条
+  const playingPathRef = useRef<string | null>(null);
 
   // 启动时：加载设置 + 加载消息
   useEffect(() => {
@@ -94,27 +98,41 @@ function App() {
   // 没配 key 头部也提示
   const needKey = !settings?.mimo_api_key;
 
-  // 自动播放某条音频
-  async function playAudio(relPath: string) {
+  // 互斥播放：停旧 → 设新 → 播放
+  const playAudio = useCallback(async (relPath: string) => {
     playingRef.current?.pause();
     const url = await getAudioUrl(relPath);
     const a = new Audio(url);
     a.volume = volume;
     a.playbackRate = playbackRate;
+    // 仅当此条仍是当前在播时才清高亮（切到其它音频时它被 pause，不会触发 ended）
+    a.addEventListener("ended", () => {
+      if (playingPathRef.current === relPath) {
+        playingPathRef.current = null;
+        setPlayingId(null);
+      }
+    });
     a.play().catch(() => { /* 用户首次播放可能被忽略 */ });
     playingRef.current = a;
+    playingPathRef.current = relPath;
+  }, [volume, playbackRate]);
+
+  // MessageBubble 传的 onPlay 需要带消息 id 维度更新正在播放态
+  // 因为 audioPath 不等于 id（同音频可能被收藏引用），改为接收 audioPath + 当前气泡 id
+  function onBubblePlay(msg: Message) {
+    setPlayingId(msg.id);
+    playAudio(msg.audio_path);
   }
 
   async function handleSend(text: string) {
     const msg = await generateTTS(text);
-    // 立即加气泡（不等事件回来），双保险
     setMessages((prev) => [...prev, msg]);
-    // 自动播放延迟 0.2 秒，给"已发出"的感知缓冲
-    setTimeout(() => playAudio(msg.audio_path), 200);
+    // 自动播放延迟 0.4 秒（避免刚生成时卡音）
+    setTimeout(() => onBubblePlay(msg), 400);
   }
 
   return (
-    <div className="flex h-screen flex-col bg-gray-50 text-gray-800">
+    <div className="relative flex h-screen flex-col bg-gray-50 text-gray-800">
       {/* 标题栏 */}
       <header className="flex items-center justify-between border-b bg-white px-4 py-3">
         <span className="text-sm font-semibold">VoiceAssist</span>
@@ -158,24 +176,22 @@ function App() {
             <MessageBubble
               key={m.id}
               message={m}
-              volume={volume}
-              playbackRate={playbackRate}
+              playingId={playingId}
               onDeleted={(id) => setMessages((prev) => prev.filter((x) => x.id !== id))}
               onFavorited={() => { /* P1 阶段收藏夹可见 */ }}
+              onPlay={() => onBubblePlay(m)}
             />
           ))
         )}
       </main>
 
-      {/* 工具栏（音量/播放速度/合成语速） */}
-      <div className="border-t bg-white px-4 py-2">
-        <Toolbar />
-      </div>
-
       {/* 输入框 */}
       <footer className="border-t bg-white p-3">
         <InputBox onSend={handleSend} />
       </footer>
+
+      {/* 悬浮球音量控件（绝对定位，浮在界面之上） */}
+      <FloatingBall />
 
       {/* API Key Modal */}
       {showApiKey && <ApiKeyModal onClose={() => { setShowApiKey(false); setShowSettings(false); }} />}

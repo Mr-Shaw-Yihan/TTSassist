@@ -48,8 +48,6 @@ pub struct Settings {
     pub mimo_api_key: String,
     /// 播放速度 0.5~2.0（前端 HTMLAudioElement.playbackRate，精确控制）
     pub playback_rate: f32,
-    /// 合成语速 0.5~2.0（塞进 MiMo user 消息，伪精确：模型按自然语言理解）
-    pub tts_speed: f32,
 }
 
 impl Default for Settings {
@@ -62,7 +60,6 @@ impl Default for Settings {
             engine_category: "remote".to_string(),
             mimo_api_key: String::new(),
             playback_rate: 1.0,
-            tts_speed: 1.0,
         }
     }
 }

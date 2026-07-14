@@ -1,46 +1,23 @@
 // 消息气泡组件：显示内容 + 播放按钮 + 右键菜单（删除/收藏）
 // 大纲 4.3-4.4
+// 互斥播放（4.6.4）：组件自身不持有 audio 元素，点播放调父级 onPlay。
 
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import type { Message } from "../../types";
-import { getAudioUrl, deleteMessage, addFavorite } from "../../services/invoke";
+import { deleteMessage, addFavorite } from "../../services/invoke";
 
 interface Props {
   message: Message;
-  volume: number;
-  /** 播放速度（HTMLAudioElement.playbackRate） */
-  playbackRate: number;
+  /** 当前正在播放的消息 id（用于高亮"正在播放"） */
+  playingId: string | null;
   onDeleted: (id: string) => void;
   onFavorited: () => void;
-  /** 父级负责的自动播放触发器（可选） */
-  autoPlaySignal?: number;
+  onPlay: (audioPath: string) => void;
 }
 
-export function MessageBubble({ message, volume, playbackRate, onDeleted, onFavorited }: Props) {
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+export function MessageBubble({ message, playingId, onDeleted, onFavorited, onPlay }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-
-  // 解析音频 URL（相对路径 → asset:// 协议 URL）
-  useEffect(() => {
-    let cancelled = false;
-    getAudioUrl(message.audio_path).then((url) => {
-      if (!cancelled) setAudioUrl(url);
-    });
-    return () => { cancelled = true; };
-  }, [message.audio_path]);
-
-  // 应用音量与播放速度
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.volume = volume;
-      audioRef.current.playbackRate = playbackRate;
-    }
-  }, [volume, playbackRate, audioUrl]);
-
-  function play() {
-    audioRef.current?.play().catch(() => {/* 用户可能的拒绝权限，忽略 */});
-  }
+  const isPlaying = playingId === message.id;
 
   async function handleDelete() {
     setMenu(null);
@@ -72,17 +49,16 @@ export function MessageBubble({ message, volume, playbackRate, onDeleted, onFavo
         <div className="whitespace-pre-wrap break-words">{message.content}</div>
         <div className="mt-1 flex items-center gap-2 text-xs text-blue-100">
           <button
-            onClick={play}
-            className="rounded px-1.5 py-0.5 hover:bg-blue-600"
-            disabled={!audioUrl}
+            onClick={() => onPlay(message.audio_path)}
+            className={[
+              "rounded px-1.5 py-0.5 hover:bg-blue-600",
+              isPlaying ? "bg-blue-700/60 font-semibold" : "",
+            ].join(" ")}
           >
-            ▶ 播放
+            {isPlaying ? "🔊 播放中" : "▶ 播放"}
           </button>
           <span className="opacity-70">{formatTime(message.created_at)}</span>
         </div>
-        {audioUrl && (
-          <audio ref={audioRef} src={audioUrl} preload="none" />
-        )}
 
         {/* 右键菜单（简单实现，点击外部关闭） */}
         {menu && (

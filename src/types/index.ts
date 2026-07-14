@@ -25,5 +25,4 @@ export interface Settings {
   engine_category: string;
   mimo_api_key: string;
   playback_rate: number;
-  tts_speed: number;
 }
