@@ -1,107 +1,44 @@
-// 悬浮音量控件：默认一个小球，hover 展开音量+播放速度滑块卡片，
-// 长按 300ms 进入拖拽模式（卡片收回），松开停在新位置。位置限定在窗口内。
-// 大纲 4.6.2
+// 音量控件（右上角按钮形式）：点击按钮收/展含音量+播放速度两个滑块的卡片。
+// 点按钮外区域收回。不再支持拖拽（悬浮球方案用户反馈拖不动，改简单）。
 
-import { useRef, useState, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
 
-const BALL_SIZE = 36;          // 球直径 px
-const DRAG_DELAY_MS = 300;     // 长按超过此时长判定为拖拽
-const EDGE = 4;                // 离窗口边最小距离
-
-export function FloatingBall() {
+export function VolumeControl() {
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
   const volume = settings?.playback_volume ?? 0.8;
   const rate = settings?.playback_rate ?? 1.0;
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
 
-  // 球位置（左上角坐标）。默认顶部居中。
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  // 是否展开滑块卡片
-  const [expanded, setExpanded] = useState(false);
-  // 是否处于拖拽中
-  const draggingRef = useRef(false);
-  const pressTimerRef = useRef<number | null>(null);
-  const dragOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
-  const ballRef = useRef<HTMLDivElement | null>(null);
-
-  // 默认顶部居中：首次布局时根据窗口宽度算
+  // 点外面收起
   useEffect(() => {
-    if (pos === null) {
-      const w = window.innerWidth;
-      setPos({ x: Math.max(EDGE, Math.floor(w / 2 - BALL_SIZE / 2)), y: EDGE });
+    if (!open) return;
+    function onClick(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
     }
-  }, [pos]);
-
-  // 拖拽时全局监听 mousemove/mouseup
-  useEffect(() => {
-    if (!draggingRef.current) return;
-    function onMove(e: MouseEvent) {
-      if (!draggingRef.current) return;
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      const x = Math.min(w - BALL_SIZE - EDGE, Math.max(EDGE, e.clientX - dragOffsetRef.current.dx));
-      const y = Math.min(h - BALL_SIZE - EDGE, Math.max(EDGE, e.clientY - dragOffsetRef.current.dy));
-      setPos({ x, y });
-    }
-    function onUp() {
-      draggingRef.current = false;
-      if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }
-      setExpanded(false); // 松开后不论 hover 与否先收回，等下次 mouseenter 触发展开
-      document.body.style.userSelect = "";
-    }
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-    document.body.style.userSelect = "none";
-    return () => {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-      document.body.style.userSelect = "";
-    };
-  }, [draggingRef.current]);
-
-  function onMouseDown(e: React.MouseEvent) {
-    // 仅响应主鼠标键
-    if (e.button !== 0) return;
-    const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
-    dragOffsetRef.current = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
-    // 300ms 后进入拖拽
-    pressTimerRef.current = window.setTimeout(() => {
-      draggingRef.current = true;
-      setExpanded(false); // 长按时收回卡片
-    }, DRAG_DELAY_MS);
-  }
-
-  function onMouseUp() {
-    if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; }
-    // 短按不触发拖拽，此时由 mouseenter/mouseleave 控制 expanded
-  }
-
-  function onMouseEnter() {
-    // 拖拽中不处理
-    if (draggingRef.current) return;
-    setExpanded(true);
-  }
-
-  function onMouseLeave() {
-    if (draggingRef.current) return;
-    setExpanded(false);
-  }
-
-  if (pos === null) return null;
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
 
   return (
-    <div
-      className="absolute z-30"
-      style={{ left: pos.x, top: pos.y, width: BALL_SIZE, height: BALL_SIZE }}
-    >
-      {/* 卡片：球右侧展开两个滑块 */}
-      {expanded && (
-        <div
-          className="absolute left-[44px] top-0 flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3 shadow-lg"
-          onMouseEnter={() => setExpanded(true)}
-          onMouseLeave={() => setExpanded(false)}
-        >
+    <div ref={wrapRef} className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={[
+          "rounded px-2 py-1 text-base",
+          open ? "bg-blue-50 text-blue-600" : "text-gray-500 hover:bg-gray-100",
+        ].join(" ")}
+        title="音量与播放速度"
+      >
+        🔊
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-[calc(100%+6px)] z-50 flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
           <Slider
             icon="🔊"
             value={volume}
@@ -122,25 +59,6 @@ export function FloatingBall() {
           />
         </div>
       )}
-
-      {/* 球本身 */}
-      <div
-        ref={ballRef}
-        onMouseDown={onMouseDown}
-        onMouseUp={onMouseUp}
-        onMouseEnter={onMouseEnter}
-        onMouseLeave={onMouseLeave}
-        className={[
-          "flex cursor-grab items-center justify-center rounded-full",
-          "bg-blue-500/85 text-white shadow-md",
-          draggingRef.current ? "cursor-grabbing scale-110" : "",
-          "transition-transform",
-        ].join(" ")}
-        style={{ width: BALL_SIZE, height: BALL_SIZE }}
-        title="鼠标移上去展开调节；长按可拖动"
-      >
-        <span className="text-base select-none">🔊</span>
-      </div>
     </div>
   );
 }

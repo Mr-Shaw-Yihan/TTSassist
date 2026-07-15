@@ -6,7 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { InputBox } from "./components/Chat/InputBox";
 import { MessageBubble } from "./components/Chat/MessageBubble";
-import { FloatingBall } from "./components/Chat/VolumeSlider";
+import { VolumeControl } from "./components/Chat/VolumeSlider";
 import { ApiKeyModal } from "./components/Settings/ApiKeyModal";
 import { useSettingsStore } from "./stores/settingsStore";
 import {
@@ -136,13 +136,16 @@ function App() {
       {/* 标题栏 */}
       <header className="flex items-center justify-between border-b bg-white px-4 py-3">
         <span className="text-sm font-semibold">VoiceAssist</span>
-        <button
-          onClick={() => setShowSettings((v) => !v)}
-          className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
-          title="设置"
-        >
-          ⚙️
-        </button>
+        <div className="flex items-center gap-1">
+          <VolumeControl />
+          <button
+            onClick={() => setShowSettings((v) => !v)}
+            className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
+            title="设置"
+          >
+            ⚙️
+          </button>
+        </div>
       </header>
 
       {needKey && (
@@ -189,9 +192,6 @@ function App() {
       <footer className="border-t bg-white p-3">
         <InputBox onSend={handleSend} />
       </footer>
-
-      {/* 悬浮球音量控件（绝对定位，浮在界面之上） */}
-      <FloatingBall />
 
       {/* API Key Modal */}
       {showApiKey && <ApiKeyModal onClose={() => { setShowApiKey(false); setShowSettings(false); }} />}
