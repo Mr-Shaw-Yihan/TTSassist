@@ -48,6 +48,10 @@ pub struct Settings {
     pub mimo_api_key: String,
     /// 播放速度 0.5~2.0（前端 HTMLAudioElement.playbackRate，精确控制）
     pub playback_rate: f32,
+    /// 克隆音色起的名字（空字符串 = 无克隆样本）
+    pub clone_voice_name: String,
+    /// 克隆音色样本相对路径，如 "voice_samples/clone.mp3"（空字符串 = 无）
+    pub clone_voice_path: String,
 }
 
 impl Default for Settings {
@@ -60,6 +64,8 @@ impl Default for Settings {
             engine_category: "remote".to_string(),
             mimo_api_key: String::new(),
             playback_rate: 1.0,
+            clone_voice_name: String::new(),
+            clone_voice_path: String::new(),
         }
     }
 }

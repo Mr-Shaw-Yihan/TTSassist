@@ -25,4 +25,6 @@ export interface Settings {
   engine_category: string;
   mimo_api_key: string;
   playback_rate: number;
+  clone_voice_name: string;
+  clone_voice_path: string;
 }

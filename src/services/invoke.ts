@@ -48,6 +48,19 @@ export async function importFavorite(
   return invoke<Favorite>("import_favorite", { filePath, note });
 }
 
+// ── 克隆音色 ─────────────────────────────────────
+
+export async function importCloneVoice(
+  filePath: string,
+  name: string,
+): Promise<void> {
+  return invoke<void>("import_clone_voice", { filePath, name });
+}
+
+export async function removeCloneVoice(): Promise<void> {
+  return invoke<void>("remove_clone_voice");
+}
+
 // ── 文件选择 ────────────────────────────────────
 
 import { open } from "@tauri-apps/plugin-dialog";

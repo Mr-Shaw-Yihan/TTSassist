@@ -37,6 +37,8 @@ pub fn load_settings(data_dir: &Path) -> Settings {
             engine_category: v.get("engine_category").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.engine_category),
             mimo_api_key: v.get("mimo_api_key").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.mimo_api_key),
             playback_rate: v.get("playback_rate").and_then(|x| x.as_f64()).map(|x| x as f32).unwrap_or(default.playback_rate),
+            clone_voice_name: v.get("clone_voice_name").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.clone_voice_name),
+            clone_voice_path: v.get("clone_voice_path").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.clone_voice_path),
         },
         Err(_) => default,
     }
@@ -58,6 +60,8 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "engine_category" => if let Some(v) = value.as_str() { s.engine_category = v.to_string() },
         "mimo_api_key" => if let Some(v) = value.as_str() { s.mimo_api_key = v.to_string() },
         "playback_rate" => if let Some(v) = value.as_f64() { s.playback_rate = v as f32 },
+        "clone_voice_name" => if let Some(v) = value.as_str() { s.clone_voice_name = v.to_string() },
+        "clone_voice_path" => if let Some(v) = value.as_str() { s.clone_voice_path = v.to_string() },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;

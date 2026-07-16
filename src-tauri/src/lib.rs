@@ -33,6 +33,8 @@ pub fn run() {
             crate::commands::settings::get_settings,
             crate::commands::settings::update_setting,
             crate::commands::audio::resolve_audio_url,
+            crate::commands::clone_voice::import_clone_voice,
+            crate::commands::clone_voice::remove_clone_voice,
         ])
         .run(tauri::generate_context!())
         .expect("VoiceAssist 启动失败");

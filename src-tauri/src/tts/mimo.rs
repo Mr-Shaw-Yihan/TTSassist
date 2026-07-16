@@ -22,7 +22,7 @@ pub struct MimoEngine {
 }
 
 impl MimoEngine {
-    /// 创建 MiMo 引擎实例。
+    /// 创建 MiMo 引擎实例（默认用预置音色模型 mimo-v2.5-tts）。
     ///
     /// `api_key` 从 settings.mimo_api_key 传入（空字符串表示未配置）。
     /// `data_dir` 是 app_data_dir，所有音频文件都放其 audio/ 子目录。
@@ -33,6 +33,12 @@ impl MimoEngine {
             model: "mimo-v2.5-tts".into(),
             data_dir,
         }
+    }
+
+    /// 切换模型。克隆音色用 `mimo-v2.5-tts-voiceclone`。
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
     }
 
     /// 构造请求体 JSON（抽象为 pub(crate) 方便测试）。

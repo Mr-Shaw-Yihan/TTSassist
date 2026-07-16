@@ -8,7 +8,7 @@ import { InputBox } from "./components/Chat/InputBox";
 import { MessageBubble } from "./components/Chat/MessageBubble";
 import { VolumeControl } from "./components/Chat/VolumeSlider";
 import { FavoriteList } from "./components/Favorites/FavoriteList";
-import { ApiKeyModal } from "./components/Settings/ApiKeyModal";
+import { SettingsDrawer } from "./components/Settings/SettingsDrawer";
 import { useSettingsStore } from "./stores/settingsStore";
 import {
   generateTTS,
@@ -25,8 +25,7 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [tab, setTab] = useState<Tab>("messages");
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [showDrawer, setShowDrawer] = useState(false);
   const [playingPath, setPlayingPath] = useState<string | null>(null);
   const settings = useSettingsStore((s) => s.settings);
   const setSettings = useSettingsStore((s) => s.setSettings);
@@ -130,6 +129,21 @@ function App() {
     return () => { unlisten?.(); };
   }, [reloadFavorites]);
 
+  // 监听 settings:changed，重读 settings 到 store（克隆命令在别处改 settings 时同步）
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    (async () => {
+      const u = await listen("settings:changed", async () => {
+        try {
+          const s = await getSettings();
+          setSettings(s);
+        } catch (e) { console.error("重读设置失败", e); }
+      });
+      unlisten = u;
+    })();
+    return () => { unlisten?.(); };
+  }, [setSettings]);
+
   // 兜底：窗口聚焦时同时刷新收藏
   useEffect(() => {
     const win = getCurrentWindow();
@@ -163,7 +177,7 @@ function App() {
         <div className="flex items-center gap-1">
           <VolumeControl />
           <button
-            onClick={() => setShowSettings((v) => !v)}
+            onClick={() => setShowDrawer(true)}
             className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
             title="设置"
           >
@@ -175,19 +189,8 @@ function App() {
       {needKey && (
         <div className="bg-amber-50 px-4 py-2 text-xs text-amber-700">
           尚未配置 MiMo API Key，
-          <button className="underline" onClick={() => setShowApiKey(true)}>
+          <button className="underline" onClick={() => setShowDrawer(true)}>
             点击配置
-          </button>
-        </div>
-      )}
-
-      {showSettings && (
-        <div className="border-b bg-white px-4 py-2 text-sm">
-          <button
-            onClick={() => { setShowApiKey(true); }}
-            className="text-blue-600 hover:underline"
-          >
-            设置 MiMo API Key
           </button>
         </div>
       )}
@@ -248,8 +251,7 @@ function App() {
         </footer>
       )}
 
-      {/* API Key Modal */}
-      {showApiKey && <ApiKeyModal onClose={() => { setShowApiKey(false); setShowSettings(false); }} />}
+      {showDrawer && <SettingsDrawer onClose={() => setShowDrawer(false)} />}
     </div>
   );
 }
