@@ -87,3 +87,20 @@ export async function getAudioUrl(relPath: string): Promise<string> {
   const absPath = await invoke<string>("resolve_audio_url", { relPath });
   return convertFileSrc(absPath);
 }
+
+/**
+ * 拿音频的本地绝对路径（不经 convertFileSrc），供 revealItemInDir 等需要路径的场景用。
+ */
+export async function getAudioAbsPath(relPath: string): Promise<string> {
+  return invoke<string>("resolve_audio_url", { relPath });
+}
+
+// ── 打开文件位置 ──────────────────────────────────
+
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
+
+/** 在系统资源管理器中定位并选中该音频文件。 */
+export async function revealAudio(relPath: string): Promise<void> {
+  const abs = await getAudioAbsPath(relPath);
+  await revealItemInDir(abs);
+}

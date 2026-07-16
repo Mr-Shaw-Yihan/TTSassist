@@ -2,7 +2,7 @@
 // 大纲 8.1-8.4。播放与消息列表共享 App 全局 Audio（互斥播放跨视图）。
 
 import type { Favorite } from "../../types";
-import { deleteFavorite, importFavorite, pickAudioFile } from "../../services/invoke";
+import { deleteFavorite, importFavorite, pickAudioFile, revealAudio } from "../../services/invoke";
 
 interface Props {
   favorites: Favorite[];
@@ -29,6 +29,14 @@ export function FavoriteList({ favorites, playingPath, onPlay, onChanged }: Prop
   async function handleDelete(id: string) {
     const ok = await deleteFavorite(id);
     if (ok) onChanged();
+  }
+
+  async function handleReveal(audioPath: string) {
+    try {
+      await revealAudio(audioPath);
+    } catch (e) {
+      window.alert(`无法打开文件位置：${e}`);
+    }
   }
 
   if (favorites.length === 0) {
@@ -68,6 +76,13 @@ export function FavoriteList({ favorites, playingPath, onPlay, onChanged }: Prop
                 ].join(" ")}
               >
                 {playing ? "🔊 播放中" : "▶ 播放"}
+              </button>
+              <button
+                onClick={() => handleReveal(f.audio_path)}
+                className="rounded px-1.5 py-0.5 text-xs text-gray-500 opacity-0 hover:bg-gray-100 group-hover:opacity-100"
+                title="在文件夹中打开"
+              >
+                📁
               </button>
               <button
                 onClick={() => handleDelete(f.id)}

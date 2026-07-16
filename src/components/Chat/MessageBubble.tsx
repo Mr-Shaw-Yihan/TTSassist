@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import type { Message } from "../../types";
-import { deleteMessage, addFavorite } from "../../services/invoke";
+import { deleteMessage, addFavorite, revealAudio } from "../../services/invoke";
 
 interface Props {
   message: Message;
@@ -23,6 +23,15 @@ export function MessageBubble({ message, playingPath, onDeleted, onFavorited, on
     setMenu(null);
     const ok = await deleteMessage(message.id);
     if (ok) onDeleted(message.id);
+  }
+
+  async function handleReveal() {
+    setMenu(null);
+    try {
+      await revealAudio(message.audio_path);
+    } catch (e) {
+      window.alert(`无法打开文件位置：${e}`);
+    }
   }
 
   async function handleFavorite() {
@@ -76,6 +85,12 @@ export function MessageBubble({ message, playingPath, onDeleted, onFavorited, on
                 className="block w-full px-4 py-1.5 text-left hover:bg-blue-50"
               >
                 ⭐ 收藏
+              </button>
+              <button
+                onClick={handleReveal}
+                className="block w-full px-4 py-1.5 text-left hover:bg-blue-50"
+              >
+                📁 在文件夹中打开
               </button>
               <button
                 onClick={handleDelete}
