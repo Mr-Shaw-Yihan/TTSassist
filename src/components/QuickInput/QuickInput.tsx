@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getAudioUrl } from "../../services/invoke";
 
 export function QuickInput() {
   const [text, setText] = useState("");
@@ -39,9 +40,15 @@ export function QuickInput() {
     if (!t || sending) return;
     setSending(true);
     try {
-      await invoke("generate_tts", { text: t });
+      const msg: { audio_path: string } = await invoke("generate_tts", { text: t });
       setText("");
       setSent(true);
+      // 自动播放语音
+      try {
+        const url = await getAudioUrl(msg.audio_path);
+        const a = new Audio(url);
+        void a.play();
+      } catch { /* 播放失败不影响发送 */ }
       setTimeout(() => setSent(false), 800);
     } catch (e) {
       window.alert(`发送失败：${e}`);

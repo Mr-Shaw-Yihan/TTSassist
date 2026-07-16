@@ -15,7 +15,9 @@ fn setup_hotkey(app: &tauri::AppHandle) {
     use tauri_plugin_global_shortcut::GlobalShortcutExt;
     let shortcut_key = "Alt+V";
 
-    let _ = app.global_shortcut().on_shortcut(shortcut_key, move |_app, _event, _state| {
+    let _ = app.global_shortcut().on_shortcut(shortcut_key, move |_app, _event, event| {
+        // 只响应按下事件（不处理松开），避免按下/松开双触发
+        if event.state != tauri_plugin_global_shortcut::ShortcutState::Pressed { return; }
         if let Some(win) = _app.get_webview_window("quick_input") {
             if win.is_visible().unwrap_or(false) {
                 let _ = win.hide();
