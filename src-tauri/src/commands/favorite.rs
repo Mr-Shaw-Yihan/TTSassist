@@ -1,8 +1,10 @@
-// 收藏相关命令：列表、新增、删除。
+// 收藏相关命令：列表、新增、删除、导入外部音频。
 //
 // 收藏策略（用户拍板）：仅引用源消息音频，不拷贝文件。
 // 依靠 storage::audio_gc 的无引用则删逻辑保护音频不被误删。
+// 例外：导入外部音频时必须复制到 audio/ 下，否则源文件移动后失效。
 
+use std::path::Path;
 use tauri::{AppHandle, State};
 use crate::commands::AppState;
 use crate::storage::types::{Favorite, gen_id, now_iso};
@@ -63,5 +65,57 @@ pub fn delete_favorite(
     if result {
         notify_changed(&app, EVENT_FAVORITE_CHANGED);
     }
+    Ok(result)
+}
+
+/// 导入外部音频文件为收藏：
+/// 把用户选择的绝对路径文件复制到 audio/ 下，source_message_id = None。
+///
+/// `file_path` 是用户通过前端 dialog 选出的绝对路径（如 D:\xxx\clap.mp3）。
+#[tauri::command]
+pub fn import_favorite(
+    file_path: String,
+    note: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Favorite, String> {
+    let data_dir = &state.data_dir;
+    let src = Path::new(&file_path);
+
+    // 取扩展名（小写），无扩展名默认 mp3
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_else(|| "mp3".into());
+
+    // 生成收藏 id 与目标文件名
+    let id = gen_id("f");
+    let rel_path = format!("audio/{id}.{ext}");
+    let dest = data_dir.join(&rel_path);
+
+    // 确保目录存在
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("创建目录失败: {e}"))?;
+    }
+    // 复制文件（非移动，原文件保持）
+    std::fs::copy(src, &dest)
+        .map_err(|e| format!("复制音频失败: {e}"))?;
+
+    let fav = Favorite {
+        id,
+        source_message_id: None,
+        note,
+        audio_path: rel_path,
+        created_at: now_iso(),
+    };
+
+    let result = fav.clone();
+    crate::storage::favorites::add_favorite(data_dir, fav)
+        .map_err(|e| format!("{e}"))?;
+
+    notify_changed(&app, EVENT_FAVORITE_CHANGED);
+
     Ok(result)
 }

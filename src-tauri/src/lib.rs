@@ -14,6 +14,7 @@ use crate::storage::types::Settings;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             storage::ensure_data_dirs(&data_dir)?;
@@ -28,6 +29,7 @@ pub fn run() {
             crate::commands::favorite::list_favorites,
             crate::commands::favorite::add_favorite,
             crate::commands::favorite::delete_favorite,
+            crate::commands::favorite::import_favorite,
             crate::commands::settings::get_settings,
             crate::commands::settings::update_setting,
             crate::commands::audio::resolve_audio_url,

@@ -8,16 +8,16 @@ import { deleteMessage, addFavorite } from "../../services/invoke";
 
 interface Props {
   message: Message;
-  /** 当前正在播放的消息 id（用于高亮"正在播放"） */
-  playingId: string | null;
+  /** 当前正在播放的 audio_path（跨视图统一高亮） */
+  playingPath: string | null;
   onDeleted: (id: string) => void;
   onFavorited: () => void;
   onPlay: (audioPath: string) => void;
 }
 
-export function MessageBubble({ message, playingId, onDeleted, onFavorited, onPlay }: Props) {
+export function MessageBubble({ message, playingPath, onDeleted, onFavorited, onPlay }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const isPlaying = playingId === message.id;
+  const isPlaying = playingPath === message.audio_path;
 
   async function handleDelete() {
     setMenu(null);

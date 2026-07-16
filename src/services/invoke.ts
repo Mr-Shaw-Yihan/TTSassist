@@ -40,6 +40,28 @@ export async function deleteFavorite(id: string): Promise<boolean> {
   return invoke<boolean>("delete_favorite", { id });
 }
 
+/** 导入外部音频文件为收藏 */
+export async function importFavorite(
+  filePath: string,
+  note: string,
+): Promise<Favorite> {
+  return invoke<Favorite>("import_favorite", { filePath, note });
+}
+
+// ── 文件选择 ────────────────────────────────────
+
+import { open } from "@tauri-apps/plugin-dialog";
+
+/** 弹文件选择器，选单个音频文件；返回绝对路径或 null（用户取消） */
+export async function pickAudioFile(): Promise<string | null> {
+  const selected = await open({
+    multiple: false,
+    filters: [{ name: "音频", extensions: ["mp3", "wav", "m4a", "ogg", "flac"] }],
+  });
+  if (typeof selected === "string") return selected;
+  return null;
+}
+
 // ── Settings ─────────────────────────────────────
 
 export async function getSettings(): Promise<Settings> {
