@@ -9,6 +9,7 @@ import { MessageBubble } from "./components/Chat/MessageBubble";
 import { VolumeControl } from "./components/Chat/VolumeSlider";
 import { FavoriteList } from "./components/Favorites/FavoriteList";
 import { SettingsDrawer } from "./components/Settings/SettingsDrawer";
+import { QuickInput } from "./components/QuickInput/QuickInput";
 import { useSettingsStore } from "./stores/settingsStore";
 import {
   generateTTS,
@@ -22,6 +23,12 @@ import type { Message, Favorite } from "./types";
 type Tab = "messages" | "favorites";
 
 function App() {
+  // 多窗口路由：检查当前窗口 label
+  const win = getCurrentWindow();
+  if (win.label === "quick_input") {
+    return <QuickInput />;
+  }
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [tab, setTab] = useState<Tab>("messages");

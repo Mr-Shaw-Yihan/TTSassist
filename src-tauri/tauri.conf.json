@@ -12,12 +12,24 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "VoiceAssist",
         "width": 380,
         "height": 600,
         "minWidth": 320,
         "minHeight": 480,
         "resizable": true
+      },
+      {
+        "label": "quick_input",
+        "title": "",
+        "width": 330,
+        "height": 160,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "visible": false,
+        "focus": true,
+        "resizable": false
       }
     ],
     "security": {
