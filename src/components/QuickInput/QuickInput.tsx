@@ -63,19 +63,19 @@ export function QuickInput() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-gray-900/95 text-white">
-      {/* 发送成功时的遮罩提示 */}
+    <div className="flex h-screen flex-col rounded-2xl bg-[var(--paper)] text-[var(--ink-900)] shadow-[0_20px_60px_rgba(26,24,22,0.25)]">
+      {/* 发送成功时的遮罩提示 ── 印一枚琥珀签 */}
       {sent && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-900/80">
-          <span className="text-lg font-medium text-green-400">✅ 已发送</span>
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--paper)]/95 animate-fade">
+          <span className="font-display text-base text-[var(--amber-600)]">✓ 已发送</span>
         </div>
       )}
 
-      <div className="flex items-center gap-1 px-2 py-1.5">
+      <div className="flex items-center gap-1.5 px-3 py-3">
         <input
           ref={inpRef}
-          className="flex-1 rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm text-white placeholder-white/40 outline-none focus:border-blue-400"
-          placeholder="输入文字，回车发送..."
+          className="flex-1 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm text-[var(--ink-900)] outline-none transition-colors placeholder:text-[var(--ink-300)] focus:border-[var(--amber-500)]"
+          placeholder="输入文字，回车发送…"
           value={text}
           disabled={sending}
           onChange={(e) => setText(e.target.value)}
@@ -89,26 +89,26 @@ export function QuickInput() {
         <button
           onClick={send}
           disabled={!text.trim() || sending}
-          className="rounded-md bg-blue-500 px-3 py-2 text-sm font-medium hover:bg-blue-600 disabled:opacity-50"
+          className="rounded-xl bg-[var(--ink-900)] px-3.5 py-2 text-sm font-medium text-[var(--paper)] transition-all hover:bg-[var(--ink-700)] disabled:cursor-not-allowed disabled:bg-[var(--ink-200)] disabled:text-[var(--ink-300)] active:scale-[0.97]"
         >
-          {sending ? "…" : "发送"}
+          {sending ? "…" : "发"}
         </button>
 
-        {/* 齿轮菜单 */}
+        {/* 菜单 ── 右侧齿轮点 */}
         <div className="relative">
           <button
             onClick={() => setMenu((v) => !v)}
-            className="rounded p-1.5 text-white/60 hover:bg-white/10"
+            className="rounded-lg p-1.5 text-[var(--ink-300)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]"
           >
-            ⚙️
+            ⋯
           </button>
           {menu && (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
-              <div className="absolute right-0 top-full z-30 mt-1 w-40 rounded-lg border border-white/10 bg-gray-800 py-1 text-xs shadow-xl">
+              <div className="absolute right-0 top-full z-30 mt-1.5 w-40 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] py-1 text-xs text-[var(--ink-700)] shadow-[0_8px_24px_rgba(26,24,22,0.12)] animate-fade overflow-hidden">
                 <button
                   onClick={openMain}
-                  className="block w-full px-3 py-2 text-left hover:bg-white/10"
+                  className="block w-full px-3 py-2 text-left hover:bg-[var(--amber-200)]/40 hover:text-[var(--ink-900)] transition-colors"
                 >
                   打开主界面
                 </button>

@@ -177,42 +177,45 @@ function App() {
   }
 
   return (
-    <div className="relative flex h-screen flex-col bg-gray-50 text-gray-800">
-      {/* 标题栏 */}
-      <header className="flex items-center justify-between border-b bg-white px-4 py-3">
-        <span className="text-sm font-semibold">VoiceAssist</span>
-        <div className="flex items-center gap-1">
+    <div className="relative flex h-screen flex-col bg-[var(--paper)] text-[var(--ink-900)]">
+      {/* 标题栏 ── 品牌字 + 极细底分隔线 */}
+      <header className="flex items-center justify-between border-b border-[var(--ink-200)] bg-[var(--paper)] px-4 py-3">
+        <div className="flex items-baseline gap-2">
+          <span className="font-display text-base text-[var(--ink-900)] tracking-tight">语笺</span>
+          <span className="text-[10px] text-[var(--ink-300)] tracking-[0.3em] uppercase">VoiceAssist</span>
+        </div>
+        <div className="flex items-center gap-0.5">
           <VolumeControl />
           <button
             onClick={() => setShowDrawer(true)}
-            className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100"
+            className="ml-1 rounded-lg p-1.5 text-[var(--ink-300)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)] transition-colors"
             title="设置"
           >
-            ⚙️
+            <span className="text-base">⋯</span>
           </button>
         </div>
       </header>
 
       {needKey && (
-        <div className="bg-amber-50 px-4 py-2 text-xs text-amber-700">
+        <div className="border-b border-[var(--amber-200)]/60 bg-[var(--amber-200)]/20 px-4 py-2 text-xs text-[var(--amber-600)] animate-fade">
           尚未配置 MiMo API Key，
-          <button className="underline" onClick={() => setShowDrawer(true)}>
+          <button className="underline underline-offset-2 font-medium" onClick={() => setShowDrawer(true)}>
             点击配置
           </button>
         </div>
       )}
 
-      {/* tab 切换 */}
-      <div className="flex border-b bg-white px-2 text-sm">
+      {/* tab 切换 ── 下划线指示器 */}
+      <div className="flex gap-1 border-b border-[var(--ink-200)] bg-[var(--paper)] px-4 text-sm">
         {(["messages", "favorites"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={[
-              "px-3 py-2 -mb-px border-b-2 transition-colors",
+              "px-3 py-2.5 -mb-px border-b-2 transition-all duration-200",
               tab === t
-                ? "border-blue-500 text-blue-600 font-medium"
-                : "border-transparent text-gray-500 hover:text-gray-800",
+                ? "border-[var(--amber-600)] text-[var(--ink-900)] font-medium"
+                : "border-transparent text-[var(--ink-300)] hover:text-[var(--ink-700)]",
             ].join(" ")}
           >
             {t === "messages" ? "消息" : "收藏"}
@@ -222,10 +225,11 @@ function App() {
 
       {/* 消息列表 / 收藏列表 */}
       {tab === "messages" ? (
-        <main ref={listRef} className="scrollbar-thin flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        <main ref={listRef} className="scrollbar-thin flex-1 space-y-3 overflow-y-auto px-4 py-5">
           {messages.length === 0 ? (
-            <div className="mt-8 text-center text-sm text-gray-400">
-              输入要朗读的文字，回车发送
+            <div className="mt-16 flex flex-col items-center gap-3 text-[var(--ink-300)] animate-fade">
+              <span className="font-display text-3xl text-[var(--ink-200)]">·</span>
+              <span className="text-sm">输入要朗读的文字，回车发送</span>
             </div>
           ) : (
             messages.map((m) => (
@@ -241,7 +245,7 @@ function App() {
           )}
         </main>
       ) : (
-        <main className="flex-1 overflow-hidden bg-gray-50">
+        <main className="flex-1 overflow-hidden bg-[var(--paper)]">
           <FavoriteList
             favorites={favorites}
             playingPath={playingPath}
@@ -253,7 +257,7 @@ function App() {
 
       {/* 输入框（仅消息 tab 显示） */}
       {tab === "messages" && (
-        <footer className="border-t bg-white p-3">
+        <footer className="border-t border-[var(--ink-200)] bg-[var(--paper-card)] p-3">
           <InputBox onSend={handleSend} />
         </footer>
       )}

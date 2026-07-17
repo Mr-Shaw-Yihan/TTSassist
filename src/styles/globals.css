@@ -1,6 +1,39 @@
 @import "tailwindcss";
 
-/* === VoiceAssist 全局样式 === */
+/* ============================================================
+   VoiceAssist ·「安墨」设计语言
+   暖白宣纸底 + 墨色芯 + 一点暖琥珀
+   ============================================================ */
+
+@font-face {
+  font-family: "GFont";
+  src: local("Noto Serif SC"), local("Source Han Serif SC");
+}
+
+@font-face {
+  font-family: "SFont";
+  src: local("PingFang SC"), local("Microsoft YaHei");
+}
+
+:root {
+  /* 色板 */
+  --ink-900: #1a1816;          /* 浓墨 - 最深文字 */
+  --ink-700: #3a3530;          /* 次级文字 */
+  --ink-500: #6b645c;          /* 辅助文字 */
+  --ink-300: #a8a098;          /* 弱化文字 */
+  --ink-200: #d8d3cc;          /* 分隔线 */
+  --ink-100: #f0ece6;          /* 浅底 */
+  --paper: #faf8f4;            /* 宣纸底色 */
+  --paper-card: #fffefb;       /* 卡片白 */
+  --amber-600: #b87333;        /* 暖琥珀 - 唯一强调色 */
+  --amber-500: #d4914a;
+  --amber-200: #f0d9b5;
+  --seal: #a8513a;             /* 朱印 - 极少用，仅收藏星 */
+
+  /* 节奏 */
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+}
 
 html,
 body,
@@ -10,20 +43,77 @@ body,
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  background: var(--paper);
+  color: var(--ink-900);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "tnum";
 }
 
-/* 隐藏滚动条但保留滚动能力（消息列表用） */
+/* 显示标题字体（中文宋气质，用于品牌字与标题） */
+.font-display {
+  font-family: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun", serif;
+  letter-spacing: 0.02em;
+}
+
+/* 滚动条 ── 极细、墨色、低存在感 */
 .scrollbar-thin::-webkit-scrollbar {
-  width: 6px;
+  width: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
-  border-radius: 3px;
+  background: rgba(26, 24, 22, 0.12);
+  border-radius: 2px;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(26, 24, 22, 0.22);
+}
+
+/* ============================================================
+   微动效：消息气泡浮现 + 卡片淡入
+   ============================================================ */
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes drawer-slide {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+@keyframes pulse-amber {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(184, 115, 51, 0); }
+  50%      { box-shadow: 0 0 0 3px rgba(184, 115, 51, 0.15); }
+}
+
+.animate-rise {
+  animation: rise-in 0.35s var(--ease-out) both;
+}
+
+.animate-fade {
+  animation: fade-in 0.25s var(--ease-soft) both;
+}
+
+.animate-drawer {
+  animation: drawer-slide 0.32s var(--ease-out) both;
+}
+
+/* 正在播放 ── 琥珀极淡脉动 */
+.is-playing {
+  animation: pulse-amber 1.6s var(--ease-soft) infinite;
+}
+
+/* 文本选择时呈现「朱批」感 */
+::selection {
+  background: rgba(168, 81, 58, 0.18);
 }

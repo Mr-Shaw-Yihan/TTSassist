@@ -72,23 +72,23 @@ export function SettingsDrawer({ onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex">
-      {/* 遮罩 */}
-      <div className="flex-1 bg-black/30" onClick={onClose} />
-      {/* 抽屉 */}
-      <div className="flex h-full w-80 flex-col bg-white shadow-2xl">
-        {/* 头 */}
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <span className="text-sm font-semibold">设置</span>
+    <div className="fixed inset-0 z-[60] flex animate-fade">
+      {/* 遮罩 ── 墨色薄纱 */}
+      <div className="flex-1 bg-[var(--ink-900)]/25" onClick={onClose} />
+      {/* 抽屉 ── 从右滑入的纸面 */}
+      <div className="flex h-full w-80 flex-col bg-[var(--paper)] shadow-[-12px_0_32px_rgba(26,24,22,0.10)] animate-drawer">
+        {/* 头 ── 品牌字标题 */}
+        <div className="flex items-center justify-between border-b border-[var(--ink-200)] px-5 py-4">
+          <span className="font-display text-base text-[var(--ink-900)]">设置</span>
           <button
             onClick={onClose}
-            className="rounded px-2 py-1 text-gray-500 hover:bg-gray-100"
+            className="rounded-lg p-1.5 text-[var(--ink-300)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]"
           >
-            ✕
+            ×
           </button>
         </div>
 
-        <div className="scrollbar-thin flex-1 space-y-5 overflow-y-auto px-4 py-4 text-sm">
+        <div className="scrollbar-thin flex-1 space-y-6 overflow-y-auto px-5 py-5 text-sm">
           {/* API Key */}
           <Section title="MiMo API Key">
             <input
@@ -96,13 +96,13 @@ export function SettingsDrawer({ onClose }: Props) {
               defaultValue={settings?.mimo_api_key ?? ""}
               onBlur={(e) => onSaveApiKey(e.target.value)}
               placeholder="sk-..."
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none transition-colors placeholder:text-[var(--ink-300)] focus:border-[var(--amber-500)]"
             />
             <a
               href="https://platform.xiaomimimo.com"
               target="_blank"
               rel="noreferrer"
-              className="mt-1 inline-block text-xs text-blue-500 hover:underline"
+              className="mt-1.5 inline-block text-xs text-[var(--ink-500)] underline underline-offset-2 hover:text-[var(--amber-600)] transition-colors"
             >
               前往 platform.xiaomimimo.com 注册/领取
             </a>
@@ -113,7 +113,7 @@ export function SettingsDrawer({ onClose }: Props) {
             <select
               value={currentVoice}
               onChange={(e) => onPickVoice(e.target.value)}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-blue-400"
+              className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
             >
               {PRESET_VOICES.map((v) => (
                 <option key={v.id} value={v.id}>{v.label}</option>
@@ -128,25 +128,25 @@ export function SettingsDrawer({ onClose }: Props) {
 
           {/* 克隆音色 */}
           <Section title="克隆音色样本">
-            <p className="mb-2 text-xs leading-relaxed text-gray-500">
-              导入一段 5-10 秒的本地说话音频（mp3/wav，≤10MB），MiMo 会用它合成相似音色。
+            <p className="mb-2.5 text-xs leading-relaxed text-[var(--ink-500)]">
+              导入一段 5–10 秒的本地说话音频（mp3/wav，≤10MB），MiMo 会用它合成相似音色。
               每次合成都要把样本传给 MiMo，速度比预置音色慢。
             </p>
             {settings?.clone_voice_path ? (
               <div className="space-y-2">
-                <div className="rounded-lg bg-gray-50 px-3 py-2 text-xs">
-                  当前样本：<span className="font-medium">{settings.clone_voice_name || "未命名"}</span>
+                <div className="rounded-xl border border-[var(--ink-200)] bg-[var(--ink-100)]/50 px-3 py-2 text-xs text-[var(--ink-500)]">
+                  当前样本：<span className="font-medium text-[var(--ink-900)]">{settings.clone_voice_name || "未命名"}</span>
                 </div>
                 <button
                   onClick={onImportClone}
                   disabled={importing}
-                  className="w-full rounded-lg border border-gray-200 px-3 py-1.5 text-xs hover:bg-gray-50 disabled:opacity-50"
+                  className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-xs text-[var(--ink-700)] hover:border-[var(--amber-500)] hover:text-[var(--amber-600)] transition-colors disabled:opacity-50"
                 >
                   {importing ? "导入中…" : "替换样本"}
                 </button>
                 <button
                   onClick={onRemoveClone}
-                  className="w-full rounded-lg px-3 py-1.5 text-xs text-red-500 hover:bg-red-50"
+                  className="w-full rounded-xl px-3 py-2 text-xs text-[var(--seal)] hover:bg-[var(--seal)]/10 transition-colors"
                 >
                   删除克隆样本
                 </button>
@@ -155,7 +155,7 @@ export function SettingsDrawer({ onClose }: Props) {
               <button
                 onClick={onImportClone}
                 disabled={importing}
-                className="w-full rounded-lg bg-blue-500 px-3 py-2 text-xs text-white hover:bg-blue-600 disabled:opacity-50"
+                className="w-full rounded-xl bg-[var(--ink-900)] px-3 py-2 text-xs text-[var(--paper)] transition-colors hover:bg-[var(--ink-700)] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {importing ? "导入中…" : "+ 导入样本"}
               </button>
@@ -169,22 +169,22 @@ export function SettingsDrawer({ onClose }: Props) {
               defaultValue={settings?.hotkey_show_window ?? "Alt+V"}
               onBlur={(e) => patch("hotkey_show_window", e.target.value.trim())}
               disabled
-              className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500"
+              className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--ink-100)]/40 px-3 py-2 text-sm text-[var(--ink-300)]"
             />
-            <p className="mt-1 text-xs text-gray-400">快捷键功能开发中，暂不可用</p>
+            <p className="mt-1.5 text-xs text-[var(--ink-300)]">快捷键功能开发中，暂不可用</p>
           </Section>
 
           {/* 关于 */}
           <Section title="关于">
-            <div className="text-xs leading-relaxed text-gray-600">
-              <div className="font-medium text-gray-800">VoiceAssist</div>
-              <div className="mt-1">为语言障碍者打造的文本转语音沟通助手。</div>
-              <div className="mt-2">TTS 引擎：小米 MiMo v2.5</div>
+            <div className="text-xs leading-relaxed text-[var(--ink-500)]">
+              <div className="font-display text-sm font-medium text-[var(--ink-900)]">语笺 VoiceAssist</div>
+              <div className="mt-1.5">为语言障碍者打造的文本转语音沟通助手。</div>
+              <div className="mt-2 text-[var(--ink-300)]">TTS 引擎 · 小米 MiMo v2.5</div>
               <a
                 href="https://mimo.mi.com/docs/zh-CN/quick-start/usage-guide/audio/speech-synthesis-v2.5"
                 target="_blank"
                 rel="noreferrer"
-                className="mt-1 inline-block text-blue-500 hover:underline"
+                className="mt-1.5 inline-block text-[var(--amber-600)] underline underline-offset-2 hover:text-[var(--ink-700)] transition-colors"
               >
                 MiMo TTS 文档
               </a>
@@ -199,7 +199,7 @@ export function SettingsDrawer({ onClose }: Props) {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section>
-      <h3 className="mb-2 text-xs font-semibold uppercase text-gray-500">{title}</h3>
+      <h3 className="mb-2.5 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--ink-300)]">{title}</h3>
       {children}
     </section>
   );

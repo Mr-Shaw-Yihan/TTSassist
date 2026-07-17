@@ -47,56 +47,58 @@ export function MessageBubble({ message, playingPath, onDeleted, onFavorited, on
   }
 
   return (
-    <div className="flex justify-end">
+    <div className="flex justify-end animate-rise">
       <div
-        className="group relative max-w-[80%] rounded-2xl bg-blue-500 px-3 py-2 text-sm text-white shadow-sm"
+        className="group relative max-w-[78%] border border-[var(--ink-200)] bg-[var(--paper-card)] rounded-t-2xl rounded-bl-2xl rounded-br-md px-3.5 py-2.5 text-sm text-[var(--ink-900)] shadow-[0_1px_2px_rgba(26,24,22,0.04)] transition-colors"
         onContextMenu={(e) => {
           e.preventDefault();
           setMenu({ x: e.clientX, y: e.clientY });
         }}
       >
-        <div className="whitespace-pre-wrap break-words">{message.content}</div>
-        <div className="mt-1 flex items-center gap-2 text-xs text-blue-100">
+        <div className="whitespace-pre-wrap break-words leading-[1.65]">{message.content}</div>
+        <div className="mt-1.5 flex items-center gap-2 text-[11px] text-[var(--ink-300)]">
           <button
             onClick={() => onPlay(message.audio_path)}
             className={[
-              "rounded px-1.5 py-0.5 hover:bg-blue-600",
-              isPlaying ? "bg-blue-700/60 font-semibold" : "",
+              "rounded-md px-1.5 py-0.5 transition-colors",
+              isPlaying
+                ? "text-[var(--amber-600)] is-playing font-medium"
+                : "text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
             ].join(" ")}
           >
-            {isPlaying ? "🔊 播放中" : "▶ 播放"}
+            {isPlaying ? "♪ 播放中" : "▶ 播放"}
           </button>
-          <span className="opacity-70">{formatTime(message.created_at)}</span>
+          <span className="tabular-nums">{formatTime(message.created_at)}</span>
         </div>
 
-        {/* 右键菜单（简单实现，点击外部关闭） */}
+        {/* 右键菜单 ── 纸笺卡片 */}
         {menu && (
           <>
             <div
-              className="fixed inset-0 z-40"
+              className="fixed inset-0 z-40 animate-fade"
               onClick={() => setMenu(null)}
             />
             <div
-              className="fixed z-50 rounded-lg border border-gray-200 bg-white py-1 text-sm text-gray-800 shadow-lg"
+              className="fixed z-50 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] py-1 text-sm text-[var(--ink-700)] shadow-[0_8px_24px_rgba(26,24,22,0.10)] animate-fade overflow-hidden"
               style={{ left: menu.x, top: menu.y }}
             >
               <button
                 onClick={handleFavorite}
-                className="block w-full px-4 py-1.5 text-left hover:bg-blue-50"
+                className="block w-full px-4 py-2 text-left hover:bg-[var(--amber-200)]/40 hover:text-[var(--ink-900)] transition-colors"
               >
-                ⭐ 收藏
+                收藏到签笺
               </button>
               <button
                 onClick={handleReveal}
-                className="block w-full px-4 py-1.5 text-left hover:bg-blue-50"
+                className="block w-full px-4 py-2 text-left hover:bg-[var(--amber-200)]/40 hover:text-[var(--ink-900)] transition-colors"
               >
-                📁 在文件夹中打开
+                在文件夹中显示
               </button>
               <button
                 onClick={handleDelete}
-                className="block w-full px-4 py-1.5 text-left text-red-600 hover:bg-red-50"
+                className="block w-full px-4 py-2 text-left text-[var(--seal)] hover:bg-[var(--seal)]/10 transition-colors border-t border-[var(--ink-200)]"
               >
-                🗑 删除
+                删除
               </button>
             </div>
           </>

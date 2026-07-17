@@ -31,8 +31,8 @@ export function InputBox({ onSend }: Props) {
     <div className="flex gap-2">
       <input
         ref={inputRef}
-        className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-blue-400"
-        placeholder="输入要朗读的文字，回车发送..."
+        className="flex-1 rounded-xl border border-[var(--ink-200)] bg-[var(--paper)] px-3.5 py-2.5 text-sm text-[var(--ink-900)] outline-none transition-colors placeholder:text-[var(--ink-300)] focus:border-[var(--amber-500)]"
+        placeholder="输入要朗读的文字，回车发送…"
         value={text}
         autoFocus
         disabled={sending}
@@ -45,11 +45,11 @@ export function InputBox({ onSend }: Props) {
         }}
       />
       <button
-        className="rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600 disabled:opacity-50"
+        className="rounded-xl bg-[var(--ink-900)] px-4 py-2.5 text-sm font-medium text-[var(--paper)] transition-all hover:bg-[var(--ink-700)] disabled:cursor-not-allowed disabled:bg-[var(--ink-200)] disabled:text-[var(--ink-300)] active:scale-[0.97]"
         disabled={!text.trim() || sending}
         onClick={send}
       >
-        {sending ? "..." : "发送"}
+        {sending ? "…" : "发"}
       </button>
     </div>
   );

@@ -29,27 +29,29 @@ export function VolumeControl() {
       <button
         onClick={() => setOpen((v) => !v)}
         className={[
-          "rounded px-2 py-1 text-base",
-          open ? "bg-blue-50 text-blue-600" : "text-gray-500 hover:bg-gray-100",
+          "rounded-lg p-1.5 text-base transition-colors",
+          open
+            ? "bg-[var(--amber-200)]/40 text-[var(--amber-600)]"
+            : "text-[var(--ink-300)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
         ].join(" ")}
         title="音量与播放速度"
       >
-        🔊
+        ♪
       </button>
 
       {open && (
-        <div className="absolute right-0 top-[calc(100%+6px)] z-50 flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
+        <div className="absolute right-0 top-[calc(100%+8px)] z-50 flex flex-col gap-3 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] p-4 shadow-[0_8px_24px_rgba(26,24,22,0.10)] animate-fade">
           <Slider
-            icon="🔊"
+            icon="音量"
             value={volume}
             min={0}
             max={1}
             step={0.05}
-            format={(v) => `${Math.round(v * 100)}%`}
+            format={(v) => `${Math.round(v * 100)}`}
             onChange={(v) => patch("playback_volume", v)}
           />
           <Slider
-            icon="⚡"
+            icon="语速"
             value={rate}
             min={0.5}
             max={2}
@@ -81,8 +83,11 @@ function Slider({
   onChange: (v: number) => void;
 }) {
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="text-sm">{icon}</span>
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between text-[10px] text-[var(--ink-300)] tracking-wider uppercase">
+        <span>{icon}</span>
+        <span className="tabular-nums text-[var(--ink-500)]">{format(value)}</span>
+      </div>
       <input
         type="range"
         min={min}
@@ -90,9 +95,8 @@ function Slider({
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="w-24 accent-blue-500"
+        className="w-32 h-[3px] cursor-pointer appearance-none rounded-full bg-[var(--ink-200)] accent-[var(--amber-600)]"
       />
-      <span className="w-10 text-xs tabular-nums text-gray-500">{format(value)}</span>
     </div>
   );
 }
