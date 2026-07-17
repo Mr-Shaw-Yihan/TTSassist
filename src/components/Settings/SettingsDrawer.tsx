@@ -92,7 +92,7 @@ export function SettingsDrawer({ onClose }: Props) {
           {/* API Key */}
           <Section title="MiMo API Key">
             <input
-              type="text"
+              type="password"
               defaultValue={settings?.mimo_api_key ?? ""}
               onBlur={(e) => onSaveApiKey(e.target.value)}
               placeholder="sk-..."
