@@ -117,3 +117,31 @@ body {
 ::selection {
   background: rgba(168, 81, 58, 0.18);
 }
+
+/* ============================================================
+   皮肤切换：浅色（安墨，默认）保留 :root；深色（夜窗）走 [data-theme="dark"]
+   切换时给 <html> 加 data-theme="dark" 即可整界面换肤
+   ============================================================ */
+
+[data-theme="dark"] {
+  --ink-900: #f0ece6;          /* 浅色基底上"墨色"反向 -> 主文字用浅米 */
+  --ink-700: #c9c2b8;
+  --ink-500: #a8a098;
+  --ink-300: #6b645c;
+  --ink-200: #3a3942;
+  --ink-100: #2f2e34;
+  --paper: #1c1b1f;            /* 主背景 深炭灰带暖 */
+  --paper-card: #252429;       /* 卡片 */
+  --amber-600: #d4914a;        /* 深色下琥珀稍亮一点 */
+  --amber-500: #e9a866;
+  --amber-200: #3a3942;
+  --seal: #e0725a;
+}
+
+[data-theme="dark"] body {
+  background: var(--paper);
+}
+
+[data-theme="dark"] ::selection {
+  background: rgba(212, 145, 74, 0.25);
+}

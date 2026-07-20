@@ -39,6 +39,7 @@ pub fn load_settings(data_dir: &Path) -> Settings {
             playback_rate: v.get("playback_rate").and_then(|x| x.as_f64()).map(|x| x as f32).unwrap_or(default.playback_rate),
             clone_voice_name: v.get("clone_voice_name").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.clone_voice_name),
             clone_voice_path: v.get("clone_voice_path").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.clone_voice_path),
+            theme: v.get("theme").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.theme),
         },
         Err(_) => default,
     }
@@ -62,6 +63,7 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "playback_rate" => if let Some(v) = value.as_f64() { s.playback_rate = v as f32 },
         "clone_voice_name" => if let Some(v) = value.as_str() { s.clone_voice_name = v.to_string() },
         "clone_voice_path" => if let Some(v) = value.as_str() { s.clone_voice_path = v.to_string() },
+        "theme" => if let Some(v) = value.as_str() { s.theme = v.to_string() },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;

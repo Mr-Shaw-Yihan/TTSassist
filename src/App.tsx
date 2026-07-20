@@ -68,6 +68,12 @@ function App() {
     })();
   }, [setSettings, reloadFavorites]);
 
+  // 皮肤同步到 <html data-theme>，整界面立刻换肤
+  useEffect(() => {
+    const theme = settings?.theme === "dark" ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [settings?.theme]);
+
   // 首次切到收藏 tab 时加载（列表也兜底）
   useEffect(() => {
     if (tab === "favorites") reloadFavorites();

@@ -4,6 +4,7 @@
 pub mod commands;
 pub mod storage;
 pub mod sync;
+pub mod tray;
 pub mod tts;
 
 use tauri::Manager;
@@ -52,6 +53,9 @@ pub fn run() {
             app.manage(AppState::new(data_dir, settings));
             // 注册快捷键
             setup_hotkey(app.handle());
+            // 系统托盘
+            tray::setup(app)?;
+            tray::install_close_to_tray(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

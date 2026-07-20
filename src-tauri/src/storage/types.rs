@@ -52,6 +52,8 @@ pub struct Settings {
     pub clone_voice_name: String,
     /// 克隆音色样本相对路径，如 "voice_samples/clone.mp3"（空字符串 = 无）
     pub clone_voice_path: String,
+    /// 界面皮肤："light"（安墨，默认） / "dark"（夜窗）
+    pub theme: String,
 }
 
 impl Default for Settings {
@@ -66,6 +68,7 @@ impl Default for Settings {
             playback_rate: 1.0,
             clone_voice_name: String::new(),
             clone_voice_path: String::new(),
+            theme: "light".to_string(),
         }
     }
 }

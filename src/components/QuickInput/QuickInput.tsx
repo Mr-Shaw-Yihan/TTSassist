@@ -13,6 +13,34 @@ export function QuickInput() {
   const [menu, setMenu] = useState(false);
   const inpRef = useRef<HTMLInputElement | null>(null);
 
+  // 浮窗启动加载 settings.theme 并应用（与主窗独立窗口，data-theme 不共享）
+  useEffect(() => {
+    (async () => {
+      try {
+        const s: { theme?: string } = await invoke("get_settings");
+        const theme = s.theme === "dark" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", theme);
+      } catch { /* 用默认浅色 */ }
+    })();
+  }, []);
+
+  // 监听 settings:changed 跟随主窗换肤
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      const u = await listen("settings:changed", async () => {
+        try {
+          const s: { theme?: string } = await invoke("get_settings");
+          const theme = s.theme === "dark" ? "dark" : "light";
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch { /* ignore */ }
+      });
+      unlisten = u;
+    })();
+    return () => { unlisten?.(); };
+  }, []);
+
   // 失去焦点时隐藏浮窗（点击外部自动关闭）
   useEffect(() => {
     const win = getCurrentWindow();

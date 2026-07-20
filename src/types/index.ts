@@ -27,4 +27,6 @@ export interface Settings {
   playback_rate: number;
   clone_voice_name: string;
   clone_voice_path: string;
+  /** 皮肤：light（安墨）/ dark（夜窗） */
+  theme: string;
 }
