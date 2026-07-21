@@ -28,6 +28,23 @@ export function SettingsDrawer({ onClose }: Props) {
   const setSettings = useSettingsStore((s) => s.setSettings);
   const [importing, setImporting] = useState(false);
   const [cloneName, setCloneName] = useState(settings?.clone_voice_name ?? "");
+  const [copied, setCopied] = useState(false);
+
+  async function copyInvite() {
+    try {
+      await navigator.clipboard.writeText("U277DH");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // 兜底：用 execCommand
+      const ta = document.createElement("textarea");
+      ta.value = "U277DH";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch {}
+      document.body.removeChild(ta);
+    }
+  }
 
   // 当前音色值：若已克隆则为特殊值 "clone"
   const currentVoice = settings?.tts_model ?? "mimo_default";
@@ -132,13 +149,32 @@ export function SettingsDrawer({ onClose }: Props) {
               className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none transition-colors placeholder:text-[var(--ink-300)] focus:border-[var(--amber-500)]"
             />
             <a
-              href="https://platform.xiaomimimo.com"
+              href="https://platform.xiaomimimo.com?ref=U277DH"
               target="_blank"
               rel="noreferrer"
               className="mt-1.5 inline-block text-xs text-[var(--ink-500)] underline underline-offset-2 hover:text-[var(--amber-600)] transition-colors"
             >
-              前往 platform.xiaomimimo.com 注册/领取
+              前往小米 mimo 获取 API
             </a>
+            <div className="mt-2 flex items-center gap-2 text-xs text-[var(--ink-500)]">
+              <span>填写邀请码</span>
+              <button
+                onClick={copyInvite}
+                title="点击复制邀请码"
+                className={[
+                  "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono tracking-wider transition-all",
+                  copied
+                    ? "border-[var(--amber-500)] bg-[var(--amber-200)]/40 text-[var(--amber-600)]"
+                    : "border-[var(--ink-200)] bg-[var(--paper-card)] text-[var(--ink-700)] hover:border-[var(--amber-500)] hover:text-[var(--amber-600)]",
+                ].join(" ")}
+              >
+                U277DH
+                <span className={["text-[10px]", copied ? "text-[var(--amber-600)]" : "text-[var(--ink-300)]"].join(" ")}>
+                  {copied ? "✓ 已复制" : "⧉"}
+                </span>
+              </button>
+              <span>获得 10R 额度</span>
+            </div>
           </Section>
 
           {/* 音色选择 */}
