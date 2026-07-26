@@ -2,7 +2,7 @@
 // 后端每个 #[tauri::command] 对应一个函数，参数名与后端 fn 参数 snake_case 一致。
 
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import type { Message, Favorite, Settings } from "../types";
+import type { Message, Favorite, Settings, MossVoice } from "../types";
 
 // ── TTS ──────────────────────────────────────────
 
@@ -83,7 +83,7 @@ export async function getSettings(): Promise<Settings> {
 
 export async function updateSetting(
   key: string,
-  value: string | number | boolean,
+  value: string | number | boolean | MossVoice[],
 ): Promise<Settings> {
   return invoke<Settings>("update_setting", { key, value });
 }

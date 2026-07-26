@@ -31,6 +31,15 @@ pub struct Favorite {
     pub created_at: String,
 }
 
+/// Moss-TTS 音色条目
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MossVoice {
+    /// 音色名称（展示用）
+    pub name: String,
+    /// 音色 id（Mossland 控制台获取）
+    pub voice_id: String,
+}
+
 /// 设置（settings.json 的完整结构）
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Settings {
@@ -56,8 +65,10 @@ pub struct Settings {
     pub theme: String,
     /// Moss-TTS API Key（Authorization: Bearer <key>）
     pub moss_api_key: String,
-    /// Moss-TTS 音色 id（需在 moss 控制台创建后填入）
+    /// Moss-TTS 当前选中音色 id（需在 moss 控制台创建后填入）
     pub moss_voice_id: String,
+    /// Moss-TTS 音色库（用户手动维护，默认含"曼波"）
+    pub moss_voices: Vec<MossVoice>,
 }
 
 impl Default for Settings {
@@ -74,7 +85,11 @@ impl Default for Settings {
             clone_voice_path: String::new(),
             theme: "light".to_string(),
             moss_api_key: String::new(),
-            moss_voice_id: String::new(),
+            moss_voice_id: "11d3a27a-0951-4bcd-96ae-ab414f454764".to_string(),
+            moss_voices: vec![MossVoice {
+                name: "曼波".to_string(),
+                voice_id: "11d3a27a-0951-4bcd-96ae-ab414f454764".to_string(),
+            }],
         }
     }
 }

@@ -42,6 +42,9 @@ pub fn load_settings(data_dir: &Path) -> Settings {
             theme: v.get("theme").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.theme),
             moss_api_key: v.get("moss_api_key").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.moss_api_key),
             moss_voice_id: v.get("moss_voice_id").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.moss_voice_id),
+            moss_voices: v.get("moss_voices")
+                .and_then(|x| serde_json::from_value::<Vec<super::types::MossVoice>>(x.clone()).ok())
+                .unwrap_or(default.moss_voices),
         },
         Err(_) => default,
     }
@@ -68,6 +71,7 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "theme" => if let Some(v) = value.as_str() { s.theme = v.to_string() },
         "moss_api_key" => if let Some(v) = value.as_str() { s.moss_api_key = v.to_string() },
         "moss_voice_id" => if let Some(v) = value.as_str() { s.moss_voice_id = v.to_string() },
+        "moss_voices" => if let Ok(list) = serde_json::from_value::<Vec<super::types::MossVoice>>(value.clone()) { s.moss_voices = list },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;

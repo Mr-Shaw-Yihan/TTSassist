@@ -3,13 +3,13 @@
 
 import { create } from "zustand";
 import { updateSetting } from "../services/invoke";
-import type { Settings } from "../types";
+import type { Settings, MossVoice } from "../types";
 
 interface SettingsState {
   settings: Settings | null;
   setSettings: (s: Settings) => void;
   /** 增量更新一个键；返回后端写入后的完整 settings */
-  patch: (key: keyof Settings, value: string | number | boolean) => Promise<void>;
+  patch: (key: keyof Settings, value: string | number | boolean | MossVoice[]) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({

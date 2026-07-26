@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { importCloneVoice, removeCloneVoice, pickAudioFile } from "../../services/invoke";
+import type { MossVoice } from "../../types";
 
 const PRESET_VOICES = [
   { id: "mimo_default", label: "默认 (mimo_default)" },
@@ -30,6 +31,13 @@ export function SettingsDrawer({ onClose }: Props) {
   const [cloneName, setCloneName] = useState(settings?.clone_voice_name ?? "");
   const [copied, setCopied] = useState(false);
 
+  // 音色库管理状态
+  const [addName, setAddName] = useState("");
+  const [addId, setAddId] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editId, setEditId] = useState("");
+
   async function copyInvite() {
     try {
       await navigator.clipboard.writeText("U277DH");
@@ -48,6 +56,54 @@ export function SettingsDrawer({ onClose }: Props) {
 
   // 当前音色值：若已克隆则为特殊值 "clone"
   const currentVoice = settings?.tts_model ?? "mimo_default";
+
+  // ── 音色库管理 ──
+  const mossVoices = settings?.moss_voices ?? [];
+
+  async function saveVoiceList(list: MossVoice[]) {
+    await patch("moss_voices", list);
+  }
+
+  async function addVoice() {
+    const name = addName.trim();
+    const id = addId.trim();
+    if (!name || !id) return;
+    await saveVoiceList([...mossVoices, { name, voice_id: id }]);
+    setAddName("");
+    setAddId("");
+  }
+
+  async function removeVoice(voiceId: string) {
+    const list = mossVoices.filter((v) => v.voice_id !== voiceId);
+    await saveVoiceList(list);
+    // 删的是当前音色 → 切到剩余第一个
+    if (settings?.moss_voice_id === voiceId) {
+      await patch("moss_voice_id", list[0]?.voice_id ?? "");
+    }
+    if (editingId === voiceId) setEditingId(null);
+  }
+
+  function startEdit(v: MossVoice) {
+    setEditingId(v.voice_id);
+    setEditName(v.name);
+    setEditId(v.voice_id);
+  }
+
+  async function saveEdit() {
+    if (editingId === null) return;
+    const name = editName.trim();
+    const id = editId.trim();
+    if (!name || !id) return;
+    const list = mossVoices.map((v) =>
+      v.voice_id === editingId ? { name, voice_id: id } : v,
+    );
+    await saveVoiceList(list);
+    // 编辑的是当前选中音色且 id 变了 → 更新 moss_voice_id
+    if (settings?.moss_voice_id === editingId && id !== editingId) {
+      await patch("moss_voice_id", id);
+    }
+    setEditingId(null);
+  }
 
   async function onPickVoice(v: string) {
     if (v !== "clone") {
@@ -269,17 +325,93 @@ export function SettingsDrawer({ onClose }: Props) {
               </a>
             </Section>
 
-            <Section title="Moss-TTS 音色 ID">
-              <input
-                type="text"
-                defaultValue={settings?.moss_voice_id ?? ""}
-                onBlur={(e) => patch("moss_voice_id", e.target.value.trim())}
-                placeholder="voice_id..."
-                className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none transition-colors placeholder:text-[var(--ink-300)] focus:border-[var(--amber-500)]"
-              />
-              <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-300)]">
-                在 Mossland 控制台「音色」页面创建音色后，复制 voice_id 填入。
-              </p>
+            <Section title="当前使用音色">
+              <select
+                value={settings?.moss_voice_id ?? ""}
+                onChange={(e) => patch("moss_voice_id", e.target.value)}
+                className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
+              >
+                {mossVoices.length === 0 && <option value="">（暂无音色，请先在下方添加）</option>}
+                {mossVoices.map((v) => (
+                  <option key={v.voice_id} value={v.voice_id}>{v.name}</option>
+                ))}
+              </select>
+            </Section>
+
+            <Section title="音色库">
+              <div className="space-y-1.5">
+                {mossVoices.map((v) => (
+                  editingId === v.voice_id ? (
+                    // 行内编辑态
+                    <div key={v.voice_id} className="space-y-1.5 rounded-xl border border-[var(--amber-500)] bg-[var(--amber-200)]/15 p-2">
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        placeholder="音色名称"
+                        className="w-full rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-2.5 py-1.5 text-xs outline-none focus:border-[var(--amber-500)]"
+                      />
+                      <input
+                        type="text"
+                        value={editId}
+                        onChange={(e) => setEditId(e.target.value)}
+                        placeholder="音色 id"
+                        className="w-full rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-2.5 py-1.5 text-xs outline-none focus:border-[var(--amber-500)] font-mono"
+                      />
+                      <div className="flex gap-1.5">
+                        <button onClick={saveEdit} className="flex-1 rounded-lg bg-[var(--ink-900)] px-2 py-1 text-xs text-[var(--paper)] hover:bg-[var(--ink-700)] transition-colors">保存</button>
+                        <button onClick={() => setEditingId(null)} className="flex-1 rounded-lg border border-[var(--ink-200)] px-2 py-1 text-xs text-[var(--ink-700)] hover:bg-[var(--ink-100)] transition-colors">取消</button>
+                      </div>
+                    </div>
+                  ) : (
+                    // 展示态
+                    <div key={v.voice_id} className="flex items-center justify-between rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-xs font-medium text-[var(--ink-900)]">{v.name}</div>
+                        <div className="truncate text-[10px] text-[var(--ink-300)] font-mono">{v.voice_id}</div>
+                      </div>
+                      <div className="ml-2 flex shrink-0 gap-1">
+                        <button onClick={() => startEdit(v)} title="编辑" className="rounded-md px-1.5 py-1 text-xs text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-900)] transition-colors">✎</button>
+                        <button onClick={() => removeVoice(v.voice_id)} title="删除" className="rounded-md px-1.5 py-1 text-xs text-[var(--ink-500)] hover:bg-[var(--seal)]/10 hover:text-[var(--seal)] transition-colors">×</button>
+                      </div>
+                    </div>
+                  )
+                ))}
+              </div>
+
+              {/* 添加表单 */}
+              <div className="mt-2.5 space-y-1.5 rounded-xl border border-dashed border-[var(--ink-200)] p-2.5">
+                <input
+                  type="text"
+                  value={addName}
+                  onChange={(e) => setAddName(e.target.value)}
+                  placeholder="音色名称（如 曼波）"
+                  className="w-full rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-2.5 py-1.5 text-xs outline-none focus:border-[var(--amber-500)]"
+                />
+                <input
+                  type="text"
+                  value={addId}
+                  onChange={(e) => setAddId(e.target.value)}
+                  placeholder="音色 id（从音色库复制）"
+                  className="w-full rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-2.5 py-1.5 text-xs outline-none focus:border-[var(--amber-500)] font-mono"
+                />
+                <button
+                  onClick={addVoice}
+                  disabled={!addName.trim() || !addId.trim()}
+                  className="w-full rounded-lg bg-[var(--ink-900)] px-2 py-1.5 text-xs text-[var(--paper)] transition-colors hover:bg-[var(--ink-700)] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  + 添加音色
+                </button>
+              </div>
+
+              <a
+                href="https://mossland.mosi.cn/voice/library"
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 inline-block text-xs text-[var(--ink-500)] underline underline-offset-2 hover:text-[var(--amber-600)] transition-colors"
+              >
+                前往 Mossland 音色库查询 voice_id
+              </a>
             </Section>
           </>
           )}

@@ -17,6 +17,12 @@ export interface Favorite {
   created_at: string;
 }
 
+/** Moss-TTS 音色条目 */
+export interface MossVoice {
+  name: string;
+  voice_id: string;
+}
+
 export interface Settings {
   tts_engine: string;
   tts_model: string;
@@ -31,6 +37,8 @@ export interface Settings {
   theme: string;
   /** Moss-TTS API Key */
   moss_api_key: string;
-  /** Moss-TTS 音色 id */
+  /** Moss-TTS 当前选中音色 id */
   moss_voice_id: string;
+  /** Moss-TTS 音色库（用户手动维护） */
+  moss_voices: MossVoice[];
 }
