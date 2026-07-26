@@ -40,6 +40,8 @@ pub fn load_settings(data_dir: &Path) -> Settings {
             clone_voice_name: v.get("clone_voice_name").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.clone_voice_name),
             clone_voice_path: v.get("clone_voice_path").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.clone_voice_path),
             theme: v.get("theme").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.theme),
+            moss_api_key: v.get("moss_api_key").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.moss_api_key),
+            moss_voice_id: v.get("moss_voice_id").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.moss_voice_id),
         },
         Err(_) => default,
     }
@@ -64,6 +66,8 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "clone_voice_name" => if let Some(v) = value.as_str() { s.clone_voice_name = v.to_string() },
         "clone_voice_path" => if let Some(v) = value.as_str() { s.clone_voice_path = v.to_string() },
         "theme" => if let Some(v) = value.as_str() { s.theme = v.to_string() },
+        "moss_api_key" => if let Some(v) = value.as_str() { s.moss_api_key = v.to_string() },
+        "moss_voice_id" => if let Some(v) = value.as_str() { s.moss_voice_id = v.to_string() },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;

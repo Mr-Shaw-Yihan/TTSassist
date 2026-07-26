@@ -139,6 +139,21 @@ export function SettingsDrawer({ onClose }: Props) {
             </div>
           </Section>
 
+          {/* TTS 引擎选择 */}
+          <Section title="TTS 引擎">
+            <select
+              value={settings?.tts_engine ?? "mimo"}
+              onChange={(e) => patch("tts_engine", e.target.value)}
+              className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
+            >
+              <option value="mimo">MiMo（小米）</option>
+              <option value="moss">Moss-TTS（Mossland）</option>
+            </select>
+          </Section>
+
+          {/* === MiMo 引擎配置 === */}
+          {(settings?.tts_engine ?? "mimo") === "mimo" && (
+          <>
           {/* API Key */}
           <Section title="MiMo API Key">
             <input
@@ -230,6 +245,44 @@ export function SettingsDrawer({ onClose }: Props) {
               </button>
             )}
           </Section>
+          </>
+          )}
+
+          {/* === Moss-TTS 引擎配置 === */}
+          {settings?.tts_engine === "moss" && (
+          <>
+            <Section title="Moss-TTS API Key">
+              <input
+                type="password"
+                defaultValue={settings?.moss_api_key ?? ""}
+                onBlur={(e) => patch("moss_api_key", e.target.value.trim())}
+                placeholder="sk-..."
+                className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none transition-colors placeholder:text-[var(--ink-300)] focus:border-[var(--amber-500)]"
+              />
+              <a
+                href="https://platform.mosi.cn/app/api-keys"
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1.5 inline-block text-xs text-[var(--ink-500)] underline underline-offset-2 hover:text-[var(--amber-600)] transition-colors"
+              >
+                前往 Mossland 控制台获取 API Key
+              </a>
+            </Section>
+
+            <Section title="Moss-TTS 音色 ID">
+              <input
+                type="text"
+                defaultValue={settings?.moss_voice_id ?? ""}
+                onBlur={(e) => patch("moss_voice_id", e.target.value.trim())}
+                placeholder="voice_id..."
+                className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none transition-colors placeholder:text-[var(--ink-300)] focus:border-[var(--amber-500)]"
+              />
+              <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-300)]">
+                在 Mossland 控制台「音色」页面创建音色后，复制 voice_id 填入。
+              </p>
+            </Section>
+          </>
+          )}
 
           {/* 快捷键（字段先做，功能下一阶段） */}
           <Section title="呼出浮窗快捷键">

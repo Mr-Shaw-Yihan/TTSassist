@@ -3,6 +3,7 @@
 
 pub mod traits;
 pub mod mimo;
+pub mod moss;
 
 use std::path::Path;
 use traits::{TTSEngine, TtsError};

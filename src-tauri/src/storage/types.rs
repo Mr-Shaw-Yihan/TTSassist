@@ -54,6 +54,10 @@ pub struct Settings {
     pub clone_voice_path: String,
     /// 界面皮肤："light"（安墨，默认） / "dark"（夜窗）
     pub theme: String,
+    /// Moss-TTS API Key（Authorization: Bearer <key>）
+    pub moss_api_key: String,
+    /// Moss-TTS 音色 id（需在 moss 控制台创建后填入）
+    pub moss_voice_id: String,
 }
 
 impl Default for Settings {
@@ -69,6 +73,8 @@ impl Default for Settings {
             clone_voice_name: String::new(),
             clone_voice_path: String::new(),
             theme: "light".to_string(),
+            moss_api_key: String::new(),
+            moss_voice_id: String::new(),
         }
     }
 }

@@ -29,4 +29,8 @@ export interface Settings {
   clone_voice_path: string;
   /** 皮肤：light（安墨）/ dark（夜窗） */
   theme: string;
+  /** Moss-TTS API Key */
+  moss_api_key: string;
+  /** Moss-TTS 音色 id */
+  moss_voice_id: string;
 }
