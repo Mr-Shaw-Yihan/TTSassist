@@ -41,4 +41,4 @@ npm run tauri build   # 打包
 
 ## License
 
-待定（计划 MIT）。
+[MIT](./LICENSE) © Mr-Shaw-Yihan
