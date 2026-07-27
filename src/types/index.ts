@@ -41,4 +41,24 @@ export interface Settings {
   moss_voice_id: string;
   /** Moss-TTS 音色库（用户手动维护） */
   moss_voices: MossVoice[];
+  /** 虚拟麦克风输出设备名（空=未配置） */
+  mic_output_device: string;
+  /** 全局开关：发送的语音是否同时发到虚拟麦克风 */
+  mic_send_enabled: boolean;
+  /** 虚拟麦克风音量 0.0~1.0 */
+  mic_playback_volume: number;
+}
+
+/** 音频输出设备 */
+export interface AudioDevice {
+  name: string;
+  is_virtual_cable: boolean;
+  is_default: boolean;
+}
+
+/** 虚拟麦克风播放状态 */
+export interface MicStatus {
+  is_playing: boolean;
+  current_device: string | null;
+  volume: number;
 }

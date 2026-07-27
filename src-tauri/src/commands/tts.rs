@@ -79,11 +79,13 @@ pub async fn generate_tts(
     text: String,
     app: AppHandle,
     state: State<'_, AppState>,
+    mic: State<'_, crate::commands::mic::MicPlayback>,
 ) -> Result<Message, String> {
     let data_dir = state.data_dir.clone();
 
     // 1. 读设置
-    let (tts_engine, mimo_key, moss_key, moss_voice, tts_model, clone_path) = {
+    let (tts_engine, mimo_key, moss_key, moss_voice, tts_model, clone_path,
+         mic_send_enabled, mic_device, mic_volume) = {
         let s = state
             .settings
             .read()
@@ -95,6 +97,9 @@ pub async fn generate_tts(
             s.moss_voice_id.clone(),
             s.tts_model.clone(),
             s.clone_voice_path.clone(),
+            s.mic_send_enabled,
+            s.mic_output_device.clone(),
+            s.mic_playback_volume,
         )
     };
 
@@ -134,6 +139,12 @@ pub async fn generate_tts(
 
     // 4. 广播事件
     notify_changed(&app, EVENT_MESSAGE_CHANGED);
+
+    // 5. 全局开关开启且配置了麦克风设备 → 同时发到虚拟麦克风（扬声器播放由前端负责）
+    if mic_send_enabled && !mic_device.is_empty() {
+        let abs = data_dir.join(&result.audio_path);
+        mic.play(abs, mic_device, mic_volume);
+    }
 
     Ok(result)
 }

@@ -9,6 +9,7 @@ pub mod audio;
 pub mod clone_voice;
 pub mod favorite;
 pub mod message;
+pub mod mic;
 pub mod settings;
 pub mod tts;
 

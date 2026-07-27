@@ -60,6 +60,8 @@ pub fn run() {
             storage::ensure_data_dirs(&data_dir)?;
             let settings: Settings = storage::settings::load_settings(&data_dir);
             app.manage(AppState::new(data_dir, settings));
+            // 虚拟麦克风播放控制（专用音频线程）
+            app.manage(crate::commands::mic::MicPlayback::spawn());
             // 注册快捷键
             setup_hotkey(app.handle());
             // 系统托盘
@@ -80,6 +82,11 @@ pub fn run() {
             crate::commands::audio::resolve_audio_url,
             crate::commands::clone_voice::import_clone_voice,
             crate::commands::clone_voice::remove_clone_voice,
+            crate::commands::mic::list_mic_devices,
+            crate::commands::mic::check_vb_cable,
+            crate::commands::mic::play_to_mic,
+            crate::commands::mic::stop_mic,
+            crate::commands::mic::get_mic_status,
             crate::show_main_window,
         ])
         .run(tauri::generate_context!())

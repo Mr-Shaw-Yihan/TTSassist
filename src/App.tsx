@@ -7,6 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { InputBox } from "./components/Chat/InputBox";
 import { MessageBubble } from "./components/Chat/MessageBubble";
 import { VolumeControl } from "./components/Chat/VolumeSlider";
+import { MicToggle } from "./components/Chat/MicToggle";
 import { FavoriteList } from "./components/Favorites/FavoriteList";
 import { SettingsDrawer } from "./components/Settings/SettingsDrawer";
 import { QuickInput } from "./components/QuickInput/QuickInput";
@@ -191,6 +192,7 @@ function App() {
           <span className="text-[10px] text-[var(--ink-300)] tracking-[0.3em] uppercase">VoiceAssist</span>
         </div>
         <div className="flex items-center gap-0.5">
+          <MicToggle onOpenSettings={() => setShowDrawer(true)} />
           <VolumeControl />
           <button
             onClick={() => setShowDrawer(true)}

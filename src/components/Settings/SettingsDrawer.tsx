@@ -1,10 +1,10 @@
 // 设置面板（右侧抽屉）：API Key / 音色 / 克隆音色 / 快捷键 / 关于
 // 大纲 9.1-9.4。从右侧滑入，点遮罩或关闭按钮收回。
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { importCloneVoice, removeCloneVoice, pickAudioFile } from "../../services/invoke";
-import type { MossVoice } from "../../types";
+import { importCloneVoice, removeCloneVoice, pickAudioFile, listMicDevices, checkVbCable } from "../../services/invoke";
+import type { MossVoice, AudioDevice } from "../../types";
 
 const PRESET_VOICES = [
   { id: "mimo_default", label: "默认 (mimo_default)" },
@@ -37,6 +37,18 @@ export function SettingsDrawer({ onClose }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editId, setEditId] = useState("");
+
+  // 虚拟麦克风设备
+  const [micDevices, setMicDevices] = useState<AudioDevice[]>([]);
+  const [vbInstalled, setVbInstalled] = useState(true);
+  useEffect(() => {
+    listMicDevices()
+      .then((d) => setMicDevices(d))
+      .catch(() => {});
+    checkVbCable()
+      .then((v) => setVbInstalled(v))
+      .catch(() => {});
+  }, []);
 
   async function copyInvite() {
     try {
@@ -193,6 +205,53 @@ export function SettingsDrawer({ onClose }: Props) {
                 );
               })}
             </div>
+          </Section>
+
+          {/* 虚拟麦克风 */}
+          <Section title="虚拟麦克风">
+            {!vbInstalled && (
+              <p className="mb-2 rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/20 px-3 py-2 text-[11px] leading-relaxed text-[var(--amber-600)]">
+                未检测到 VB-CABLE 虚拟声卡。要让队友听到语音，请先安装{" "}
+                <a href="https://vb-audio.com/Cable/" target="_blank" rel="noreferrer"
+                   className="underline underline-offset-2 font-medium hover:text-[var(--seal)] transition-colors">
+                  VB-Audio Virtual Cable
+                </a>
+                （免费，需管理员权限），装完重启本软件。
+              </p>
+            )}
+            <label className="mb-1 block text-[11px] text-[var(--ink-300)]">输出设备（选 CABLE Input）</label>
+            <select
+              value={settings?.mic_output_device ?? ""}
+              onChange={(e) => patch("mic_output_device", e.target.value)}
+              className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
+            >
+              <option value="">未配置</option>
+              {[...micDevices]
+                .sort((a, b) => Number(b.is_virtual_cable) - Number(a.is_virtual_cable))
+                .map((d) => (
+                  <option key={d.name} value={d.name}>
+                    {d.name}{d.is_virtual_cable ? "（虚拟声卡）" : ""}{d.is_default ? "（默认）" : ""}
+                  </option>
+                ))}
+            </select>
+            <div className="mt-2.5 flex items-center gap-2">
+              <span className="text-[11px] text-[var(--ink-300)]">麦克风音量</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={settings?.mic_playback_volume ?? 1.0}
+                onChange={(e) => patch("mic_playback_volume", parseFloat(e.target.value))}
+                className="flex-1 accent-[var(--amber-600)]"
+              />
+              <span className="w-8 text-[11px] tabular-nums text-[var(--ink-500)]">
+                {Math.round((settings?.mic_playback_volume ?? 1.0) * 100)}%
+              </span>
+            </div>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-300)]">
+              开启工具栏🎙️开关后，发送的语音会发到所选设备。请在游戏/通话软件里把麦克风设为「CABLE Output」。
+            </p>
           </Section>
 
           {/* TTS 引擎选择 */}

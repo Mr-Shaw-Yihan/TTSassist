@@ -69,6 +69,12 @@ pub struct Settings {
     pub moss_voice_id: String,
     /// Moss-TTS 音色库（用户手动维护，默认含"曼波"）
     pub moss_voices: Vec<MossVoice>,
+    /// 虚拟麦克风输出设备名（如 "CABLE Input (VB-Audio Virtual Cable)"，空=未配置）
+    pub mic_output_device: String,
+    /// 全局开关：发送的语音是否同时发到虚拟麦克风（默认 false）
+    pub mic_send_enabled: bool,
+    /// 虚拟麦克风音量 0.0~1.0（独立于扬声器音量，默认 1.0）
+    pub mic_playback_volume: f32,
 }
 
 impl Default for Settings {
@@ -90,6 +96,9 @@ impl Default for Settings {
                 name: "曼波".to_string(),
                 voice_id: "11d3a27a-0951-4bcd-96ae-ab414f454764".to_string(),
             }],
+            mic_output_device: String::new(),
+            mic_send_enabled: false,
+            mic_playback_volume: 1.0,
         }
     }
 }

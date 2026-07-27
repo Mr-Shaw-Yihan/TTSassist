@@ -2,7 +2,7 @@
 // 后端每个 #[tauri::command] 对应一个函数，参数名与后端 fn 参数 snake_case 一致。
 
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import type { Message, Favorite, Settings, MossVoice } from "../types";
+import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus } from "../types";
 
 // ── TTS ──────────────────────────────────────────
 
@@ -116,4 +116,32 @@ import { revealItemInDir } from "@tauri-apps/plugin-opener";
 export async function revealAudio(relPath: string): Promise<void> {
   const abs = await getAudioAbsPath(relPath);
   await revealItemInDir(abs);
+}
+
+// ── 虚拟麦克风 ──────────────────────────────────
+
+/** 枚举音频输出设备（含 VB-CABLE 标记） */
+export async function listMicDevices(): Promise<AudioDevice[]> {
+  return invoke<AudioDevice[]>("list_mic_devices");
+}
+
+/** 检测是否安装 VB-CABLE */
+export async function checkVbCable(): Promise<boolean> {
+  return invoke<boolean>("check_vb_cable");
+}
+
+/** 手动播放音频到指定设备（传相对路径，内部解析为绝对路径） */
+export async function playToMic(relPath: string, deviceName: string, volume?: number): Promise<void> {
+  const abs = await getAudioAbsPath(relPath);
+  return invoke<void>("play_to_mic", { audioPath: abs, deviceName, volume });
+}
+
+/** 停止虚拟麦克风播放 */
+export async function stopMic(): Promise<void> {
+  return invoke<void>("stop_mic");
+}
+
+/** 获取虚拟麦克风播放状态 */
+export async function getMicStatus(): Promise<MicStatus> {
+  return invoke<MicStatus>("get_mic_status");
 }
