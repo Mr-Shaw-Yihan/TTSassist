@@ -61,4 +61,6 @@ export interface MicStatus {
   is_playing: boolean;
   current_device: string | null;
   volume: number;
+  last_error: string | null;
+  last_source: string | null;
 }

@@ -136,6 +136,11 @@ export async function playToMic(relPath: string, deviceName: string, volume?: nu
   return invoke<void>("play_to_mic", { audioPath: abs, deviceName, volume });
 }
 
+/** 播放测试音（440Hz）到指定设备，诊断设备路由 */
+export async function testMic(deviceName: string, volume?: number): Promise<void> {
+  return invoke<void>("test_mic", { deviceName, volume });
+}
+
 /** 停止虚拟麦克风播放 */
 export async function stopMic(): Promise<void> {
   return invoke<void>("stop_mic");

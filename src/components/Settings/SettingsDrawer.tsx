@@ -3,8 +3,8 @@
 
 import { useState, useEffect } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { importCloneVoice, removeCloneVoice, pickAudioFile, listMicDevices, checkVbCable } from "../../services/invoke";
-import type { MossVoice, AudioDevice } from "../../types";
+import { importCloneVoice, removeCloneVoice, pickAudioFile, listMicDevices, checkVbCable, testMic, getMicStatus } from "../../services/invoke";
+import type { MossVoice, AudioDevice, MicStatus } from "../../types";
 
 const PRESET_VOICES = [
   { id: "mimo_default", label: "默认 (mimo_default)" },
@@ -41,6 +41,8 @@ export function SettingsDrawer({ onClose }: Props) {
   // 虚拟麦克风设备
   const [micDevices, setMicDevices] = useState<AudioDevice[]>([]);
   const [vbInstalled, setVbInstalled] = useState(true);
+  const [micStatus, setMicStatus] = useState<MicStatus | null>(null);
+  const [testing, setTesting] = useState(false);
   useEffect(() => {
     listMicDevices()
       .then((d) => setMicDevices(d))
@@ -49,6 +51,32 @@ export function SettingsDrawer({ onClose }: Props) {
       .then((v) => setVbInstalled(v))
       .catch(() => {});
   }, []);
+
+  // 实时轮询麦克风状态（每 600ms），让发送消息后能立刻看到麦克风线程的动作
+  useEffect(() => {
+    let alive = true;
+    const timer = setInterval(async () => {
+      if (!alive) return;
+      try {
+        setMicStatus(await getMicStatus());
+      } catch { /* ignore */ }
+    }, 600);
+    return () => { alive = false; clearInterval(timer); };
+  }, []);
+
+  // 播放测试音（结果由上面的轮询自动显示）
+  async function runMicTest() {
+    const device = settings?.mic_output_device ?? "";
+    if (!device) return;
+    setTesting(true);
+    try {
+      await testMic(device, settings?.mic_playback_volume ?? 1.0);
+      setTimeout(() => setTesting(false), 400);
+    } catch (e) {
+      setMicStatus({ is_playing: false, current_device: device, volume: 1, last_error: String(e), last_source: null });
+      setTesting(false);
+    }
+  }
 
   async function copyInvite() {
     try {
@@ -269,6 +297,38 @@ export function SettingsDrawer({ onClose }: Props) {
                 {Math.round((settings?.mic_playback_volume ?? 1.0) * 100)}%
               </span>
             </div>
+            <div className="mt-2.5 flex items-center gap-2">
+              <button
+                onClick={runMicTest}
+                disabled={testing || !(settings?.mic_output_device)}
+                className="rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-1.5 text-xs text-[var(--ink-700)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {testing ? "测试中…" : "🔊 测试麦克风"}
+              </button>
+              <span className="text-[11px] text-[var(--ink-300)]">播放 1.2 秒测试音到所选设备</span>
+            </div>
+            {micStatus && (
+              <div className="mt-1.5 rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-[11px] leading-relaxed">
+                {micStatus.last_error ? (
+                  <span className="text-[var(--seal)]">✗ {micStatus.last_error}</span>
+                ) : micStatus.is_playing ? (
+                  <span className="text-[var(--amber-600)]">
+                    🔊 正在播放到「{micStatus.current_device}」…（{micStatus.last_source}）
+                  </span>
+                ) : micStatus.last_source ? (
+                  <span className="text-[var(--ink-500)]">
+                    ✓ 上次已发送到「{micStatus.current_device}」（{micStatus.last_source}）
+                  </span>
+                ) : (
+                  <span className="text-[var(--ink-300)]">空闲。点「测试麦克风」或发一条消息试试。</span>
+                )}
+                {micStatus.last_source && !micStatus.last_error && (
+                  <div className="mt-1 text-[var(--ink-300)]">
+                    若此处显示已发送但对方听不到：请确认通话软件麦克风设为「CABLE Output」。
+                  </div>
+                )}
+              </div>
+            )}
             <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-300)]">
               开启工具栏🎙️开关后，发送的语音会发到所选设备。请在游戏/通话软件里把麦克风设为「CABLE Output」。
             </p>

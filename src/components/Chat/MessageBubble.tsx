@@ -5,7 +5,8 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import type { Message } from "../../types";
-import { deleteMessage, addFavorite, revealAudio } from "../../services/invoke";
+import { deleteMessage, addFavorite, revealAudio, playToMic } from "../../services/invoke";
+import { useSettingsStore } from "../../stores/settingsStore";
 
 interface Props {
   message: Message;
@@ -20,6 +21,15 @@ export function MessageBubble({ message, playingPath, onDeleted, onFavorited, on
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const isPlaying = playingPath === message.audio_path;
+
+  // 播放：扬声器（onPlay）+ 全局开关开启时同时发麦克风
+  function handlePlay() {
+    onPlay(message.audio_path);
+    const s = useSettingsStore.getState().settings;
+    if (s?.mic_send_enabled && s?.mic_output_device) {
+      playToMic(message.audio_path, s.mic_output_device, s.mic_playback_volume).catch(() => {});
+    }
+  }
 
   // 菜单出现时校正位置，避免溢出视窗右/下边
   useEffect(() => {
@@ -98,7 +108,7 @@ export function MessageBubble({ message, playingPath, onDeleted, onFavorited, on
         <div className="whitespace-pre-wrap break-words leading-[1.65]">{message.content}</div>
         <div className="mt-1.5 flex items-center gap-2 text-[11px] text-[var(--ink-300)]">
           <button
-            onClick={() => onPlay(message.audio_path)}
+            onClick={handlePlay}
             className={[
               "rounded-md px-1.5 py-0.5 transition-colors",
               isPlaying

@@ -85,6 +85,7 @@ pub fn run() {
             crate::commands::mic::list_mic_devices,
             crate::commands::mic::check_vb_cable,
             crate::commands::mic::play_to_mic,
+            crate::commands::mic::test_mic,
             crate::commands::mic::stop_mic,
             crate::commands::mic::get_mic_status,
             crate::show_main_window,
