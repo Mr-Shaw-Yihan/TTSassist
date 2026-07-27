@@ -209,14 +209,34 @@ export function SettingsDrawer({ onClose }: Props) {
 
           {/* 虚拟麦克风 */}
           <Section title="虚拟麦克风">
-            {!vbInstalled && (
-              <p className="mb-2 rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/20 px-3 py-2 text-[11px] leading-relaxed text-[var(--amber-600)]">
-                未检测到 VB-CABLE 虚拟声卡。要让队友听到语音，请先安装{" "}
-                <a href="https://vb-audio.com/Cable/" target="_blank" rel="noreferrer"
-                   className="underline underline-offset-2 font-medium hover:text-[var(--seal)] transition-colors">
-                  VB-Audio Virtual Cable
-                </a>
-                （免费，需管理员权限），装完重启本软件。
+            {!vbInstalled ? (
+              <div className="mb-2 rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/20 px-3 py-2.5 text-[11px] leading-relaxed text-[var(--amber-600)]">
+                <p className="font-medium">未检测到 VB-CABLE 虚拟声卡</p>
+                <p className="mt-1">要让队友听到语音，需先安装 VB-CABLE 驱动：</p>
+                <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <a
+                    href="https://github.com/Mr-Shaw-Yihan/TTSassist/releases/download/v1.1.0/VBCABLE_Driver_Pack45.zip"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 rounded-md bg-[var(--amber-500)] px-2 py-1 font-medium text-[var(--paper)] no-underline transition-colors hover:bg-[var(--amber-600)]"
+                  >
+                    ⬇ 下载驱动包
+                  </a>
+                  <a href="https://vb-audio.com/Cable/" target="_blank" rel="noreferrer"
+                     className="underline underline-offset-2 hover:text-[var(--seal)] transition-colors">
+                    或访问官网
+                  </a>
+                </div>
+                <p className="mt-1.5 text-[10px] text-[var(--amber-600)]/80">
+                  解压后右键以管理员身份运行 VBCABLE_Setup_x64.exe，装完重启电脑。
+                </p>
+                <p className="mt-1 text-[10px] text-[var(--ink-300)]">
+                  VB-CABLE 是捐赠软件（donationware），来源 www.vb-cable.com，欢迎向作者捐赠。
+                </p>
+              </div>
+            ) : (
+              <p className="mb-2 rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-[11px] text-[var(--ink-500)]">
+                ✓ 已检测到 VB-CABLE 虚拟声卡
               </p>
             )}
             <label className="mb-1 block text-[11px] text-[var(--ink-300)]">输出设备（选 CABLE Input）</label>
