@@ -10,7 +10,6 @@
 - **克隆音色**：导入一段本地说话音频（mp3/wav，≤10MB），MiMo 复刻相似音色
 - **皮肤切换**：安墨（浅色）/ 夜窗（深色）两套
 - **系统托盘**：关闭主窗最小化到托盘不退出
-- **单实例**：重复启动只把已开窗口拉前台
 
 ## 下载安装
 
@@ -22,12 +21,15 @@
 ## 首次使用
 
 1. 启动后右上角 ⋯ → 设置
-2. 填入 **MiMo API Key**（前往 [platform.xiaomimimo.com](https://platform.xiaomimimo.com?ref=U277DH) 注册领取；可填写邀请码 `U277DH` 获得 10R 额度）
-3. 输入文字、回车发送即可合成播放
+2. 选择 TTS引擎（Mimo，响应快； Moss，音色丰富）
+3. 填入 **API Key**（前往 [platform.xiaomimimo.com](https://platform.xiaomimimo.com?ref=U277DH) 注册领取；可填写邀请码 `U277DH` 获得 10R 额度）
+4. 输入文字、回车发送即可合成播放
+5. 快捷键 alt + v 打开/关闭 浮窗，快捷输入转语音
 
 ## 技术栈
 
-Tauri 2 + React 19 + TypeScript + Tailwind CSS v4 + Rust，TTS 引擎为 [小米 MiMo v2.5](https://mimo.mi.com/docs/zh-CN/quick-start/usage-guide/audio/speech-synthesis-v2.5)。
+Tauri 2 + React 19 + TypeScript + Tailwind CSS v4 + Rust
+TTS 采用 [小米 MiMo]、[Mossland]
 
 ## 开发
 
@@ -42,3 +44,7 @@ npm run tauri build   # 打包
 ## License
 
 [MIT](./LICENSE) © Mr-Shaw-Yihan
+
+## 备忘录
+1. 托盘双击打开主界面、优化便捷浮窗
+2. 支持本地tts引擎接入，提供更快的响应速度以及音色自定义能力
