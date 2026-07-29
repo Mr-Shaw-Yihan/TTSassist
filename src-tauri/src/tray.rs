@@ -1,11 +1,20 @@
-// 系统托盘：图标 + 菜单（显示主窗 / 退出）
-// 关闭主窗 = 最小化到托盘不退出；托盘"显示主窗"= show+focus；托盘"退出"= 真正退出。
+// 系统托盘：图标 + 菜单（显示主窗 / 退出）+ 单击/双击打开主窗
+// 关闭主窗 = 最小化到托盘不退出；单击或双击托盘 = 打开主窗；右键 = 菜单；"退出"= 真正退出。
 
 use tauri::{
     menu::{Menu, MenuItem},
-    tray::TrayIconBuilder,
-    Manager, WindowEvent,
+    tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Manager, WindowEvent,
 };
+
+/// 显示并聚焦主窗口
+fn show_main_window(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+}
 
 /// 初始化系统托盘。在 setup 里调用一次。
 pub fn setup(app: &tauri::App) -> tauri::Result<()> {
@@ -18,18 +27,24 @@ pub fn setup(app: &tauri::App) -> tauri::Result<()> {
         .icon(app.default_window_icon().expect("缺少默认窗口图标").clone())
         .tooltip("VoiceAssist · 语笺")
         .menu(&menu)
-        .show_menu_on_left_click(true)
+        // 左键不自动弹菜单（避免双击打开主窗时菜单先闪一下）；右键仍显示菜单
+        .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
-            "tray_show" => {
-                if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.show();
-                    let _ = win.set_focus();
-                }
-            }
-            "tray_quit" => {
-                app.exit(0);
-            }
+            "tray_show" => show_main_window(app),
+            "tray_quit" => app.exit(0),
             _ => {}
+        })
+        // 单击或双击托盘左键 → 打开主窗口
+        .on_tray_icon_event(|tray, event| {
+            let app = tray.app_handle();
+            match event {
+                TrayIconEvent::DoubleClick { .. } => show_main_window(app),
+                TrayIconEvent::Click {
+                    button: MouseButton::Left,
+                    ..
+                } => show_main_window(app),
+                _ => {}
+            }
         })
         .build(app)?;
 
@@ -37,7 +52,7 @@ pub fn setup(app: &tauri::App) -> tauri::Result<()> {
 }
 
 /// 给主窗挂"关闭=最小化到托盘"逻辑。在 setup 后用窗口事件处理。
-pub fn install_close_to_tray(app: &tauri::AppHandle) {
+pub fn install_close_to_tray(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let app_handle = app.clone();
         win.on_window_event(move |event| {
