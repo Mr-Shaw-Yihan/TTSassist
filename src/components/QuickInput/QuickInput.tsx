@@ -71,11 +71,11 @@ export function QuickInput() {
     const t = text.trim();
     // 合成期间仍可打字，但不重复发送
     if (!t || sending) return;
+    setText(""); // 立即清空输入框，合成期间可直接输入下一句
     setSending(true);
     setStatus({ kind: "converting" });
     try {
       const msg: { audio_path: string } = await invoke("generate_tts", { text: t });
-      setText(""); // 清空输入框，可立即输入下一句
       // 播放语音（麦克风由后端 generate_tts 按全局开关自动处理）
       try {
         const s: { playback_volume?: number; playback_rate?: number } = await invoke("get_settings");
@@ -105,14 +105,19 @@ export function QuickInput() {
   return (
     <div className="flex h-screen flex-col overflow-hidden rounded-2xl bg-[var(--paper)] text-[var(--ink-900)] shadow-[0_20px_60px_rgba(26,24,22,0.25)]">
       {/* 顶部条（拖拽区）：拖拽柄 + 标题 + 菜单 */}
-      <div
-        data-tauri-drag-region
-        className="flex select-none items-center gap-2 px-3 pt-2 pb-1"
-      >
-        <span data-tauri-drag-region className="cursor-move text-[var(--ink-300)]">⠿</span>
-        <span data-tauri-drag-region className="font-display text-xs text-[var(--ink-500)]">语笺</span>
-        <div className="flex-1" data-tauri-drag-region />
-        {/* 菜单（在拖拽区内，但按钮自身可点） */}
+      <div className="flex select-none items-center px-3 pt-2 pb-1">
+        {/* 拖拽区（⠿ + 标题 + 空白）：按住左键拖动移动浮窗 */}
+        <div
+          data-tauri-drag-region
+          onMouseDown={(e) => {
+            if (e.button === 0) void getCurrentWindow().startDragging();
+          }}
+          className="flex flex-1 cursor-move items-center gap-2"
+        >
+          <span className="text-[var(--ink-300)]">⠿</span>
+          <span className="font-display text-xs text-[var(--ink-500)]">语笺</span>
+        </div>
+        {/* 菜单（独立于拖拽区，可点击） */}
         <div className="relative">
           <button
             onClick={() => setMenu((v) => !v)}
