@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { importCloneVoice, removeCloneVoice, pickAudioFile, listMicDevices, checkVbCable, testMic, getMicStatus } from "../../services/invoke";
 import type { MossVoice, AudioDevice, MicStatus } from "../../types";
+import { HotkeyRecorder } from "./HotkeyRecorder";
 
 const PRESET_VOICES = [
   { id: "mimo_default", label: "默认 (mimo_default)" },
@@ -555,16 +556,9 @@ export function SettingsDrawer({ onClose }: Props) {
           </>
           )}
 
-          {/* 快捷键（字段先做，功能下一阶段） */}
+          {/* 呼出浮窗快捷键（按键录入自定义） */}
           <Section title="呼出浮窗快捷键">
-            <input
-              type="text"
-              defaultValue={settings?.hotkey_show_window ?? "Alt+V"}
-              onBlur={(e) => patch("hotkey_show_window", e.target.value.trim())}
-              disabled
-              className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--ink-100)]/40 px-3 py-2 text-sm text-[var(--ink-300)]"
-            />
-            <p className="mt-1.5 text-xs text-[var(--ink-300)]">快捷键功能开发中，暂不可用</p>
+            <HotkeyRecorder />
           </Section>
 
           {/* 关于 */}

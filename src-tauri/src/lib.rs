@@ -2,33 +2,17 @@
 // 多窗口架构：main（主窗）+ quick_input（浮窗），跨窗口同步事件。
 
 pub mod commands;
+pub mod hotkey;
 pub mod storage;
 pub mod sync;
 pub mod tray;
 pub mod tts;
 
+use std::sync::Mutex;
 use tauri::Manager;
 use crate::commands::AppState;
+use crate::hotkey::HotkeyState;
 use crate::storage::types::Settings;
-
-/// 全局快捷键：切换浮窗显隐
-fn setup_hotkey(app: &tauri::AppHandle) {
-    use tauri_plugin_global_shortcut::GlobalShortcutExt;
-    let shortcut_key = "Alt+V";
-
-    let _ = app.global_shortcut().on_shortcut(shortcut_key, move |_app, _event, event| {
-        // 只响应按下事件（不处理松开），避免按下/松开双触发
-        if event.state != tauri_plugin_global_shortcut::ShortcutState::Pressed { return; }
-        if let Some(win) = _app.get_webview_window("quick_input") {
-            if win.is_visible().unwrap_or(false) {
-                let _ = win.hide();
-            } else {
-                let _ = win.show();
-                let _ = win.set_focus();
-            }
-        }
-    });
-}
 
 /// 显示并聚焦主窗口（从浮窗菜单调用）
 #[tauri::command]
@@ -59,11 +43,23 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             storage::ensure_data_dirs(&data_dir)?;
             let settings: Settings = storage::settings::load_settings(&data_dir);
+
+            // 浮窗呼出快捷键：读设置 → 注册（失败只记日志，不影响主功能）
+            let accel = settings.hotkey_show_window.clone();
+            let register_ok = match hotkey::register_hotkey(app.handle(), &accel) {
+                Ok(()) => true,
+                Err(e) => {
+                    eprintln!("注册快捷键 {accel} 失败: {e}");
+                    false
+                }
+            };
+            app.manage(HotkeyState {
+                current: Mutex::new(register_ok.then_some(accel)),
+            });
+
             app.manage(AppState::new(data_dir, settings));
             // 虚拟麦克风播放控制（专用音频线程）
             app.manage(crate::commands::mic::MicPlayback::spawn());
-            // 注册快捷键
-            setup_hotkey(app.handle());
             // 系统托盘
             tray::setup(app)?;
             tray::install_close_to_tray(app.handle());
@@ -88,6 +84,7 @@ pub fn run() {
             crate::commands::mic::test_mic,
             crate::commands::mic::stop_mic,
             crate::commands::mic::get_mic_status,
+            crate::hotkey::set_hotkey,
             crate::show_main_window,
         ])
         .run(tauri::generate_context!())

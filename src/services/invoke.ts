@@ -150,3 +150,10 @@ export async function stopMic(): Promise<void> {
 export async function getMicStatus(): Promise<MicStatus> {
   return invoke<MicStatus>("get_mic_status");
 }
+
+// ── 全局快捷键 ──────────────────────────────────
+
+/** 设置（更换）浮窗呼出快捷键，后端验证有效性并重新注册 */
+export async function setHotkey(accel: string): Promise<void> {
+  return invoke<void>("set_hotkey", { accel });
+}
