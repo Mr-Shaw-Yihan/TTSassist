@@ -7,6 +7,7 @@
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use crate::sync::{notify_changed, EVENT_SETTINGS_CHANGED};
 
 /// 记录当前已注册的快捷键（用于切换时注销旧的）
 pub struct HotkeyState {
@@ -85,6 +86,9 @@ pub fn set_hotkey(
     if let Ok(mut g) = app_state.settings.write() {
         g.hotkey_show_window = accel;
     }
+
+    // 广播 settings:changed，让前端 store 刷新（与其它设置项一致）
+    notify_changed(&app, EVENT_SETTINGS_CHANGED);
 
     Ok(())
 }

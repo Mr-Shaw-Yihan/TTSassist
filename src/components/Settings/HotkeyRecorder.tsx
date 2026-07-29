@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { setHotkey } from "../../services/invoke";
+import { setHotkey, getSettings } from "../../services/invoke";
 
 /** 把键盘事件的特殊键名映射成加速键格式 */
 function mapKey(key: string): string {
@@ -39,6 +39,7 @@ function buildAccelerator(e: React.KeyboardEvent): string | null {
 
 export function HotkeyRecorder() {
   const settings = useSettingsStore((s) => s.settings);
+  const setSettings = useSettingsStore((s) => s.setSettings);
   const current = settings?.hotkey_show_window ?? "Alt+V";
 
   const [recording, setRecording] = useState(false);
@@ -78,6 +79,8 @@ export function HotkeyRecorder() {
     setError(null);
     try {
       await setHotkey(pending);
+      // 立即刷新 store，让显示即时更新（不等事件异步往返）
+      setSettings(await getSettings());
       setRecording(false);
       setPending(null);
     } catch (e) {
