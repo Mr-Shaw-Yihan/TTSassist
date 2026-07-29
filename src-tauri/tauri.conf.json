@@ -23,8 +23,8 @@
       {
         "label": "quick_input",
         "title": "",
-        "width": 330,
-        "height": 160,
+        "width": 360,
+        "height": 140,
         "decorations": false,
         "alwaysOnTop": true,
         "visible": false,
