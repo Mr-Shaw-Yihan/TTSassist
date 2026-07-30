@@ -14,12 +14,15 @@ use crate::commands::AppState;
 use crate::hotkey::HotkeyState;
 use crate::storage::types::Settings;
 
-/// 显示并聚焦主窗口（从浮窗菜单调用）
+/// 显示并聚焦主窗口（从浮窗按钮调用），同时隐藏浮窗（避免两窗同现）
 #[tauri::command]
 fn show_main_window(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(win) = app.get_webview_window("main") {
         win.show().map_err(|e| format!("{e}"))?;
         win.set_focus().map_err(|e| format!("{e}"))?;
+    }
+    if let Some(floating) = app.get_webview_window("quick_input") {
+        let _ = floating.hide();
     }
     Ok(())
 }
