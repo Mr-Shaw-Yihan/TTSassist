@@ -82,6 +82,7 @@ mod tests {
             note: "n".into(),
             audio_path,
             created_at: now_iso(),
+            hotkey: None,
         }
     }
 

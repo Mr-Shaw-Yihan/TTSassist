@@ -15,6 +15,8 @@ export interface Favorite {
   note: string;
   audio_path: string;
   created_at: string;
+  /** 自定义快捷播放快捷键（如 "Alt+1"），未设置为 null */
+  hotkey: string | null;
 }
 
 /** Moss-TTS 音色条目 */

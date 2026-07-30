@@ -74,6 +74,22 @@ pub fn unlink_favorites_by_message(data_dir: &Path, message_id: &str) -> Result<
     write_json_pretty(&path(data_dir), &updated)
 }
 
+/// 设置某收藏的快捷键（hotkey=None 表示移除）。返回更新后的完整收藏列表。
+pub fn set_favorite_hotkey(data_dir: &Path, id: &str, hotkey: Option<String>) -> Result<Vec<Favorite>> {
+    let list = load_favorites(data_dir);
+    let updated: Vec<Favorite> = list
+        .into_iter()
+        .map(|mut f| {
+            if f.id == id {
+                f.hotkey = hotkey.clone();
+            }
+            f
+        })
+        .collect();
+    write_json_pretty(&path(data_dir), &updated)?;
+    Ok(updated)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -87,6 +103,7 @@ mod tests {
             note: note.into(),
             audio_path: audio_path.into(),
             created_at: now_iso(),
+            hotkey: None,
         }
     }
 

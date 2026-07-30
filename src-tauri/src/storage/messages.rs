@@ -138,6 +138,7 @@ mod tests {
             note: "n".into(),
             audio_path: make_audio(&d, "fav1"),
             created_at: now_iso(),
+            hotkey: None,
         };
         favorites::add_favorite(&d, f.clone()).unwrap();
 
@@ -175,6 +176,7 @@ mod tests {
             note: "n".into(),
             audio_path: audio.clone(),
             created_at: now_iso(),
+            hotkey: None,
         };
         favorites::add_favorite(&d, f).unwrap();
 

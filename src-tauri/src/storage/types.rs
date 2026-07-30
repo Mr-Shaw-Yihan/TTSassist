@@ -29,6 +29,9 @@ pub struct Favorite {
     pub audio_path: String,
     /// ISO8601 时间戳字符串
     pub created_at: String,
+    /// 自定义快捷键（加速键串如 "Alt+1"）；None=未设置
+    #[serde(default)]
+    pub hotkey: Option<String>,
 }
 
 /// Moss-TTS 音色条目

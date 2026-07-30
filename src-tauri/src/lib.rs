@@ -11,7 +11,7 @@ pub mod tts;
 use std::sync::Mutex;
 use tauri::Manager;
 use crate::commands::AppState;
-use crate::hotkey::HotkeyState;
+use crate::hotkey::{FavoriteHotkeys, HotkeyState};
 use crate::storage::types::Settings;
 
 /// 显示并聚焦主窗口（从浮窗按钮调用），同时隐藏浮窗（避免两窗同现）
@@ -59,10 +59,18 @@ pub fn run() {
             app.manage(HotkeyState {
                 current: Mutex::new(register_ok.then_some(accel)),
             });
+            app.manage(FavoriteHotkeys::new());
+
+            // 加载收藏用于注册收藏快捷键（data_dir 随后移入 AppState）
+            let favorites = storage::favorites::load_favorites(&data_dir);
 
             app.manage(AppState::new(data_dir, settings));
             // 虚拟麦克风播放控制（专用音频线程）
             app.manage(crate::commands::mic::MicPlayback::spawn());
+            // 注册收藏快捷键（需在 AppState/MicPlayback manage 之后）
+            if let Err(e) = hotkey::refresh_favorite_hotkeys(app.handle(), &favorites) {
+                eprintln!("注册收藏快捷键失败: {e}");
+            }
             // 系统托盘
             tray::setup(app)?;
             tray::install_close_to_tray(app.handle());
@@ -76,6 +84,8 @@ pub fn run() {
             crate::commands::favorite::add_favorite,
             crate::commands::favorite::delete_favorite,
             crate::commands::favorite::import_favorite,
+            crate::commands::favorite::set_favorite_hotkey,
+            crate::commands::favorite::remove_favorite_hotkey,
             crate::commands::settings::get_settings,
             crate::commands::settings::update_setting,
             crate::commands::audio::resolve_audio_url,

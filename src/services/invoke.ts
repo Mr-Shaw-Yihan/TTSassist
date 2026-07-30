@@ -48,6 +48,19 @@ export async function importFavorite(
   return invoke<Favorite>("import_favorite", { filePath, note });
 }
 
+/** 为收藏设置快捷键（后端检测冲突，冲突时抛错） */
+export async function setFavoriteHotkey(
+  id: string,
+  hotkey: string,
+): Promise<Favorite[]> {
+  return invoke<Favorite[]>("set_favorite_hotkey", { id, hotkey });
+}
+
+/** 移除收藏的快捷键 */
+export async function removeFavoriteHotkey(id: string): Promise<Favorite[]> {
+  return invoke<Favorite[]>("remove_favorite_hotkey", { id });
+}
+
 // ── 克隆音色 ─────────────────────────────────────
 
 export async function importCloneVoice(

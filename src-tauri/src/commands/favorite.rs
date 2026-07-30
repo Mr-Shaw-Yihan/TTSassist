@@ -41,6 +41,7 @@ pub fn add_favorite(
         note,
         audio_path: msg.audio_path.clone(),
         created_at: now_iso(),
+        hotkey: None,
     };
 
     let result = fav.clone();
@@ -109,6 +110,7 @@ pub fn import_favorite(
         note,
         audio_path: rel_path,
         created_at: now_iso(),
+        hotkey: None,
     };
 
     let result = fav.clone();
@@ -118,4 +120,64 @@ pub fn import_favorite(
     notify_changed(&app, EVENT_FAVORITE_CHANGED);
 
     Ok(result)
+}
+
+/// 为某收藏设置快捷键（含冲突检测），设置后刷新全局快捷键注册。
+#[tauri::command]
+pub fn set_favorite_hotkey(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    hotkey: String,
+) -> Result<Vec<Favorite>, String> {
+    let hotkey = hotkey.trim().to_string();
+    if hotkey.is_empty() {
+        return Err("快捷键不能为空".into());
+    }
+
+    // 冲突检测 1：与浮窗呼出快捷键相同
+    let floating_hotkey = state
+        .settings
+        .read()
+        .map(|s| s.hotkey_show_window.clone())
+        .unwrap_or_default();
+    if hotkey == floating_hotkey {
+        return Err("与「呼出浮窗」快捷键冲突，请换一个".into());
+    }
+
+    // 冲突检测 2：与其它收藏的快捷键相同
+    let favorites = crate::storage::favorites::load_favorites(&state.data_dir);
+    for fav in &favorites {
+        if fav.id != id && fav.hotkey.as_deref() == Some(hotkey.as_str()) {
+            return Err(format!("与收藏「{}」的快捷键冲突，请换一个", fav.note));
+        }
+    }
+
+    // 写入快捷键
+    let updated = crate::storage::favorites::set_favorite_hotkey(&state.data_dir, &id, Some(hotkey))
+        .map_err(|e| format!("{e}"))?;
+
+    // 刷新全局快捷键注册
+    crate::hotkey::refresh_favorite_hotkeys(&app, &updated)?;
+
+    notify_changed(&app, EVENT_FAVORITE_CHANGED);
+
+    Ok(updated)
+}
+
+/// 移除某收藏的快捷键，刷新注册。
+#[tauri::command]
+pub fn remove_favorite_hotkey(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Vec<Favorite>, String> {
+    let updated = crate::storage::favorites::set_favorite_hotkey(&state.data_dir, &id, None)
+        .map_err(|e| format!("{e}"))?;
+
+    crate::hotkey::refresh_favorite_hotkeys(&app, &updated)?;
+
+    notify_changed(&app, EVENT_FAVORITE_CHANGED);
+
+    Ok(updated)
 }

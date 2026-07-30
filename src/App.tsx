@@ -143,6 +143,18 @@ function App() {
     return () => { unlisten?.(); };
   }, [reloadFavorites]);
 
+  // 监听 favorite:play（收藏快捷键触发）→ 播扬声器
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    (async () => {
+      const u = await listen<string>("favorite:play", (e) => {
+        void playAudio(e.payload);
+      });
+      unlisten = u;
+    })();
+    return () => { unlisten?.(); };
+  }, [playAudio]);
+
   // 监听 settings:changed，重读 settings 到 store（克隆命令在别处改 settings 时同步）
   useEffect(() => {
     let unlisten: (() => void) | null = null;
