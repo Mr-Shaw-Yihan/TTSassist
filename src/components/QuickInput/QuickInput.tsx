@@ -4,7 +4,9 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getAudioUrl } from "../../services/invoke";
+import { getAudioUrl, getSettings } from "../../services/invoke";
+import { useSettingsStore } from "../../stores/settingsStore";
+import { MicToggle } from "../Chat/MicToggle";
 
 /** 发送/合成的三态反馈 */
 type Status =
@@ -17,36 +19,41 @@ export function QuickInput() {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
-  const [menu, setMenu] = useState(false);
   const inpRef = useRef<HTMLInputElement | null>(null);
+  const setSettings = useSettingsStore((s) => s.setSettings);
 
-  // 浮窗启动加载 settings.theme 并应用（与主窗独立窗口，data-theme 不共享）
+  // 应用主题
+  function applyTheme(theme?: string) {
+    document.documentElement.setAttribute("data-theme", theme === "dark" ? "dark" : "light");
+  }
+
+  // 浮窗启动：加载 settings 到 store（供 MicToggle 用）并应用主题
   useEffect(() => {
     (async () => {
       try {
-        const s: { theme?: string } = await invoke("get_settings");
-        const theme = s.theme === "dark" ? "dark" : "light";
-        document.documentElement.setAttribute("data-theme", theme);
-      } catch { /* 用默认浅色 */ }
+        const s = await getSettings();
+        setSettings(s);
+        applyTheme(s.theme);
+      } catch { /* 用默认 */ }
     })();
-  }, []);
+  }, [setSettings]);
 
-  // 监听 settings:changed 跟随主窗换肤
+  // 监听 settings:changed：同步 store + 换肤（跟随主窗设置变化）
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     (async () => {
       const { listen } = await import("@tauri-apps/api/event");
       const u = await listen("settings:changed", async () => {
         try {
-          const s: { theme?: string } = await invoke("get_settings");
-          const theme = s.theme === "dark" ? "dark" : "light";
-          document.documentElement.setAttribute("data-theme", theme);
+          const s = await getSettings();
+          setSettings(s);
+          applyTheme(s.theme);
         } catch { /* ignore */ }
       });
       unlisten = u;
     })();
     return () => { unlisten?.(); };
-  }, []);
+  }, [setSettings]);
 
   // 失去焦点时隐藏浮窗（点击外部自动关闭）
   useEffect(() => {
@@ -97,14 +104,19 @@ export function QuickInput() {
     }
   }
 
-  async function openMain() {
-    setMenu(false);
+  // 打开主界面并关闭浮窗（show_main_window 后端会同时隐藏浮窗）
+  async function openMainAndClose() {
     void (await invoke("show_main_window"));
+  }
+
+  // 麦克风开关未配置设备时 → 打开主界面去设置
+  function onOpenSettingsFromFloating() {
+    void invoke("show_main_window");
   }
 
   return (
     <div className="flex h-screen flex-col overflow-hidden rounded-2xl bg-[var(--paper)] text-[var(--ink-900)] shadow-[0_20px_60px_rgba(26,24,22,0.25)]">
-      {/* 顶部条（拖拽区）：拖拽柄 + 标题 + 菜单 */}
+      {/* 顶部条：拖拽区 + 麦克风开关 + 打开主界面 */}
       <div className="flex select-none items-center px-3 pt-2 pb-1">
         {/* 拖拽区（⠿ + 标题 + 空白）：按住左键拖动移动浮窗 */}
         <div
@@ -117,28 +129,16 @@ export function QuickInput() {
           <span className="text-[var(--ink-300)]">⠿</span>
           <span className="font-display text-xs text-[var(--ink-500)]">语笺</span>
         </div>
-        {/* 菜单（独立于拖拽区，可点击） */}
-        <div className="relative">
-          <button
-            onClick={() => setMenu((v) => !v)}
-            className="rounded-lg p-1 text-[var(--ink-300)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]"
-          >
-            ⋯
-          </button>
-          {menu && (
-            <>
-              <div className="fixed inset-0 z-20" onClick={() => setMenu(false)} />
-              <div className="absolute right-0 top-full z-30 mt-1 w-36 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] py-1 text-xs text-[var(--ink-700)] shadow-[0_8px_24px_rgba(26,24,22,0.12)] animate-fade overflow-hidden">
-                <button
-                  onClick={openMain}
-                  className="block w-full px-3 py-2 text-left hover:bg-[var(--amber-200)]/40 hover:text-[var(--ink-900)] transition-colors"
-                >
-                  打开主界面
-                </button>
-              </div>
-            </>
-          )}
-        </div>
+        {/* 麦克风开关（与主界面相同功能） */}
+        <MicToggle onOpenSettings={onOpenSettingsFromFloating} />
+        {/* 打开主界面并关闭浮窗 */}
+        <button
+          onClick={openMainAndClose}
+          title="打开主界面"
+          className="ml-0.5 rounded-lg p-1.5 text-[var(--ink-300)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]"
+        >
+          🗗
+        </button>
       </div>
 
       {/* 输入行（合成期间仍可打字） */}

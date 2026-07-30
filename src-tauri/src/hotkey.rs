@@ -15,6 +15,7 @@ pub struct HotkeyState {
 }
 
 /// 注册一个全局快捷键，回调切换 quick_input 窗口显隐。
+/// 呼出浮窗时隐藏主窗（避免两窗同现）；收起浮窗时主窗保持隐藏（用户自行通过托盘/浮窗按钮打开）。
 pub fn register_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
     app.global_shortcut()
         .on_shortcut(accel, |app, _shortcut, event| {
@@ -22,12 +23,17 @@ pub fn register_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
             if event.state() != ShortcutState::Pressed {
                 return;
             }
-            if let Some(win) = app.get_webview_window("quick_input") {
-                if win.is_visible().unwrap_or(false) {
-                    let _ = win.hide();
+            if let Some(floating) = app.get_webview_window("quick_input") {
+                if floating.is_visible().unwrap_or(false) {
+                    // 浮窗已显示 → 收起浮窗（主窗保持隐藏）
+                    let _ = floating.hide();
                 } else {
-                    let _ = win.show();
-                    let _ = win.set_focus();
+                    // 呼出浮窗，同时隐藏主窗（避免两窗同现）
+                    let _ = floating.show();
+                    let _ = floating.set_focus();
+                    if let Some(main) = app.get_webview_window("main") {
+                        let _ = main.hide();
+                    }
                 }
             }
         })

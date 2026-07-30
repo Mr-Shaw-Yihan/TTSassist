@@ -7,12 +7,15 @@ use tauri::{
     AppHandle, Manager, WindowEvent,
 };
 
-/// 显示并聚焦主窗口
+/// 显示并聚焦主窗口（同时隐藏浮窗，避免两窗同现）
 fn show_main_window(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
+    }
+    if let Some(floating) = app.get_webview_window("quick_input") {
+        let _ = floating.hide();
     }
 }
 
