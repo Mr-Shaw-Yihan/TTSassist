@@ -188,8 +188,8 @@ function App() {
       {/* 标题栏 ── 品牌字 + 极细底分隔线 */}
       <header className="flex items-center justify-between border-b border-[var(--ink-200)] bg-[var(--paper)] px-4 py-3">
         <div className="flex items-baseline gap-2">
-          <span className="font-display text-base text-[var(--ink-900)] tracking-tight">语笺</span>
-          <span className="text-[10px] text-[var(--ink-300)] tracking-[0.3em] uppercase">VoiceAssist</span>
+          <span className="font-display text-base text-[var(--ink-900)] tracking-tight">电子声带</span>
+          <span className="text-[10px] text-[var(--ink-300)] tracking-[0.3em] uppercase">TTSassist</span>
         </div>
         <div className="flex items-center gap-0.5">
           <MicToggle onOpenSettings={() => setShowDrawer(true)} />

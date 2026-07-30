@@ -23,12 +23,12 @@ fn show_main_window(app: &AppHandle) {
 pub fn setup(app: &tauri::App) -> tauri::Result<()> {
     // 菜单项
     let show = MenuItem::with_id(app, "tray_show", "显示主界面", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "tray_quit", "退出 VoiceAssist", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "tray_quit", "退出 TTSassist", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &quit])?;
 
     let _tray = TrayIconBuilder::with_id("main-tray")
         .icon(app.default_window_icon().expect("缺少默认窗口图标").clone())
-        .tooltip("VoiceAssist · 语笺")
+        .tooltip("TTSassist · 电子声带")
         .menu(&menu)
         // 左键不自动弹菜单（避免双击打开主窗时菜单先闪一下）；右键仍显示菜单
         .show_menu_on_left_click(false)

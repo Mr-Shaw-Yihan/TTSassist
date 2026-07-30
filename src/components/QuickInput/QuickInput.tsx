@@ -127,7 +127,7 @@ export function QuickInput() {
           className="flex flex-1 cursor-move items-center gap-2"
         >
           <span className="text-[var(--ink-300)]">⠿</span>
-          <span className="font-display text-xs text-[var(--ink-500)]">语笺</span>
+          <span className="font-display text-xs text-[var(--ink-500)]">电子声带</span>
         </div>
         {/* 麦克风开关（与主界面相同功能） */}
         <MicToggle onOpenSettings={onOpenSettingsFromFloating} />
