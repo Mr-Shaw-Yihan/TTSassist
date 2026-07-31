@@ -121,21 +121,26 @@ fn register_favorite_hotkey(app: &AppHandle, hotkey: &str, audio_path: String) -
             if event.state() != ShortcutState::Pressed {
                 return;
             }
-            // 发麦克风（若全局开关开启且配置了设备）
-            if let Some(state) = app.try_state::<AppState>() {
-                let abs = state.data_dir.join(&audio_path);
-                let (enabled, device, volume) = match state.settings.read() {
-                    Ok(s) => (s.mic_send_enabled, s.mic_output_device.clone(), s.mic_playback_volume),
-                    Err(_) => (false, String::new(), 1.0),
-                };
-                if enabled && !device.is_empty() {
+            // 读设置：麦克风是否开启 + 设备 + 音量
+            let mic_info = app.try_state::<AppState>().and_then(|state| {
+                state.settings.read().ok().map(|s| {
+                    (state.data_dir.join(&audio_path), s.mic_send_enabled, s.mic_output_device.clone(), s.mic_playback_volume)
+                })
+            });
+
+            let mic_active = matches!(&mic_info, Some((_, true, device, _)) if !device.is_empty());
+
+            if mic_active {
+                // 麦克风开启 → 只发麦克风，不再播扬声器（避免默认输出是 CABLE Input 时重音）
+                if let Some((abs, _, device, volume)) = mic_info {
                     if let Some(mic) = app.try_state::<MicPlayback>() {
                         mic.play(abs, device, volume);
                     }
                 }
+            } else {
+                // 麦克风未开启 → 播扬声器
+                let _ = app.emit("favorite:play", audio_path.clone());
             }
-            // emit 事件让前端主窗播扬声器
-            let _ = app.emit("favorite:play", audio_path.clone());
         })
         .map_err(|e| format!("注册收藏快捷键失败：{e}"))
 }
