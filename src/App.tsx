@@ -2,8 +2,8 @@
 // 大纲 4.1-4.6 端到端打通 MVP。
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useTauriListen } from "./hooks/useTauriListen";
 import { InputBox } from "./components/Chat/InputBox";
 import { MessageBubble } from "./components/Chat/MessageBubble";
 import { VolumeControl } from "./components/Chat/VolumeSlider";
@@ -81,16 +81,8 @@ function App() {
   }, [tab, reloadFavorites]);
 
   // 监听 message:changed 事件，重读消息列表（跨窗口同步 + 双保险）
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    (async () => {
-      const u = await listen("message:changed", async () => {
-        const msgs = await listMessages();
-        setMessages(msgs);
-      });
-      unlisten = u;
-    })();
-    return () => { unlisten?.(); };
+  useTauriListen("message:changed", async () => {
+    setMessages(await listMessages());
   }, []);
 
   // 滚动管理：新消息来时滚到底
@@ -134,40 +126,22 @@ function App() {
   }, [volume, playbackRate]);
 
   // 监听 favorite:changed，刷新收藏
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    (async () => {
-      const u = await listen("favorite:changed", reloadFavorites);
-      unlisten = u;
-    })();
-    return () => { unlisten?.(); };
+  useTauriListen("favorite:changed", () => {
+    void reloadFavorites();
   }, [reloadFavorites]);
 
   // 监听 favorite:play（收藏快捷键触发）→ 播扬声器
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    (async () => {
-      const u = await listen<string>("favorite:play", (e) => {
-        void playAudio(e.payload);
-      });
-      unlisten = u;
-    })();
-    return () => { unlisten?.(); };
+  useTauriListen<string>("favorite:play", (payload) => {
+    void playAudio(payload);
   }, [playAudio]);
 
   // 监听 settings:changed，重读 settings 到 store（克隆命令在别处改 settings 时同步）
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    (async () => {
-      const u = await listen("settings:changed", async () => {
-        try {
-          const s = await getSettings();
-          setSettings(s);
-        } catch (e) { console.error("重读设置失败", e); }
-      });
-      unlisten = u;
-    })();
-    return () => { unlisten?.(); };
+  useTauriListen("settings:changed", async () => {
+    try {
+      setSettings(await getSettings());
+    } catch (e) {
+      console.error("重读设置失败", e);
+    }
   }, [setSettings]);
 
   // 兜底：窗口聚焦时同时刷新收藏

@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getAudioUrl, getSettings } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useTauriListen } from "../../hooks/useTauriListen";
 import { MicToggle } from "../Chat/MicToggle";
 
 /** 发送/合成的三态反馈 */
@@ -39,20 +40,12 @@ export function QuickInput() {
   }, [setSettings]);
 
   // 监听 settings:changed：同步 store + 换肤（跟随主窗设置变化）
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    (async () => {
-      const { listen } = await import("@tauri-apps/api/event");
-      const u = await listen("settings:changed", async () => {
-        try {
-          const s = await getSettings();
-          setSettings(s);
-          applyTheme(s.theme);
-        } catch { /* ignore */ }
-      });
-      unlisten = u;
-    })();
-    return () => { unlisten?.(); };
+  useTauriListen("settings:changed", async () => {
+    try {
+      const s = await getSettings();
+      setSettings(s);
+      applyTheme(s.theme);
+    } catch { /* ignore */ }
   }, [setSettings]);
 
   // 失去焦点时隐藏浮窗（点击外部自动关闭）
