@@ -10,7 +10,9 @@ use crate::tts::moss::MossEngine;
 use crate::tts::traits::{TTSEngine, TTSParams, TtsError};
 use crate::sync::{notify_changed, EVENT_MESSAGE_CHANGED};
 
-/// 把克隆样本音频转成 MiMo 要的 data URI（"data:audio/<ext>;base64,<b64>"）
+/// 把克隆样本音频转成 MiMo 要的 data URI（"data:<mime>;base64,<b64>"）。
+/// MiMo 克隆音色支持 mp3/flac/m4a/wav/ogg，须按实际格式声明正确的 MIME，
+/// 否则 MiMo 会因 MIME 与真实格式不符而报 "invalid audio format"。
 fn build_clone_voice_uri(sample_path: &Path) -> Result<String, String> {
     use base64::Engine as _;
     let bytes = std::fs::read(sample_path)
@@ -19,10 +21,19 @@ fn build_clone_voice_uri(sample_path: &Path) -> Result<String, String> {
         .extension()
         .and_then(|e| e.to_str())
         .map(|s| s.to_lowercase())
-        .unwrap_or_else(|| "mp3".into());
+        .unwrap_or_default();
     let mime = match ext.as_str() {
+        "mp3" => "audio/mpeg",
         "wav" => "audio/wav",
-        _ => "audio/mpeg",
+        "m4a" => "audio/mp4",
+        "flac" => "audio/flac",
+        "ogg" => "audio/ogg",
+        other => {
+            return Err(format!(
+                "不支持的音频格式「{}」，克隆音色仅支持 mp3 / wav / m4a / flac / ogg",
+                if other.is_empty() { "未知" } else { other }
+            ));
+        }
     };
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Ok(format!("data:{mime};base64,{b64}"))
