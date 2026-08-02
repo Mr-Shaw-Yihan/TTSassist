@@ -426,6 +426,11 @@ export function SettingsDrawer({ onClose }: Props) {
               >
                 MiMo TTS 文档
               </a>
+              {/* 免责声明 */}
+              <div className="mt-3 rounded-lg border border-[var(--ink-200)] bg-[var(--ink-100)]/40 px-3 py-2 text-[10px] leading-relaxed text-[var(--ink-300)]">
+                <div className="mb-1 font-medium text-[var(--ink-500)]">免责声明</div>
+                本软件为开源项目，仅供学习与个人使用。软件仅提供本地服务功能，语音合成能力由第三方运营商服务提供，API Key 由用户自行申请，相关条款与资费以运营商为准。本软件不收集、不上传任何用户个人信息，所有数据仅存储于本地。使用产生的任何后果由用户自行承担。
+              </div>
             </div>
           </Section>
         </div>
