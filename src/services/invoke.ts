@@ -2,12 +2,17 @@
 // 后端每个 #[tauri::command] 对应一个函数，参数名与后端 fn 参数 snake_case 一致。
 
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus } from "../types";
+import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, EdgeVoiceItem } from "../types";
 
 // ── TTS ──────────────────────────────────────────
 
 export async function generateTTS(text: string): Promise<Message> {
   return invoke<Message>("generate_tts", { text });
+}
+
+/** 获取 Edge TTS 内置中文音色清单 */
+export async function listEdgeVoices(): Promise<EdgeVoiceItem[]> {
+  return invoke<EdgeVoiceItem[]>("list_edge_voices");
 }
 
 // ── Messages ──────────────────────────────────────

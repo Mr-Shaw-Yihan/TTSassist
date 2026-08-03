@@ -95,7 +95,7 @@ pub async fn generate_tts(
     let data_dir = state.data_dir.clone();
 
     // 1. 读设置
-    let (tts_engine, mimo_key, moss_key, moss_voice, tts_model, clone_path,
+    let (tts_engine, mimo_key, moss_key, moss_voice, tts_model, clone_path, edge_voice,
          mic_send_enabled, mic_device, mic_volume) = {
         let s = state
             .settings
@@ -108,6 +108,7 @@ pub async fn generate_tts(
             s.moss_voice_id.clone(),
             s.tts_model.clone(),
             s.clone_voice_path.clone(),
+            s.edge_voice.clone(),
             s.mic_send_enabled,
             s.mic_output_device.clone(),
             s.mic_playback_volume,
@@ -125,6 +126,17 @@ pub async fn generate_tts(
             }
             let engine = MossEngine::new(moss_key, moss_voice, data_dir.clone());
             engine.generate(&text).await.map_err(|e| format!("{e}"))?
+        }
+        "edge" => {
+            // Edge TTS：免费、无需 key。音色用 edge_voice（空则用默认晓晓）
+            let engine = crate::tts::edge::EdgeTtsEngine::new(data_dir.clone());
+            let voice = if edge_voice.is_empty() { None } else { Some(edge_voice.as_str()) };
+            let params = TTSParams {
+                text: &text,
+                voice,
+                instruction: None,
+            };
+            engine.generate(params).await.map_err(|e| format!("{e}"))?
         }
         _ => {
             // 默认走 mimo（含空字符串兜底）
@@ -158,4 +170,19 @@ pub async fn generate_tts(
     }
 
     Ok(result)
+}
+
+/// Edge TTS 内置中文音色清单（id + 显示名），供前端下拉选择。
+#[tauri::command]
+pub fn list_edge_voices() -> Vec<EdgeVoiceItem> {
+    crate::tts::edge::EDGE_ZH_VOICES
+        .iter()
+        .map(|(id, label)| EdgeVoiceItem { id: (*id).to_string(), label: (*label).to_string() })
+        .collect()
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EdgeVoiceItem {
+    pub id: String,
+    pub label: String,
 }

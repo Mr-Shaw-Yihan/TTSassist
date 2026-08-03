@@ -2,10 +2,10 @@
 // 分类：语音合成 / 虚拟麦克风 / 快捷键 / 外观 / 关于。
 // 虚拟麦克风轮询隔离在 MicSettings 组件，分类收起即停止轮询。
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { importCloneVoice, removeCloneVoice, pickAudioFile } from "../../services/invoke";
-import type { MossVoice } from "../../types";
+import { importCloneVoice, removeCloneVoice, pickAudioFile, listEdgeVoices } from "../../services/invoke";
+import type { MossVoice, EdgeVoiceItem } from "../../types";
 import { HotkeyRecorder } from "./HotkeyRecorder";
 import { MicSettings } from "./MicSettings";
 
@@ -40,6 +40,12 @@ export function SettingsDrawer({ onClose }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editId, setEditId] = useState("");
+
+  // Edge TTS 音色清单
+  const [edgeVoices, setEdgeVoices] = useState<EdgeVoiceItem[]>([]);
+  useEffect(() => {
+    listEdgeVoices().then(setEdgeVoices).catch(() => {});
+  }, []);
 
   async function copyInvite() {
     try {
@@ -171,6 +177,7 @@ export function SettingsDrawer({ onClose }: Props) {
               >
                 <option value="mimo">MiMo（小米）</option>
                 <option value="moss">Moss-TTS（Mossland）</option>
+                <option value="edge">Edge TTS（免费·微软）</option>
               </select>
             </Field>
 
@@ -369,6 +376,27 @@ export function SettingsDrawer({ onClose }: Props) {
                   >
                     前往 Mossland 音色库查询 voice_id
                   </a>
+                </Field>
+              </>
+            )}
+
+            {/* === Edge TTS 引擎配置（免费） === */}
+            {settings?.tts_engine === "edge" && (
+              <>
+                <div className="rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/20 px-3 py-2 text-[11px] leading-relaxed text-[var(--amber-600)]">
+                  Edge TTS 为<b>免费</b>引擎（微软 Edge 朗读服务），无需 API Key。
+                  但它是非官方接口，可能不稳定或受地区限制（部分地区 403），失效不属于软件 bug。
+                </div>
+                <Field label="Edge 音色">
+                  <select
+                    value={settings?.edge_voice ?? "zh-CN-XiaoxiaoNeural"}
+                    onChange={(e) => patch("edge_voice", e.target.value)}
+                    className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
+                  >
+                    {edgeVoices.map((v) => (
+                      <option key={v.id} value={v.id}>{v.label}</option>
+                    ))}
+                  </select>
                 </Field>
               </>
             )}

@@ -78,6 +78,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             crate::commands::tts::generate_tts,
+            crate::commands::tts::list_edge_voices,
             crate::commands::message::list_messages,
             crate::commands::message::delete_message,
             crate::commands::favorite::list_favorites,
