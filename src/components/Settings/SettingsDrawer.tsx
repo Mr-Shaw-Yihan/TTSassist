@@ -4,8 +4,8 @@
 
 import { useState, useEffect } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { importCloneVoice, removeCloneVoice, pickAudioFile, listEdgeVoices } from "../../services/invoke";
-import type { MossVoice, EdgeVoiceItem } from "../../types";
+import { importCloneVoice, removeCloneVoice, pickAudioFile, listPlugins } from "../../services/invoke";
+import type { MossVoice, PluginInfo } from "../../types";
 import { HotkeyRecorder } from "./HotkeyRecorder";
 import { MicSettings } from "./MicSettings";
 
@@ -41,10 +41,10 @@ export function SettingsDrawer({ onClose }: Props) {
   const [editName, setEditName] = useState("");
   const [editId, setEditId] = useState("");
 
-  // Edge TTS 音色清单
-  const [edgeVoices, setEdgeVoices] = useState<EdgeVoiceItem[]>([]);
+  // 已加载插件（引擎下拉动态项 + 插件音色来源）
+  const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   useEffect(() => {
-    listEdgeVoices().then(setEdgeVoices).catch(() => {});
+    listPlugins().then(setPlugins).catch(() => {});
   }, []);
 
   async function copyInvite() {
@@ -177,7 +177,12 @@ export function SettingsDrawer({ onClose }: Props) {
               >
                 <option value="mimo">MiMo（小米）</option>
                 <option value="moss">Moss-TTS（Mossland）</option>
-                <option value="edge-tts">Edge TTS（免费·微软）</option>
+                {/* 插件引擎（动态，来自插件管理） */}
+                {plugins
+                  .filter((p) => p.loaded)
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
               </select>
             </Field>
 
@@ -380,31 +385,37 @@ export function SettingsDrawer({ onClose }: Props) {
               </>
             )}
 
-            {/* === Edge TTS 引擎配置（免费，插件） === */}
-            {settings?.tts_engine === "edge-tts" && (
-              <>
-                <div className="rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/20 px-3 py-2 text-[11px] leading-relaxed text-[var(--amber-600)]">
-                  Edge TTS 为<b>免费</b>引擎（微软 Edge 朗读服务），无需 API Key。
-                  但它是非官方接口，可能不稳定或受地区限制（部分地区 403），失效不属于软件 bug。
-                </div>
-                <Field label="Edge 音色">
-                  <select
-                    value={settings?.plugin_voices?.["edge-tts"] ?? "zh-CN-XiaoxiaoNeural"}
-                    onChange={(e) =>
-                      patch("plugin_voices", {
-                        ...(settings?.plugin_voices ?? {}),
-                        "edge-tts": e.target.value,
-                      })
-                    }
-                    className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
-                  >
-                    {edgeVoices.map((v) => (
-                      <option key={v.id} value={v.id}>{v.label}</option>
-                    ))}
-                  </select>
-                </Field>
-              </>
-            )}
+            {/* === 插件引擎配置（音色表来自插件本身，通用） === */}
+            {(() => {
+              const cur = plugins.find((p) => p.id === settings?.tts_engine && p.loaded);
+              if (!cur) return null;
+              return (
+                <>
+                  {cur.id === "edge-tts" && (
+                    <div className="rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/20 px-3 py-2 text-[11px] leading-relaxed text-[var(--amber-600)]">
+                      Edge TTS 为<b>免费</b>引擎（微软 Edge 朗读服务），无需 API Key。
+                      但它是非官方接口，可能不稳定或受地区限制（部分地区 403），失效不属于软件 bug。
+                    </div>
+                  )}
+                  <Field label={`${cur.name} 音色`}>
+                    <select
+                      value={settings?.plugin_voices?.[cur.id] ?? cur.voices[0]?.id ?? ""}
+                      onChange={(e) =>
+                        patch("plugin_voices", {
+                          ...(settings?.plugin_voices ?? {}),
+                          [cur.id]: e.target.value,
+                        })
+                      }
+                      className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
+                    >
+                      {cur.voices.map((v) => (
+                        <option key={v.id} value={v.id}>{v.label}</option>
+                      ))}
+                    </select>
+                  </Field>
+                </>
+              );
+            })()}
           </Section>
 
           {/* 虚拟麦克风 */}

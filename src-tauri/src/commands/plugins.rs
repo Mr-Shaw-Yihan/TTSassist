@@ -1,4 +1,4 @@
-// 插件管理命令（第 3 步 UI 会用到，本步先提供后端能力）。
+// 插件管理命令。
 
 use tauri::State;
 use crate::plugins::{PluginInfo, PluginManager};
@@ -7,4 +7,14 @@ use crate::plugins::{PluginInfo, PluginManager};
 #[tauri::command]
 pub fn list_plugins(plugins: State<'_, PluginManager>) -> Vec<PluginInfo> {
     plugins.list()
+}
+
+/// 卸载插件：注册表移除 + 删目录。已加载的 dll 常驻到进程退出，
+/// 返回文案告知用户是否需要重启。
+#[tauri::command]
+pub fn uninstall_plugin(
+    id: String,
+    plugins: State<'_, PluginManager>,
+) -> Result<String, String> {
+    plugins.uninstall(&id).map_err(|e| e.to_string())
 }

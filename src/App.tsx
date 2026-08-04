@@ -11,6 +11,7 @@ import { MicToggle } from "./components/Chat/MicToggle";
 import { FavoriteList } from "./components/Favorites/FavoriteList";
 import { SettingsDrawer } from "./components/Settings/SettingsDrawer";
 import { QuickInput } from "./components/QuickInput/QuickInput";
+import { PluginPage } from "./components/Plugins/PluginPage";
 import { useSettingsStore } from "./stores/settingsStore";
 import {
   generateTTS,
@@ -18,10 +19,11 @@ import {
   listFavorites,
   getSettings,
   getAudioUrl,
+  playToMic,
 } from "./services/invoke";
 import type { Message, Favorite } from "./types";
 
-type Tab = "messages" | "favorites";
+type Tab = "messages" | "favorites" | "plugins";
 
 function App() {
   // 多窗口路由：检查当前窗口 label
@@ -125,6 +127,23 @@ function App() {
     setPlayingPath(relPath);
   }, [volume, playbackRate]);
 
+  // 手动播放（收藏/消息重播）：扬声器 + 若全局开关开启则同时发虚拟麦克风。
+  // 与快捷键路径对齐（快捷键在后端 hotkey 回调里发麦克风）；
+  // 生成后的自动播放不走这里（generate_tts 后端已发过，避免双份）。
+  const micEnabled = settings?.mic_send_enabled ?? false;
+  const micDevice = settings?.mic_output_device ?? "";
+  const micVolume = settings?.mic_playback_volume ?? 1.0;
+  const playAudioWithMic = useCallback(async (relPath: string) => {
+    await playAudio(relPath);
+    if (micEnabled && micDevice.trim()) {
+      try {
+        await playToMic(relPath, micDevice, micVolume);
+      } catch (e) {
+        console.error("发送到虚拟麦克风失败", e);
+      }
+    }
+  }, [playAudio, micEnabled, micDevice, micVolume]);
+
   // 监听 favorite:changed，刷新收藏
   useTauriListen("favorite:changed", () => {
     void reloadFavorites();
@@ -199,65 +218,100 @@ function App() {
         </div>
       )}
 
-      {/* tab 切换 ── 下划线指示器 */}
-      <div className="flex gap-1 border-b border-[var(--ink-200)] bg-[var(--paper)] px-4 text-sm">
-        {(["messages", "favorites"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={[
-              "px-3 py-2.5 -mb-px border-b-2 transition-all duration-200",
-              tab === t
-                ? "border-[var(--amber-600)] text-[var(--ink-900)] font-medium"
-                : "border-transparent text-[var(--ink-300)] hover:text-[var(--ink-700)]",
-            ].join(" ")}
-          >
-            {t === "messages" ? "消息" : "收藏"}
-          </button>
-        ))}
-      </div>
+      <div className="flex min-h-0 flex-1">
+        {/* 左侧边栏（永久）：消息 / 收藏 / 插件 / 设置 */}
+        <nav className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-[var(--ink-200)] bg-[var(--paper)] py-3">
+          <SideButton icon="💬" label="消息" active={tab === "messages"} onClick={() => setTab("messages")} />
+          <SideButton icon="⌑" label="收藏" active={tab === "favorites"} onClick={() => setTab("favorites")} />
+          <SideButton icon="⧉" label="插件" active={tab === "plugins"} onClick={() => setTab("plugins")} />
+          <div className="flex-1" />
+          <SideButton icon="⋯" label="设置" active={false} onClick={() => setShowDrawer(true)} />
+        </nav>
 
-      {/* 消息列表 / 收藏列表 */}
-      {tab === "messages" ? (
-        <main ref={listRef} className="scrollbar-thin flex-1 space-y-3 overflow-y-auto px-4 py-5">
-          {messages.length === 0 ? (
-            <div className="mt-16 flex flex-col items-center gap-3 text-[var(--ink-300)] animate-fade">
-              <span className="font-display text-3xl text-[var(--ink-200)]">·</span>
-              <span className="text-sm">输入要朗读的文字，回车发送</span>
-            </div>
-          ) : (
-            messages.map((m) => (
-              <MessageBubble
-                key={m.id}
-                message={m}
-                playingPath={playingPath}
-                onDeleted={(id) => setMessages((prev) => prev.filter((x) => x.id !== id))}
-                onFavorited={() => { /* 已通过 favorite:changed 事件刷新 */ }}
-                onPlay={() => playAudio(m.audio_path)}
-              />
-            ))
+        {/* 右侧内容区（随侧边栏切换） */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {/* 消息列表 */}
+          {tab === "messages" && (
+            <main ref={listRef} className="scrollbar-thin flex-1 space-y-3 overflow-y-auto px-4 py-5">
+              {messages.length === 0 ? (
+                <div className="mt-16 flex flex-col items-center gap-3 text-[var(--ink-300)] animate-fade">
+                  <span className="font-display text-3xl text-[var(--ink-200)]">·</span>
+                  <span className="text-sm">输入要朗读的文字，回车发送</span>
+                </div>
+              ) : (
+                messages.map((m) => (
+                  <MessageBubble
+                    key={m.id}
+                    message={m}
+                    playingPath={playingPath}
+                    onDeleted={(id) => setMessages((prev) => prev.filter((x) => x.id !== id))}
+                    onFavorited={() => { /* 已通过 favorite:changed 事件刷新 */ }}
+                    onPlay={() => playAudioWithMic(m.audio_path)}
+                  />
+                ))
+              )}
+            </main>
           )}
-        </main>
-      ) : (
-        <main className="flex-1 overflow-hidden bg-[var(--paper)]">
-          <FavoriteList
-            favorites={favorites}
-            playingPath={playingPath}
-            onPlay={(p) => playAudio(p)}
-            onChanged={reloadFavorites}
-          />
-        </main>
-      )}
 
-      {/* 输入框（仅消息 tab 显示） */}
-      {tab === "messages" && (
-        <footer className="border-t border-[var(--ink-200)] bg-[var(--paper-card)] p-3">
-          <InputBox onSend={handleSend} />
-        </footer>
-      )}
+          {/* 收藏列表 */}
+          {tab === "favorites" && (
+            <main className="flex-1 overflow-hidden bg-[var(--paper)]">
+              <FavoriteList
+                favorites={favorites}
+                playingPath={playingPath}
+                onPlay={(p) => playAudioWithMic(p)}
+                onChanged={reloadFavorites}
+              />
+            </main>
+          )}
+
+          {/* 插件管理 */}
+          {tab === "plugins" && (
+            <main className="min-h-0 flex-1 overflow-hidden bg-[var(--paper)]">
+              <PluginPage />
+            </main>
+          )}
+
+          {/* 输入框（仅消息视图显示） */}
+          {tab === "messages" && (
+            <footer className="border-t border-[var(--ink-200)] bg-[var(--paper-card)] p-3">
+              <InputBox onSend={handleSend} />
+            </footer>
+          )}
+        </div>
+      </div>
 
       {showDrawer && <SettingsDrawer onClose={() => setShowDrawer(false)} />}
     </div>
+  );
+}
+
+/** 侧边栏按钮：图标 + 小字标签 */
+function SideButton({
+  icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: string;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      className={[
+        "flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-xl transition-colors",
+        active
+          ? "bg-[var(--amber-200)]/40 text-[var(--amber-600)]"
+          : "text-[var(--ink-300)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
+      ].join(" ")}
+    >
+      <span className="text-base leading-none">{icon}</span>
+      <span className="text-[9px] leading-none tracking-wide">{label}</span>
+    </button>
   );
 }
 

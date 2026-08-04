@@ -20,24 +20,47 @@ pub use manifest::PluginManifest;
 use std::path::Path;
 use thiserror::Error;
 
-use crate::storage::types::Settings;
-
 /// 兼容迁移：内置 edge 引擎自插件系统起抽出为 "edge-tts" 插件。
-/// 老设置 tts_engine == "edge" 自动改为插件 id，并把已选音色带到
+/// 老设置 tts_engine == "edge" 自动改为插件 id，并把已选 edge_voice 带到
 /// plugin_voices["edge-tts"]，用户无感。幂等，每次启动执行。
-pub fn migrate_legacy_engine(data_dir: &Path, mut settings: Settings) -> Settings {
-    if settings.tts_engine == "edge" {
-        let voice = std::mem::take(&mut settings.edge_voice);
-        settings
-            .plugin_voices
-            .entry("edge-tts".to_string())
-            .or_insert(voice);
-        settings.tts_engine = "edge-tts".to_string();
-        if let Err(e) = crate::storage::settings::save_settings(data_dir, &settings) {
-            eprintln!("edge→插件迁移设置保存失败: {e}");
-        }
+///
+/// 直接改 settings.json 文件（不经过 Settings 结构体——新结构体已无 edge_voice 字段）。
+pub fn migrate_legacy_engine(data_dir: &Path) {
+    let path = data_dir.join("settings.json");
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let mut value: serde_json::Value = match serde_json::from_str(raw.trim_start_matches('\u{FEFF}')) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let obj = match value.as_object_mut() {
+        Some(o) => o,
+        None => return,
+    };
+    if obj.get("tts_engine").and_then(|x| x.as_str()) != Some("edge") {
+        return;
     }
-    settings
+    // 带上旧音色（缺失用默认晓晓），清掉旧字段
+    let voice = obj
+        .get("edge_voice")
+        .and_then(|x| x.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("zh-CN-XiaoxiaoNeural")
+        .to_string();
+    obj.insert("tts_engine".into(), serde_json::Value::String("edge-tts".into()));
+    obj.remove("edge_voice");
+    let pv = obj
+        .entry("plugin_voices")
+        .or_insert_with(|| serde_json::json!({}));
+    if let Some(map) = pv.as_object_mut() {
+        map.entry("edge-tts".to_string())
+            .or_insert(serde_json::Value::String(voice));
+    }
+    if let Err(e) = crate::storage::atomic::write_json_pretty(&path, &value) {
+        eprintln!("edge→插件迁移设置保存失败: {e}");
+    }
 }
 
 /// 插件子系统的错误类型
@@ -80,39 +103,61 @@ pub enum PluginError {
 mod tests {
     use super::*;
 
+    fn read_json(dir: &Path) -> serde_json::Value {
+        let raw = std::fs::read_to_string(dir.join("settings.json")).unwrap();
+        serde_json::from_str(&raw).unwrap()
+    }
+
     #[test]
     fn 迁移_edge引擎改插件id并带音色() {
         let dir = tempfile::tempdir().unwrap();
-        let mut s = Settings::default();
-        s.tts_engine = "edge".into();
-        s.edge_voice = "zh-CN-YunyangNeural".into();
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"tts_engine":"edge","edge_voice":"zh-CN-YunyangNeural"}"#,
+        )
+        .unwrap();
 
-        let migrated = migrate_legacy_engine(dir.path(), s);
-        assert_eq!(migrated.tts_engine, "edge-tts");
-        assert_eq!(migrated.plugin_voices.get("edge-tts").map(String::as_str), Some("zh-CN-YunyangNeural"));
-        // 已落盘（重启后不再触发迁移也不会丢）
-        let saved = crate::storage::settings::load_settings(dir.path());
-        assert_eq!(saved.tts_engine, "edge-tts");
+        migrate_legacy_engine(dir.path());
+
+        let v = read_json(dir.path());
+        assert_eq!(v["tts_engine"], "edge-tts");
+        assert_eq!(v["plugin_voices"]["edge-tts"], "zh-CN-YunyangNeural");
+        assert!(v.get("edge_voice").is_none(), "旧字段应被清除");
     }
 
     #[test]
     fn 迁移_已有插件音色则不覆盖() {
         let dir = tempfile::tempdir().unwrap();
-        let mut s = Settings::default();
-        s.tts_engine = "edge".into();
-        s.edge_voice = "zh-CN-YunyangNeural".into();
-        s.plugin_voices.insert("edge-tts".into(), "zh-CN-XiaoxiaoNeural".into());
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"tts_engine":"edge","edge_voice":"zh-CN-YunyangNeural","plugin_voices":{"edge-tts":"zh-CN-XiaoxiaoNeural"}}"#,
+        )
+        .unwrap();
 
-        let migrated = migrate_legacy_engine(dir.path(), s);
-        assert_eq!(migrated.plugin_voices.get("edge-tts").map(String::as_str), Some("zh-CN-XiaoxiaoNeural"));
+        migrate_legacy_engine(dir.path());
+
+        let v = read_json(dir.path());
+        assert_eq!(v["plugin_voices"]["edge-tts"], "zh-CN-XiaoxiaoNeural");
     }
 
     #[test]
     fn 迁移_非edge引擎不动() {
         let dir = tempfile::tempdir().unwrap();
-        let mut s = Settings::default();
-        s.tts_engine = "mimo".into();
-        let migrated = migrate_legacy_engine(dir.path(), s);
-        assert_eq!(migrated.tts_engine, "mimo");
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"tts_engine":"mimo","edge_voice":"x"}"#,
+        )
+        .unwrap();
+
+        migrate_legacy_engine(dir.path());
+
+        let v = read_json(dir.path());
+        assert_eq!(v["tts_engine"], "mimo", "非 edge 引擎不应改动");
+    }
+
+    #[test]
+    fn 迁移_无设置文件不报错() {
+        let dir = tempfile::tempdir().unwrap();
+        migrate_legacy_engine(dir.path()); // 不 panic 即通过
     }
 }

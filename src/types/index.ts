@@ -25,12 +25,6 @@ export interface MossVoice {
   voice_id: string;
 }
 
-/** Edge-TTS 音色条目 */
-export interface EdgeVoiceItem {
-  id: string;
-  label: string;
-}
-
 export interface Settings {
   tts_engine: string;
   tts_model: string;
@@ -38,8 +32,6 @@ export interface Settings {
   hotkey_show_window: string;
   engine_category: string;
   mimo_api_key: string;
-  /** Edge TTS 音色（免费引擎），如 "zh-CN-XiaoxiaoNeural" */
-  edge_voice: string;
   playback_rate: number;
   clone_voice_name: string;
   clone_voice_path: string;

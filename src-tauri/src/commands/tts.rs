@@ -180,30 +180,3 @@ pub async fn generate_tts(
 
     Ok(result)
 }
-
-/// Edge TTS 中文音色清单（id + 显示名），供前端下拉选择。
-///
-/// ⚠️ 过渡保留：edge 已抽成插件（音色表真实来源是插件的 va_list_voices），
-/// 第 3 步插件管理页改用 list_plugins 后删除本命令。
-const EDGE_ZH_VOICES: &[(&str, &str)] = &[
-    ("zh-CN-XiaoxiaoNeural", "晓晓（女·温暖）"),
-    ("zh-CN-YunxiNeural", "云希（男·青年）"),
-    ("zh-CN-YunyangNeural", "云扬（男·新闻）"),
-    ("zh-CN-XiaoyiNeural", "晓伊（女·活泼）"),
-    ("zh-CN-YunjianNeural", "云健（男·体育）"),
-    ("zh-CN-XiaochenNeural", "晓辰（女·知性）"),
-];
-
-#[tauri::command]
-pub fn list_edge_voices() -> Vec<EdgeVoiceItem> {
-    EDGE_ZH_VOICES
-        .iter()
-        .map(|(id, label)| EdgeVoiceItem { id: (*id).to_string(), label: (*label).to_string() })
-        .collect()
-}
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct EdgeVoiceItem {
-    pub id: String,
-    pub label: String,
-}

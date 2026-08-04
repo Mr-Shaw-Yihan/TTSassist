@@ -9,6 +9,7 @@ use std::sync::{Arc, RwLock};
 use super::loader::{LoadedPlugin, PluginEngine};
 use super::manifest::PluginManifest;
 use super::registry;
+use super::PluginError;
 
 /// 当前宿主版本号（编译期注入），用于 min_app_version 校验
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -52,14 +53,30 @@ impl PluginManager {
         };
 
         let reg = registry::load_registry(&manager.plugins_root);
+        // 清理孤儿目录：不在注册表里的插件目录（来自"运行中卸载"的残留）
+        sweep_orphan_dirs(&manager.plugins_root, &reg);
         for entry in &reg.plugins {
             manager.load_one(&entry.id);
         }
         manager
     }
 
-    /// 加载单个插件（id 即目录名）；结果记入 loaded 或 failed
-    fn load_one(&self, id: &str) {
+    /// 插件根目录（<data_dir>/plugins）
+    pub fn plugins_root(&self) -> &Path {
+        &self.plugins_root
+    }
+
+    /// 插件是否已加载可用
+    pub fn is_loaded(&self, id: &str) -> bool {
+        self.loaded
+            .read()
+            .map(|map| map.contains_key(id))
+            .unwrap_or(false)
+    }
+
+    /// 加载单个插件（id 即目录名）；结果记入 loaded 或 failed。
+    /// pub：安装新插件后立即加载用。
+    pub fn load_one(&self, id: &str) {
         let dir = self.plugins_root.join(id);
         match LoadedPlugin::load(&dir, APP_VERSION) {
             Ok(plugin) => {
@@ -130,6 +147,67 @@ impl PluginManager {
             });
         }
         result
+    }
+
+    /// 卸载插件：注册表移除 + 删除目录。
+    /// dll 运行期不卸载（常驻约束）：已加载的插件本次会话内仍可用，重启后彻底消失。
+    /// 若目录因 dll 被占用删不掉（Windows 特性），留给下次启动的孤儿清理。
+    /// 返回提示文案（是否需要重启）。
+    pub fn uninstall(&self, id: &str) -> Result<String, PluginError> {
+        // id 合法性兜底（防路径穿越）
+        if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            return Err(PluginError::Unsupported(format!("非法插件 id：{id}")));
+        }
+        let was_loaded = self.is_loaded(id);
+
+        // 1. 注册表移除
+        let mut reg = registry::load_registry(&self.plugins_root);
+        reg.plugins.retain(|e| e.id != id);
+        registry::save_registry(&self.plugins_root, &reg)?;
+
+        // 2. 删除目录（dll 被占用时容忍失败，启动时孤儿清理兜底）
+        let dir = self.plugins_root.join(id);
+        if dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(&dir) {
+                eprintln!("插件目录删除失败（重启后自动清理）: {e}");
+            }
+        }
+
+        // 3. 失败记录清理（loaded 不清：dll 常驻到进程退出）
+        if let Ok(mut map) = self.failed.write() {
+            map.remove(id);
+        }
+
+        Ok(if was_loaded {
+            "已卸载。该插件本次会话内仍可使用，重启应用后彻底移除。".to_string()
+        } else {
+            "已卸载。".to_string()
+        })
+    }
+}
+
+/// 清理孤儿插件目录：plugins/ 下不在注册表中的目录（运行中卸载的残留）。
+/// pending 目录由安装流程管理，不清理。删除失败只记日志。
+fn sweep_orphan_dirs(plugins_root: &Path, reg: &registry::Registry) {
+    let entries = match std::fs::read_dir(plugins_root) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name == "pending" {
+            continue;
+        }
+        if !reg.plugins.iter().any(|e| e.id == name) {
+            match std::fs::remove_dir_all(&path) {
+                Ok(()) => eprintln!("已清理孤儿插件目录: {name}"),
+                Err(e) => eprintln!("孤儿插件目录清理失败 [{name}]: {e}"),
+            }
+        }
     }
 }
 

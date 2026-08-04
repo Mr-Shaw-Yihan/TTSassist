@@ -46,10 +46,11 @@ pub fn run() {
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             storage::ensure_data_dirs(&data_dir)?;
-            let settings: Settings = storage::settings::load_settings(&data_dir);
 
-            // 兼容迁移：老设置的内置 edge 引擎 → edge-tts 插件（幂等）
-            let settings = plugins::migrate_legacy_engine(&data_dir, settings);
+            // 兼容迁移：老设置的内置 edge 引擎 → edge-tts 插件（幂等，直接改文件）
+            plugins::migrate_legacy_engine(&data_dir);
+
+            let settings: Settings = storage::settings::load_settings(&data_dir);
 
             // 插件系统：加载已安装插件（单个插件失败只记日志，不影响主流程）
             app.manage(plugins::PluginManager::load_all(&data_dir));
@@ -85,8 +86,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             crate::commands::tts::generate_tts,
-            crate::commands::tts::list_edge_voices,
             crate::commands::plugins::list_plugins,
+            crate::commands::plugins::uninstall_plugin,
             crate::commands::message::list_messages,
             crate::commands::message::delete_message,
             crate::commands::favorite::list_favorites,

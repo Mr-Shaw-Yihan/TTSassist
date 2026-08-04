@@ -59,8 +59,6 @@ pub struct Settings {
     pub engine_category: String,
     /// MiMo TTS API Key（明文存，settings.json 中的 mimo_api_key）
     pub mimo_api_key: String,
-    /// Edge TTS 音色（免费引擎），如 "zh-CN-XiaoxiaoNeural"
-    pub edge_voice: String,
     /// 播放速度 0.5~2.0（前端 HTMLAudioElement.playbackRate，精确控制）
     pub playback_rate: f32,
     /// 克隆音色起的名字（空字符串 = 无克隆样本）
@@ -95,7 +93,6 @@ impl Default for Settings {
             hotkey_show_window: "Alt+V".to_string(),
             engine_category: "remote".to_string(),
             mimo_api_key: String::new(),
-            edge_voice: "zh-CN-XiaoxiaoNeural".to_string(),
             playback_rate: 1.0,
             clone_voice_name: String::new(),
             clone_voice_path: String::new(),

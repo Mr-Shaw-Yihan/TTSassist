@@ -1,7 +1,9 @@
 // 工具栏「发送到麦克风」全局开关按钮。
 // 开启后：每次 TTS 生成的语音除了扬声器播放，还会发到虚拟麦克风设备（队友听）。
+// 开启前会检测 VB-Cable 驱动，未安装则提示并拒绝开启。
 
 import { useSettingsStore } from "../../stores/settingsStore";
+import { checkVbCable } from "../../services/invoke";
 
 interface Props {
   /** 点击"未配置"状态时打开设置抽屉 */
@@ -15,11 +17,28 @@ export function MicToggle({ onOpenSettings }: Props) {
   const enabled = settings?.mic_send_enabled ?? false;
   const hasDevice = !!(settings?.mic_output_device && settings.mic_output_device.trim());
 
-  // 没配置设备时，点击改为引导去设置
-  function onClick() {
+  // 没配置设备时，点击改为引导去设置；开启前先检测 VB-Cable 驱动
+  async function onClick() {
     if (!hasDevice) {
       onOpenSettings();
       return;
+    }
+    if (!enabled) {
+      // 开启前检测：驱动缺失时功能无效，直接拦截并指引安装
+      let installed = false;
+      try {
+        installed = await checkVbCable();
+      } catch {
+        installed = false;
+      }
+      if (!installed) {
+        window.alert(
+          "未检测到 VB-Cable 虚拟音频驱动，无法开启虚拟麦克风。\n\n" +
+            "请先安装 VB-Cable 驱动（安装包 VBCABLE_Driver_Pack45.zip 在项目目录，" +
+            "或到官网 vb-audio.com 下载），安装后重启电脑再试。"
+        );
+        return;
+      }
     }
     patch("mic_send_enabled", !enabled);
   }
