@@ -250,6 +250,33 @@ mod tests {
         assert!(pm.list().is_empty());
     }
 
+    /// 实网验证：加载本机已安装的 edge-tts 插件并真实合成。
+    /// 需要联网（连微软服务）；默认 ignored，手动运行：
+    /// cargo test -- --ignored edge插件实网合成
+    #[test]
+    #[cfg(target_os = "windows")]
+    #[ignore = "需联网且本机已安装 edge-tts 插件，手动运行"]
+    fn edge插件实网合成() {
+        let appdata = std::env::var("APPDATA").expect("APPDATA 环境变量");
+        let plugin_dir = PathBuf::from(appdata).join("com.voiceassist.app/plugins/edge-tts");
+        assert!(plugin_dir.exists(), "edge-tts 插件未安装: {}", plugin_dir.display());
+
+        let plugin = crate::plugins::loader::LoadedPlugin::load(&plugin_dir, APP_VERSION)
+            .expect("edge-tts 插件加载失败");
+        assert_eq!(plugin.dll_id, "edge-tts");
+        assert_eq!(plugin.audio_format, "mp3");
+
+        // 真实合成一句（用云希音色，验证 voice 参数透传）
+        let bytes = plugin
+            .synthesize("你好，这是电子声带的插件测试", Some("zh-CN-YunxiNeural"))
+            .expect("edge-tts 合成失败（可能是网络或地区限制）");
+        assert!(bytes.len() > 1000, "音频过小: {} 字节", bytes.len());
+        // 检查 MP3 特征（ID3 标签或帧同步头）
+        let looks_mp3 = bytes.starts_with(b"ID3")
+            || (bytes.len() >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0);
+        assert!(looks_mp3, "返回内容不是 MP3");
+    }
+
     #[tokio::test]
     #[cfg(target_os = "windows")]
     async fn 插件引擎落盘音频文件() {
