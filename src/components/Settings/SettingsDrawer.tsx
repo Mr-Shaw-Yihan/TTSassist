@@ -177,7 +177,7 @@ export function SettingsDrawer({ onClose }: Props) {
               >
                 <option value="mimo">MiMo（小米）</option>
                 <option value="moss">Moss-TTS（Mossland）</option>
-                <option value="edge">Edge TTS（免费·微软）</option>
+                <option value="edge-tts">Edge TTS（免费·微软）</option>
               </select>
             </Field>
 
@@ -380,8 +380,8 @@ export function SettingsDrawer({ onClose }: Props) {
               </>
             )}
 
-            {/* === Edge TTS 引擎配置（免费） === */}
-            {settings?.tts_engine === "edge" && (
+            {/* === Edge TTS 引擎配置（免费，插件） === */}
+            {settings?.tts_engine === "edge-tts" && (
               <>
                 <div className="rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/20 px-3 py-2 text-[11px] leading-relaxed text-[var(--amber-600)]">
                   Edge TTS 为<b>免费</b>引擎（微软 Edge 朗读服务），无需 API Key。
@@ -389,8 +389,13 @@ export function SettingsDrawer({ onClose }: Props) {
                 </div>
                 <Field label="Edge 音色">
                   <select
-                    value={settings?.edge_voice ?? "zh-CN-XiaoxiaoNeural"}
-                    onChange={(e) => patch("edge_voice", e.target.value)}
+                    value={settings?.plugin_voices?.["edge-tts"] ?? "zh-CN-XiaoxiaoNeural"}
+                    onChange={(e) =>
+                      patch("plugin_voices", {
+                        ...(settings?.plugin_voices ?? {}),
+                        "edge-tts": e.target.value,
+                      })
+                    }
                     className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
                   >
                     {edgeVoices.map((v) => (

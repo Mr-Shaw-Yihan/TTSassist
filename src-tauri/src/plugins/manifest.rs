@@ -38,7 +38,9 @@ impl PluginManifest {
         let path = plugin_dir.join("manifest.json");
         let raw = std::fs::read_to_string(&path)
             .map_err(|e| PluginError::NotFound(format!("清单文件不存在: {} ({e})", path.display())))?;
-        serde_json::from_str(&raw)
+        // PowerShell 等工具写出的 UTF-8 文件可能带 BOM，serde_json 不认，先剥掉
+        let raw = raw.trim_start_matches('\u{FEFF}');
+        serde_json::from_str(raw)
             .map_err(|e| PluginError::Manifest(format!("manifest.json 解析失败: {e}")))
     }
 
@@ -164,5 +166,16 @@ mod tests {
         let mut m = sample();
         m.checksum = "  ".into();
         assert!(m.validate("1.3.1").is_err());
+    }
+
+    #[test]
+    fn 带bom的清单也能解析() {
+        // PowerShell 5.1 的 UTF8 输出自带 BOM，必须容错
+        let dir = tempfile::tempdir().unwrap();
+        let m = sample();
+        let json = format!("\u{FEFF}{}", serde_json::to_string(&m).unwrap());
+        std::fs::write(dir.path().join("manifest.json"), json).unwrap();
+        let loaded = PluginManifest::load(dir.path()).expect("带 BOM 应能解析");
+        assert_eq!(loaded.id, m.id);
     }
 }

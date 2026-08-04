@@ -1,5 +1,5 @@
 // generate_tts 命令：前端输入文本 → TTS 生成 → 写 messages.json → 广播。
-// 支持多引擎分发：settings.tts_engine = "mimo" | "moss" | "edge" | 插件 id
+// 支持多引擎分发：settings.tts_engine = "mimo" | "moss" | 插件 id（如 "edge-tts"）
 
 use std::path::Path;
 use tauri::{AppHandle, State};
@@ -97,7 +97,7 @@ pub async fn generate_tts(
     let data_dir = state.data_dir.clone();
 
     // 1. 读设置
-    let (tts_engine, mimo_key, moss_key, moss_voice, tts_model, clone_path, edge_voice,
+    let (tts_engine, mimo_key, moss_key, moss_voice, tts_model, clone_path,
          plugin_voices, mic_send_enabled, mic_device, mic_volume) = {
         let s = state
             .settings
@@ -110,7 +110,6 @@ pub async fn generate_tts(
             s.moss_voice_id.clone(),
             s.tts_model.clone(),
             s.clone_voice_path.clone(),
-            s.edge_voice.clone(),
             s.plugin_voices.clone(),
             s.mic_send_enabled,
             s.mic_output_device.clone(),
@@ -129,17 +128,6 @@ pub async fn generate_tts(
             }
             let engine = MossEngine::new(moss_key, moss_voice, data_dir.clone());
             engine.generate(&text).await.map_err(|e| format!("{e}"))?
-        }
-        "edge" => {
-            // Edge TTS：免费、无需 key。音色用 edge_voice（空则用默认晓晓）
-            let engine = crate::tts::edge::EdgeTtsEngine::new(data_dir.clone());
-            let voice = if edge_voice.is_empty() { None } else { Some(edge_voice.as_str()) };
-            let params = TTSParams {
-                text: &text,
-                voice,
-                instruction: None,
-            };
-            engine.generate(params).await.map_err(|e| format!("{e}"))?
         }
         "" | "mimo" => {
             // 默认走 mimo（含空字符串兜底）
@@ -193,10 +181,22 @@ pub async fn generate_tts(
     Ok(result)
 }
 
-/// Edge TTS 内置中文音色清单（id + 显示名），供前端下拉选择。
+/// Edge TTS 中文音色清单（id + 显示名），供前端下拉选择。
+///
+/// ⚠️ 过渡保留：edge 已抽成插件（音色表真实来源是插件的 va_list_voices），
+/// 第 3 步插件管理页改用 list_plugins 后删除本命令。
+const EDGE_ZH_VOICES: &[(&str, &str)] = &[
+    ("zh-CN-XiaoxiaoNeural", "晓晓（女·温暖）"),
+    ("zh-CN-YunxiNeural", "云希（男·青年）"),
+    ("zh-CN-YunyangNeural", "云扬（男·新闻）"),
+    ("zh-CN-XiaoyiNeural", "晓伊（女·活泼）"),
+    ("zh-CN-YunjianNeural", "云健（男·体育）"),
+    ("zh-CN-XiaochenNeural", "晓辰（女·知性）"),
+];
+
 #[tauri::command]
 pub fn list_edge_voices() -> Vec<EdgeVoiceItem> {
-    crate::tts::edge::EDGE_ZH_VOICES
+    EDGE_ZH_VOICES
         .iter()
         .map(|(id, label)| EdgeVoiceItem { id: (*id).to_string(), label: (*label).to_string() })
         .collect()

@@ -48,6 +48,9 @@ pub fn run() {
             storage::ensure_data_dirs(&data_dir)?;
             let settings: Settings = storage::settings::load_settings(&data_dir);
 
+            // 兼容迁移：老设置的内置 edge 引擎 → edge-tts 插件（幂等）
+            let settings = plugins::migrate_legacy_engine(&data_dir, settings);
+
             // 插件系统：加载已安装插件（单个插件失败只记日志，不影响主流程）
             app.manage(plugins::PluginManager::load_all(&data_dir));
 

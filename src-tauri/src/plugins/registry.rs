@@ -34,7 +34,9 @@ pub fn load_registry(plugins_root: &Path) -> Registry {
         Ok(s) => s,
         Err(_) => return Registry::default(),
     };
-    serde_json::from_str(&raw).unwrap_or_else(|e| {
+    // PowerShell 等工具写出的 UTF-8 文件可能带 BOM，serde_json 不认，先剥掉
+    let raw = raw.trim_start_matches('\u{FEFF}');
+    serde_json::from_str(raw).unwrap_or_else(|e| {
         eprintln!("插件注册表损坏，按空处理: {e}");
         Registry::default()
     })
@@ -80,5 +82,21 @@ mod tests {
         std::fs::write(dir.path().join(FILE), "{{坏的json").unwrap();
         let r = load_registry(dir.path());
         assert!(r.plugins.is_empty());
+    }
+
+    #[test]
+    fn 带bom也能解析() {
+        let dir = tempdir().unwrap();
+        let r = Registry {
+            plugins: vec![RegistryEntry {
+                id: "edge-tts".into(),
+                version: "1.0.0".into(),
+                installed_at: "2026-08-04T10:00:00+08:00".into(),
+            }],
+        };
+        let json = format!("\u{FEFF}{}", serde_json::to_string(&r).unwrap());
+        std::fs::write(dir.path().join(FILE), json).unwrap();
+        let back = load_registry(dir.path());
+        assert_eq!(back, r);
     }
 }

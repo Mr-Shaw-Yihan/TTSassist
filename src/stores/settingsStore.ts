@@ -9,7 +9,10 @@ interface SettingsState {
   settings: Settings | null;
   setSettings: (s: Settings) => void;
   /** 增量更新一个键；返回后端写入后的完整 settings */
-  patch: (key: keyof Settings, value: string | number | boolean | MossVoice[]) => Promise<void>;
+  patch: (
+    key: keyof Settings,
+    value: string | number | boolean | MossVoice[] | Record<string, string>,
+  ) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({

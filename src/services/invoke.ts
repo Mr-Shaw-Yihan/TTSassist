@@ -101,7 +101,7 @@ export async function getSettings(): Promise<Settings> {
 
 export async function updateSetting(
   key: string,
-  value: string | number | boolean | MossVoice[],
+  value: string | number | boolean | MossVoice[] | Record<string, string>,
 ): Promise<Settings> {
   return invoke<Settings>("update_setting", { key, value });
 }

@@ -33,7 +33,6 @@ thiserror = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 base64 = "0.22"
 async-trait = "0.1"
-kothok-edge-tts = "0.2"
 libloading = "0.8"
 sha2 = "0.10"
 plugin-api = { path = "../plugins/plugin-api" }
