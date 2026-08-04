@@ -2883,6 +2883,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "plugin-api"
+version = "1.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "png"
 version = "0.17.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4939,10 +4947,13 @@ dependencies = [
  "chrono",
  "cpal",
  "kothok-edge-tts",
+ "libloading 0.8.9",
+ "plugin-api",
  "reqwest 0.12.28",
  "rodio",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

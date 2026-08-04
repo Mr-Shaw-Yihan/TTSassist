@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Rust 构建产物（src-tauri 由 Tauri 管理，这里管 plugins 子 crate）
+plugins/target-test/
+plugins/plugin-api/target/
+plugins/plugin-api/Cargo.lock
+plugins/edge-tts/target/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1,0 +1,12 @@
+[package]
+name = "test-plugin"
+version = "0.1.0"
+description = "测试桩插件：仅供宿主程序插件加载框架的自动化测试，不发布"
+edition = "2021"
+
+[lib]
+# 插件必须是动态库（Windows 上产出 .dll）
+crate-type = ["cdylib"]
+
+[dependencies]
+plugin-api = { path = "../plugin-api" }

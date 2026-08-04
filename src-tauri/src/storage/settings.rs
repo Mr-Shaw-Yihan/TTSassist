@@ -49,6 +49,9 @@ pub fn load_settings(data_dir: &Path) -> Settings {
             mic_output_device: v.get("mic_output_device").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.mic_output_device),
             mic_send_enabled: v.get("mic_send_enabled").and_then(|x| x.as_bool()).unwrap_or(default.mic_send_enabled),
             mic_playback_volume: v.get("mic_playback_volume").and_then(|x| x.as_f64()).map(|x| x as f32).unwrap_or(default.mic_playback_volume),
+            plugin_voices: v.get("plugin_voices")
+                .and_then(|x| serde_json::from_value::<std::collections::HashMap<String, String>>(x.clone()).ok())
+                .unwrap_or(default.plugin_voices),
         },
         Err(_) => default,
     }
@@ -80,6 +83,7 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "mic_output_device" => if let Some(v) = value.as_str() { s.mic_output_device = v.to_string() },
         "mic_send_enabled" => if let Some(v) = value.as_bool() { s.mic_send_enabled = v },
         "mic_playback_volume" => if let Some(v) = value.as_f64() { s.mic_playback_volume = v as f32 },
+        "plugin_voices" => if let Ok(map) = serde_json::from_value::<std::collections::HashMap<String, String>>(value.clone()) { s.plugin_voices = map },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;

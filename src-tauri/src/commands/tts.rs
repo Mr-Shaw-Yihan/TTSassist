@@ -1,9 +1,10 @@
 // generate_tts 命令：前端输入文本 → TTS 生成 → 写 messages.json → 广播。
-// 支持多引擎分发：settings.tts_engine = "mimo" | "moss"
+// 支持多引擎分发：settings.tts_engine = "mimo" | "moss" | "edge" | 插件 id
 
 use std::path::Path;
 use tauri::{AppHandle, State};
 use crate::commands::AppState;
+use crate::plugins::PluginManager;
 use crate::storage::types::{Message, gen_id, now_iso};
 use crate::tts::mimo::MimoEngine;
 use crate::tts::moss::MossEngine;
@@ -91,12 +92,13 @@ pub async fn generate_tts(
     app: AppHandle,
     state: State<'_, AppState>,
     mic: State<'_, crate::commands::mic::MicPlayback>,
+    plugins: State<'_, PluginManager>,
 ) -> Result<Message, String> {
     let data_dir = state.data_dir.clone();
 
     // 1. 读设置
     let (tts_engine, mimo_key, moss_key, moss_voice, tts_model, clone_path, edge_voice,
-         mic_send_enabled, mic_device, mic_volume) = {
+         plugin_voices, mic_send_enabled, mic_device, mic_volume) = {
         let s = state
             .settings
             .read()
@@ -109,6 +111,7 @@ pub async fn generate_tts(
             s.tts_model.clone(),
             s.clone_voice_path.clone(),
             s.edge_voice.clone(),
+            s.plugin_voices.clone(),
             s.mic_send_enabled,
             s.mic_output_device.clone(),
             s.mic_playback_volume,
@@ -138,7 +141,7 @@ pub async fn generate_tts(
             };
             engine.generate(params).await.map_err(|e| format!("{e}"))?
         }
-        _ => {
+        "" | "mimo" => {
             // 默认走 mimo（含空字符串兜底）
             if mimo_key.is_empty() {
                 return Err("请在设置中填写 MiMo API Key".into());
@@ -146,6 +149,24 @@ pub async fn generate_tts(
             generate_mimo(&text, &data_dir, &mimo_key, &tts_model, &clone_path)
                 .await
                 .map_err(|e| format!("{e}"))?
+        }
+        plugin_id => {
+            // 其余引擎名按插件 id 查找（如 "edge-tts"）
+            let engine = plugins
+                .build_engine(plugin_id, &data_dir)
+                .ok_or_else(|| {
+                    format!("引擎「{plugin_id}」不可用：插件未安装或加载失败，请在插件管理中检查")
+                })?;
+            let voice = plugin_voices
+                .get(plugin_id)
+                .filter(|v| !v.is_empty())
+                .map(|s| s.as_str());
+            let params = TTSParams {
+                text: &text,
+                voice,
+                instruction: None,
+            };
+            engine.generate(params).await.map_err(|e| format!("{e}"))?
         }
     };
 

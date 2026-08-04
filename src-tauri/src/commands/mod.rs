@@ -10,6 +10,7 @@ pub mod clone_voice;
 pub mod favorite;
 pub mod message;
 pub mod mic;
+pub mod plugins;
 pub mod settings;
 pub mod tts;
 

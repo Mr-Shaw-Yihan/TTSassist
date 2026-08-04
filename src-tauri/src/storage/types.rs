@@ -1,6 +1,7 @@
 // 数据结构定义 + 时间/id 工具
 // 三份数据文件（messages/favorites/settings）的 Rust 表示。
 
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 /// 一条消息记录
@@ -80,6 +81,9 @@ pub struct Settings {
     pub mic_send_enabled: bool,
     /// 虚拟麦克风音量 0.0~1.0（独立于扬声器音量，默认 1.0）
     pub mic_playback_volume: f32,
+    /// 各插件引擎当前选中的音色（插件 id → 音色 id）
+    #[serde(default)]
+    pub plugin_voices: HashMap<String, String>,
 }
 
 impl Default for Settings {
@@ -105,6 +109,7 @@ impl Default for Settings {
             mic_output_device: String::new(),
             mic_send_enabled: false,
             mic_playback_volume: 1.0,
+            plugin_voices: HashMap::new(),
         }
     }
 }

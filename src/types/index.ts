@@ -57,6 +57,29 @@ export interface Settings {
   mic_send_enabled: boolean;
   /** 虚拟麦克风音量 0.0~1.0 */
   mic_playback_volume: number;
+  /** 各插件引擎当前选中的音色（插件 id → 音色 id） */
+  plugin_voices: Record<string, string>;
+}
+
+/** 插件音色条目 */
+export interface PluginVoiceItem {
+  id: string;
+  label: string;
+}
+
+/** 已安装插件信息（list_plugins 返回） */
+export interface PluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  /** 是否加载成功可用 */
+  loaded: boolean;
+  /** 加载失败原因（loaded=false 时有值） */
+  error: string | null;
+  voices: PluginVoiceItem[];
+  /** 音频格式（如 mp3） */
+  audio_format: string;
 }
 
 /** 音频输出设备 */

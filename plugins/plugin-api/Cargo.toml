@@ -1,0 +1,9 @@
+[package]
+name = "plugin-api"
+version = "1.0.0"
+description = "VoiceAssist 插件 C ABI 接口定义（宿主程序与插件共用）"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
