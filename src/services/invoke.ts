@@ -2,7 +2,7 @@
 // 后端每个 #[tauri::command] 对应一个函数，参数名与后端 fn 参数 snake_case 一致。
 
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, PluginInfo } from "../types";
+import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry } from "../types";
 
 // ── TTS ──────────────────────────────────────────
 
@@ -20,6 +20,21 @@ export async function listPlugins(): Promise<PluginInfo[]> {
 /** 卸载插件，返回提示文案（是否需重启等） */
 export async function uninstallPlugin(id: string): Promise<string> {
   return invoke<string>("uninstall_plugin", { id });
+}
+
+/** 拖入安装：本地插件 zip 路径，返回提示文案 */
+export async function installPluginZip(path: string): Promise<string> {
+  return invoke<string>("install_plugin_zip", { path });
+}
+
+/** 拉取官方插件索引 */
+export async function fetchPluginIndex(): Promise<PluginIndexEntry[]> {
+  return invoke<PluginIndexEntry[]>("fetch_plugin_index");
+}
+
+/** 在线安装：下载 zip → SHA-256 校验 → 安装，返回提示文案 */
+export async function downloadInstallPlugin(id: string): Promise<string> {
+  return invoke<string>("download_install_plugin", { id });
 }
 
 // ── Messages ──────────────────────────────────────

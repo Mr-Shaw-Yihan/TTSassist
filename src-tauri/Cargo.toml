@@ -35,6 +35,7 @@ base64 = "0.22"
 async-trait = "0.1"
 libloading = "0.8"
 sha2 = "0.10"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 plugin-api = { path = "../plugins/plugin-api" }
 
 [dev-dependencies]

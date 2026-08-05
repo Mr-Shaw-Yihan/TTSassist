@@ -18,6 +18,10 @@ pub struct RegistryEntry {
     pub version: String,
     /// 安装时间（ISO8601）
     pub installed_at: String,
+    /// 待应用的更新 zip（相对 plugins/ 的路径，如 "pending/edge-tts.zip"）。
+    /// 插件运行中无法覆盖 dll，安装时先记挂这里，下次启动时应用。
+    #[serde(default)]
+    pub pending_zip: Option<String>,
 }
 
 /// registry.json 结构
@@ -69,6 +73,7 @@ mod tests {
                 id: "edge-tts".into(),
                 version: "1.0.0".into(),
                 installed_at: "2026-08-04T10:00:00+08:00".into(),
+                pending_zip: None,
             }],
         };
         save_registry(dir.path(), &r).unwrap();
@@ -92,6 +97,7 @@ mod tests {
                 id: "edge-tts".into(),
                 version: "1.0.0".into(),
                 installed_at: "2026-08-04T10:00:00+08:00".into(),
+                pending_zip: None,
             }],
         };
         let json = format!("\u{FEFF}{}", serde_json::to_string(&r).unwrap());

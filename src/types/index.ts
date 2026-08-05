@@ -74,6 +74,17 @@ export interface PluginInfo {
   audio_format: string;
 }
 
+/** 官方插件索引条目（fetch_plugin_index 返回） */
+export interface PluginIndexEntry {
+  id: string;
+  name: string;
+  version: string;
+  download_url: string;
+  /** zip 包的 SHA-256 */
+  checksum: string;
+  description: string;
+}
+
 /** 音频输出设备 */
 export interface AudioDevice {
   name: string;
