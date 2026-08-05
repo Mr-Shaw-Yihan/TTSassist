@@ -98,6 +98,14 @@ impl PluginManager {
             .unwrap_or(false)
     }
 
+    /// 插件是否已安装（注册表中有记录，含加载失败的）
+    pub fn is_installed(&self, id: &str) -> bool {
+        registry::load_registry(&self.plugins_root)
+            .plugins
+            .iter()
+            .any(|e| e.id == id)
+    }
+
     /// 加载单个插件（id 即目录名）；结果记入 loaded 或 failed。
     /// pub：安装新插件后立即加载用。
     pub fn load_one(&self, id: &str) {

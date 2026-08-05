@@ -97,6 +97,16 @@ export interface PluginIndexEntry {
   description: string;
 }
 
+/** 内置插件条目（随安装包携带，list_bundled_plugins 返回） */
+export interface BundledPluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  /** 本机是否已安装 */
+  installed: boolean;
+}
+
 /** 音频输出设备 */
 export interface AudioDevice {
   name: string;

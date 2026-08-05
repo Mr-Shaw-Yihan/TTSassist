@@ -1,8 +1,8 @@
-// 插件管理命令：列表 / 卸载 / 拖入安装 / 在线索引 / 下载安装。
+// 插件管理命令：列表 / 卸载 / 拖入安装 / 在线索引 / 下载安装 / 内置插件库。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tauri::State;
+use tauri::{Manager, State};
 use crate::plugins::{InstallOutcome, PluginInfo, PluginManager};
 
 /// 官方插件索引地址（托管在 GitHub Releases 资产）
@@ -136,6 +136,92 @@ pub async fn download_install_plugin(
     let _ = std::fs::remove_file(&tmp);
 
     let (outcome, manifest) = result.map_err(|e| e.to_string())?;
+    Ok(match outcome {
+        InstallOutcome::Installed => format!("插件「{}」安装成功，已加载。", manifest.name),
+        InstallOutcome::PendingRestart => {
+            format!("插件「{}」正在运行中，将在重启应用后完成更新。", manifest.name)
+        }
+    })
+}
+
+// ── 内置插件库（随安装包分发的 zip）─────────────────
+
+/// 内置插件条目（读自安装包资源里的 zip 内嵌 manifest）
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BundledPluginInfo {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    /// 本机是否已安装（含加载失败的）
+    pub installed: bool,
+}
+
+/// 安装包资源目录下的全部插件 zip（resources/plugins/*.zip）
+fn bundled_zip_paths(app: &tauri::AppHandle) -> Vec<PathBuf> {
+    let Ok(root) = app.path().resource_dir() else {
+        return Vec::new();
+    };
+    let dir = root.join("resources").join("plugins");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension()
+                .map(|x| x.eq_ignore_ascii_case("zip"))
+                .unwrap_or(false)
+        })
+        .collect()
+}
+
+/// 读 zip 内嵌的 manifest.json（不解压到磁盘）
+fn read_zip_manifest(zip_path: &Path) -> Option<crate::plugins::PluginManifest> {
+    use std::io::Read;
+    let file = std::fs::File::open(zip_path).ok()?;
+    let mut archive = zip::ZipArchive::new(file).ok()?;
+    let mut entry = archive.by_name("manifest.json").ok()?;
+    let mut raw = String::new();
+    entry.read_to_string(&mut raw).ok()?;
+    serde_json::from_str(raw.trim_start_matches('\u{FEFF}')).ok()
+}
+
+/// 列出随安装包内置的插件（插件库）
+#[tauri::command]
+pub fn list_bundled_plugins(
+    app: tauri::AppHandle,
+    plugins: State<'_, PluginManager>,
+) -> Vec<BundledPluginInfo> {
+    bundled_zip_paths(&app)
+        .iter()
+        .filter_map(|path| {
+            let m = read_zip_manifest(path)?;
+            Some(BundledPluginInfo {
+                installed: plugins.is_installed(&m.id),
+                id: m.id,
+                name: m.name,
+                version: m.version,
+                description: m.description,
+            })
+        })
+        .collect()
+}
+
+/// 安装内置插件（dll SHA-256 对照其 manifest.checksum）
+#[tauri::command]
+pub fn install_bundled_plugin(
+    app: tauri::AppHandle,
+    id: String,
+    plugins: State<'_, PluginManager>,
+) -> Result<String, String> {
+    let zip = bundled_zip_paths(&app)
+        .into_iter()
+        .find(|p| read_zip_manifest(p).map(|m| m.id == id).unwrap_or(false))
+        .ok_or_else(|| format!("安装包内不存在插件「{id}」"))?;
+
+    let (outcome, manifest) = plugins.install_zip(&zip, None).map_err(|e| e.to_string())?;
     Ok(match outcome {
         InstallOutcome::Installed => format!("插件「{}」安装成功，已加载。", manifest.name),
         InstallOutcome::PendingRestart => {

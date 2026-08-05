@@ -10,9 +10,11 @@ import {
   installPluginZip,
   fetchPluginIndex,
   downloadInstallPlugin,
+  listBundledPlugins,
+  installBundledPlugin,
 } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
-import type { PluginInfo, PluginIndexEntry } from "../../types";
+import type { PluginInfo, PluginIndexEntry, BundledPluginInfo } from "../../types";
 
 /** 版本号比较：a > b 返回 true（按数字段逐段比） */
 function isNewer(a: string, b: string): boolean {
@@ -32,6 +34,9 @@ export function PluginPage() {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // 内置插件库（随安装包携带）
+  const [bundled, setBundled] = useState<BundledPluginInfo[]>([]);
 
   // 在线插件索引
   const [index, setIndex] = useState<PluginIndexEntry[] | null>(null);
@@ -70,10 +75,19 @@ export function PluginPage() {
     }
   }, []);
 
+  const reloadBundled = useCallback(async () => {
+    try {
+      setBundled(await listBundledPlugins());
+    } catch {
+      setBundled([]);
+    }
+  }, []);
+
   useEffect(() => {
     void reload();
     void reloadIndex();
-  }, [reload, reloadIndex]);
+    void reloadBundled();
+  }, [reload, reloadIndex, reloadBundled]);
 
   // 拖入安装：监听窗口拖放事件
   useEffect(() => {
@@ -158,6 +172,20 @@ export function PluginPage() {
     try {
       const msg = await downloadInstallPlugin(entry.id);
       await reload();
+      window.alert(msg);
+    } catch (e) {
+      window.alert(`安装失败：${e}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleBundledInstall(entry: BundledPluginInfo) {
+    setBusy(`正在安装「${entry.name}」…`);
+    try {
+      const msg = await installBundledPlugin(entry.id);
+      await reload();
+      await reloadBundled();
       window.alert(msg);
     } catch (e) {
       window.alert(`安装失败：${e}`);
@@ -281,6 +309,46 @@ export function PluginPage() {
             })}
           </div>
         </section>
+
+        {/* ── 插件库（随安装包内置，离线可用） ── */}
+        {bundled.length > 0 && (
+          <section>
+            <h2 className="mb-2 text-[11px] font-medium uppercase tracking-[0.25em] text-[var(--ink-300)]">
+              插件库（随安装包提供）
+            </h2>
+            <div className="space-y-2.5">
+              {bundled.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="flex items-center gap-3 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-4 py-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-[var(--ink-900)]">{entry.name}</span>
+                      <span className="rounded-md bg-[var(--ink-100)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--ink-500)]">
+                        v{entry.version}
+                      </span>
+                    </div>
+                    {entry.description && (
+                      <p className="mt-1 truncate text-[11px] text-[var(--ink-500)]">{entry.description}</p>
+                    )}
+                  </div>
+                  {entry.installed ? (
+                    <span className="shrink-0 text-[11px] text-[var(--ink-300)]">已安装</span>
+                  ) : (
+                    <button
+                      onClick={() => handleBundledInstall(entry)}
+                      disabled={busy !== null}
+                      className="shrink-0 rounded-lg bg-[var(--amber-500)] px-3 py-1.5 text-[11px] font-medium text-[var(--paper)] transition-opacity hover:opacity-90 disabled:opacity-40"
+                    >
+                      安装
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* ── 在线插件（官方索引） ── */}
         <section>
