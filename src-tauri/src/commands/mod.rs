@@ -13,6 +13,7 @@ pub mod mic;
 pub mod plugins;
 pub mod settings;
 pub mod tts;
+pub mod update;
 
 use std::path::PathBuf;
 use std::sync::RwLock;

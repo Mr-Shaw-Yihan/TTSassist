@@ -51,6 +51,18 @@ export interface Settings {
   mic_playback_volume: number;
   /** 各插件引擎当前选中的音色（插件 id → 音色 id） */
   plugin_voices: Record<string, string>;
+  /** 用户选择"忽略"的更新版本号（空=未忽略） */
+  update_ignored_version: string;
+}
+
+/** 版本更新信息（check_app_update 返回） */
+export interface UpdateInfo {
+  /** 新版本号（不带 v） */
+  version: string;
+  /** Release 页面地址 */
+  url: string;
+  /** 更新说明 */
+  notes: string;
 }
 
 /** 插件音色条目 */

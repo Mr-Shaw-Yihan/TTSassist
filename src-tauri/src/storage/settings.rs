@@ -51,6 +51,7 @@ pub fn load_settings(data_dir: &Path) -> Settings {
             plugin_voices: v.get("plugin_voices")
                 .and_then(|x| serde_json::from_value::<std::collections::HashMap<String, String>>(x.clone()).ok())
                 .unwrap_or(default.plugin_voices),
+            update_ignored_version: v.get("update_ignored_version").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.update_ignored_version),
         },
         Err(_) => default,
     }
@@ -82,6 +83,7 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "mic_send_enabled" => if let Some(v) = value.as_bool() { s.mic_send_enabled = v },
         "mic_playback_volume" => if let Some(v) = value.as_f64() { s.mic_playback_volume = v as f32 },
         "plugin_voices" => if let Ok(map) = serde_json::from_value::<std::collections::HashMap<String, String>>(value.clone()) { s.plugin_voices = map },
+        "update_ignored_version" => if let Some(v) = value.as_str() { s.update_ignored_version = v.to_string() },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;

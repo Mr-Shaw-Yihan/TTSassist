@@ -12,7 +12,9 @@ import { FavoriteList } from "./components/Favorites/FavoriteList";
 import { SettingsDrawer } from "./components/Settings/SettingsDrawer";
 import { QuickInput } from "./components/QuickInput/QuickInput";
 import { PluginPage } from "./components/Plugins/PluginPage";
+import { UpdateDialog } from "./components/Settings/UpdateDialog";
 import { useSettingsStore } from "./stores/settingsStore";
+import { useUpdateStore, shouldShowUpdateDot } from "./stores/updateStore";
 import {
   generateTTS,
   listMessages,
@@ -39,6 +41,14 @@ function App() {
   const [playingPath, setPlayingPath] = useState<string | null>(null);
   const settings = useSettingsStore((s) => s.settings);
   const setSettings = useSettingsStore((s) => s.setSettings);
+  const patch = useSettingsStore((s) => s.patch);
+
+  // 版本更新状态
+  const updateLatest = useUpdateStore((s) => s.latest);
+  const dialogDismissed = useUpdateStore((s) => s.dialogDismissed);
+  const dismissDialog = useUpdateStore((s) => s.dismissDialog);
+  const checkUpdate = useUpdateStore((s) => s.check);
+  const updateDot = useUpdateStore(shouldShowUpdateDot);
 
   // 全局唯一播放元素（互斥播放）
   const playingRef = useRef<HTMLAudioElement | null>(null);
@@ -70,6 +80,11 @@ function App() {
       await reloadFavorites();
     })();
   }, [setSettings, reloadFavorites]);
+
+  // 启动时检查一次版本更新（失败静默）
+  useEffect(() => {
+    void checkUpdate();
+  }, [checkUpdate]);
 
   // 皮肤同步到 <html data-theme>，整界面立刻换肤
   useEffect(() => {
@@ -225,7 +240,7 @@ function App() {
           <SideButton icon="⌑" label="收藏" active={tab === "favorites"} onClick={() => setTab("favorites")} />
           <SideButton icon="⧉" label="插件" active={tab === "plugins"} onClick={() => setTab("plugins")} />
           <div className="flex-1" />
-          <SideButton icon="⋯" label="设置" active={false} onClick={() => setShowDrawer(true)} />
+          <SideButton icon="⋯" label="设置" active={false} dot={updateDot} onClick={() => setShowDrawer(true)} />
         </nav>
 
         {/* 右侧内容区（随侧边栏切换） */}
@@ -282,20 +297,40 @@ function App() {
       </div>
 
       {showDrawer && <SettingsDrawer onClose={() => setShowDrawer(false)} />}
+
+      {/* 版本更新弹窗（有新版本且未忽略该版本时，每次启动提示一次） */}
+      {updateLatest &&
+        !dialogDismissed &&
+        updateLatest.version !== (settings?.update_ignored_version ?? "") && (
+          <UpdateDialog
+            info={updateLatest}
+            onLater={dismissDialog}
+            onIgnore={async () => {
+              try {
+                await patch("update_ignored_version", updateLatest.version);
+              } catch {
+                /* 忽略失败不影响关闭 */
+              }
+              dismissDialog();
+            }}
+          />
+        )}
     </div>
   );
 }
 
-/** 侧边栏按钮：图标 + 小字标签 */
+/** 侧边栏按钮：图标 + 小字标签，可选红点 */
 function SideButton({
   icon,
   label,
   active,
+  dot,
   onClick,
 }: {
   icon: string;
   label: string;
   active: boolean;
+  dot?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -303,7 +338,7 @@ function SideButton({
       onClick={onClick}
       title={label}
       className={[
-        "flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-xl transition-colors",
+        "relative flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-xl transition-colors",
         active
           ? "bg-[var(--amber-200)]/40 text-[var(--amber-600)]"
           : "text-[var(--ink-300)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
@@ -311,6 +346,9 @@ function SideButton({
     >
       <span className="text-base leading-none">{icon}</span>
       <span className="text-[9px] leading-none tracking-wide">{label}</span>
+      {dot && (
+        <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[var(--seal)]" />
+      )}
     </button>
   );
 }

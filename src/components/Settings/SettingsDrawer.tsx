@@ -3,7 +3,9 @@
 // 虚拟麦克风轮询隔离在 MicSettings 组件，分类收起即停止轮询。
 
 import { useState, useEffect } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useUpdateStore, shouldShowUpdateDot } from "../../stores/updateStore";
 import { importCloneVoice, removeCloneVoice, pickAudioFile, listPlugins } from "../../services/invoke";
 import type { MossVoice, PluginInfo } from "../../types";
 import { HotkeyRecorder } from "./HotkeyRecorder";
@@ -30,6 +32,11 @@ export function SettingsDrawer({ onClose }: Props) {
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
   const setSettings = useSettingsStore((s) => s.setSettings);
+
+  // 版本更新：关于区红点 + 新版本入口
+  const updateLatest = useUpdateStore((s) => s.latest);
+  const updateDot = useUpdateStore(shouldShowUpdateDot);
+  const markAboutSeen = useUpdateStore((s) => s.markAboutSeen);
   const [importing, setImporting] = useState(false);
   const [cloneName, setCloneName] = useState(settings?.clone_voice_name ?? "");
   const [copied, setCopied] = useState(false);
@@ -457,10 +464,36 @@ export function SettingsDrawer({ onClose }: Props) {
           </Section>
 
           {/* 关于 */}
-          <Section title="关于">
+          <Section
+            title={
+              <>
+                关于
+                {updateDot && (
+                  <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-[var(--seal)] align-middle" />
+                )}
+              </>
+            }
+            defaultOpen={!!updateLatest}
+            onOpen={markAboutSeen}
+          >
             <div className="text-xs leading-relaxed text-[var(--ink-500)]">
               <div className="font-display text-sm font-medium text-[var(--ink-900)]">电子声带 TTSassist</div>
               <div className="mt-1.5">为语言障碍者打造的文本转语音沟通助手。</div>
+
+              {/* 新版本提示（有更新时常驻展示，忽略后仍可在此下载） */}
+              {updateLatest && (
+                <div className="mt-2.5 rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/20 px-3 py-2 text-[11px] leading-relaxed text-[var(--amber-600)]">
+                  发现新版本 <span className="font-mono font-medium">v{updateLatest.version}</span>
+                  ，建议更新以获得新功能与修复。
+                  <button
+                    onClick={() => openUrl(updateLatest.url).catch(() => {})}
+                    className="ml-1.5 font-medium underline underline-offset-2 hover:text-[var(--ink-700)]"
+                  >
+                    前往下载
+                  </button>
+                </div>
+              )}
+
               <div className="mt-2 text-[var(--ink-300)]">TTS 引擎 · 小米 MiMo v2.5</div>
               <a
                 href="https://mimo.mi.com/docs/zh-CN/quick-start/usage-guide/audio/speech-synthesis-v2.5"
@@ -487,17 +520,24 @@ export function SettingsDrawer({ onClose }: Props) {
 function Section({
   title,
   defaultOpen = false,
+  onOpen,
   children,
 }: {
-  title: string;
+  title: React.ReactNode;
   defaultOpen?: boolean;
+  /** 展开时回调（如"关于"展开后清红点） */
+  onOpen?: () => void;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <section className="rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)]">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          const next = !open;
+          setOpen(next);
+          if (next) onOpen?.();
+        }}
         className="flex w-full items-center justify-between px-4 py-3 text-left"
       >
         <span className="text-sm font-medium text-[var(--ink-900)]">{title}</span>

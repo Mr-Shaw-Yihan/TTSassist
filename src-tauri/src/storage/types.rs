@@ -82,6 +82,9 @@ pub struct Settings {
     /// 各插件引擎当前选中的音色（插件 id → 音色 id）
     #[serde(default)]
     pub plugin_voices: HashMap<String, String>,
+    /// 用户选择"忽略"的更新版本号（启动时不再弹窗，关于页仍提示；空=未忽略）
+    #[serde(default)]
+    pub update_ignored_version: String,
 }
 
 impl Default for Settings {
@@ -107,6 +110,7 @@ impl Default for Settings {
             mic_send_enabled: false,
             mic_playback_volume: 1.0,
             plugin_voices: HashMap::new(),
+            update_ignored_version: String::new(),
         }
     }
 }
