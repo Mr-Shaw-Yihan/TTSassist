@@ -1,8 +1,9 @@
-// 设置面板（右侧抽屉）：分类收纳（手风琴），消除平铺卡顿。
+// 设置页面（主界面侧边栏"设置"项的右侧内容区）：分类收纳（手风琴），消除平铺卡顿。
 // 分类：语音合成 / 虚拟麦克风 / 快捷键 / 外观 / 关于。
 // 虚拟麦克风轮询隔离在 MicSettings 组件，分类收起即停止轮询。
 
 import { useState, useEffect } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "../../stores/updateStore";
@@ -24,19 +25,32 @@ const THEMES = [
   { id: "dark",  label: "夜窗（深色）", desc: "深炭灰 · 琥珀高光 · 夜间友好" },
 ] as const;
 
-interface Props {
-  onClose: () => void;
-}
-
-export function SettingsDrawer({ onClose }: Props) {
+export function SettingsPage() {
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
   const setSettings = useSettingsStore((s) => s.setSettings);
 
   // 版本更新：关于区红点 + 新版本入口
   const updateLatest = useUpdateStore((s) => s.latest);
+  const updateChecked = useUpdateStore((s) => s.checked);
+  const checkUpdate = useUpdateStore((s) => s.check);
   const updateDot = useUpdateStore(shouldShowUpdateDot);
   const markAboutSeen = useUpdateStore((s) => s.markAboutSeen);
+
+  // 关于：当前版本号 + 手动检查更新
+  const [appVersion, setAppVersion] = useState<string>("");
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
+  }, []);
+  async function handleCheckUpdate() {
+    setCheckingUpdate(true);
+    try {
+      await checkUpdate();
+    } finally {
+      setCheckingUpdate(false);
+    }
+  }
   const [importing, setImporting] = useState(false);
   const [cloneName, setCloneName] = useState(settings?.clone_voice_name ?? "");
   const [copied, setCopied] = useState(false);
@@ -158,22 +172,9 @@ export function SettingsDrawer({ onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex animate-fade">
-      {/* 遮罩 */}
-      <div className="flex-1 bg-[var(--ink-900)]/25" onClick={onClose} />
-      {/* 抽屉 */}
-      <div className="flex h-full w-80 flex-col bg-[var(--paper)] shadow-[-12px_0_32px_rgba(26,24,22,0.10)] animate-drawer">
-        <div className="flex items-center justify-between border-b border-[var(--ink-200)] px-5 py-4">
-          <span className="font-display text-base text-[var(--ink-900)]">设置</span>
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-[var(--ink-300)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]"
-          >
-            ×
-          </button>
-        </div>
-
-        <div className="scrollbar-thin flex-1 space-y-2.5 overflow-y-auto px-4 py-4 text-sm">
+    <div className="flex h-full flex-col">
+      <div className="scrollbar-thin flex-1 space-y-2.5 overflow-y-auto px-4 py-5 text-sm">
+        <div className="mx-auto max-w-xl space-y-2.5">
           {/* 语音合成 */}
           <Section title="语音合成" defaultOpen>
             <Field label="TTS 引擎">
@@ -480,8 +481,22 @@ export function SettingsDrawer({ onClose }: Props) {
               <div className="font-display text-sm font-medium text-[var(--ink-900)]">电子声带 TTSassist</div>
               <div className="mt-1.5">为语言障碍者打造的文本转语音沟通助手。</div>
 
-              {/* 新版本提示（有更新时常驻展示，忽略后仍可在此下载） */}
-              {updateLatest && (
+              {/* 当前版本 + 检查更新 */}
+              <div className="mt-3 flex items-center gap-2">
+                <span className="rounded-md bg-[var(--ink-100)] px-2 py-0.5 font-mono text-[11px] text-[var(--ink-500)]">
+                  {appVersion ? `v${appVersion}` : "…"}
+                </span>
+                <button
+                  onClick={handleCheckUpdate}
+                  disabled={checkingUpdate}
+                  className="rounded-lg border border-[var(--ink-200)] px-2.5 py-1 text-[11px] text-[var(--ink-500)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)] disabled:opacity-50"
+                >
+                  {checkingUpdate ? "检查中…" : "检查更新"}
+                </button>
+              </div>
+
+              {/* 检查/启动检查结果 */}
+              {updateLatest ? (
                 <div className="mt-2.5 rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/20 px-3 py-2 text-[11px] leading-relaxed text-[var(--amber-600)]">
                   发现新版本 <span className="font-mono font-medium">v{updateLatest.version}</span>
                   ，建议更新以获得新功能与修复。
@@ -492,17 +507,12 @@ export function SettingsDrawer({ onClose }: Props) {
                     前往下载
                   </button>
                 </div>
+              ) : (
+                updateChecked && (
+                  <div className="mt-2.5 text-[11px] text-[var(--ink-300)]">已是最新版本</div>
+                )
               )}
 
-              <div className="mt-2 text-[var(--ink-300)]">TTS 引擎 · 小米 MiMo v2.5</div>
-              <a
-                href="https://mimo.mi.com/docs/zh-CN/quick-start/usage-guide/audio/speech-synthesis-v2.5"
-                target="_blank"
-                rel="noreferrer"
-                className="mt-1.5 inline-block text-[var(--amber-600)] underline underline-offset-2 hover:text-[var(--ink-700)] transition-colors"
-              >
-                MiMo TTS 文档
-              </a>
               {/* 免责声明 */}
               <div className="mt-3 rounded-lg border border-[var(--ink-200)] bg-[var(--ink-100)]/40 px-3 py-2 text-[10px] leading-relaxed text-[var(--ink-300)]">
                 <div className="mb-1 font-medium text-[var(--ink-500)]">免责声明</div>

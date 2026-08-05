@@ -6,7 +6,7 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { checkVbCable } from "../../services/invoke";
 
 interface Props {
-  /** 点击"未配置"状态时打开设置抽屉 */
+  /** 点击"未配置"状态时跳转到设置页 */
   onOpenSettings: () => void;
 }
 

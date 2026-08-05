@@ -5,8 +5,7 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import type { Message } from "../../types";
-import { deleteMessage, addFavorite, revealAudio, playToMic } from "../../services/invoke";
-import { useSettingsStore } from "../../stores/settingsStore";
+import { deleteMessage, addFavorite, revealAudio } from "../../services/invoke";
 
 interface Props {
   message: Message;
@@ -22,13 +21,10 @@ export function MessageBubble({ message, playingPath, onDeleted, onFavorited, on
   const menuRef = useRef<HTMLDivElement | null>(null);
   const isPlaying = playingPath === message.audio_path;
 
-  // 播放：扬声器（onPlay）+ 全局开关开启时同时发麦克风
+  // 播放：onPlay 由 App 提供（playAudioWithMic 已含"开关开启时发麦克风"），
+  // 此处不再自行发麦，避免双份。
   function handlePlay() {
     onPlay(message.audio_path);
-    const s = useSettingsStore.getState().settings;
-    if (s?.mic_send_enabled && s?.mic_output_device) {
-      playToMic(message.audio_path, s.mic_output_device, s.mic_playback_volume).catch(() => {});
-    }
   }
 
   // 菜单出现时校正位置，避免溢出视窗右/下边

@@ -1,7 +1,8 @@
-// 收藏夹视图：列表展示 + 播放 + 删除 + 导入音频 + 自定义快捷键
-// 大纲 8.1-8.4 + 阶段 15（收藏快捷键 + 冲突检测）。
+// 收藏夹视图：列表展示 + 播放 + 右键菜单（快捷键管理/定位文件/删除）+ 导入音频
+// 大纲 8.1-8.4 + 阶段 15（收藏快捷键）+ 右键菜单收纳低频操作（节省行内空间）。
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Favorite } from "../../types";
 import {
   deleteFavorite,
@@ -24,6 +25,44 @@ interface Props {
 export function FavoriteList({ favorites, playingPath, onPlay, onChanged }: Props) {
   // 正在录入快捷键的收藏 id
   const [capturingId, setCapturingId] = useState<string | null>(null);
+  // 右键菜单（含触发位置与目标收藏 id）
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuFavorite = menu ? favorites.find((f) => f.id === menu.id) ?? null : null;
+
+  // 菜单出现时校正位置，避免溢出视窗右/下边
+  useEffect(() => {
+    if (!menu || !menuRef.current) return;
+    const el = menuRef.current;
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let x = menu.x;
+    let y = menu.y;
+    if (x + rect.width > vw - 8) x = Math.max(8, vw - rect.width - 8);
+    if (y + rect.height > vh - 8) y = Math.max(8, vh - rect.height - 8);
+    el.style.left = `${x}px`;
+    el.style.top = `${y}px`;
+  }, [menu]);
+
+  // 点别处 / 右键别处 → 关闭菜单（同消息气泡菜单的做法）
+  useEffect(() => {
+    if (!menu) return;
+    function onDown(e: MouseEvent) {
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
+      setMenu(null);
+    }
+    function onCtx(e: MouseEvent) {
+      if (menuRef.current && menuRef.current.contains(e.target as Node)) return;
+      setMenu(null);
+    }
+    document.addEventListener("mousedown", onDown, true);
+    document.addEventListener("contextmenu", onCtx, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown, true);
+      document.removeEventListener("contextmenu", onCtx, true);
+    };
+  }, [menu]);
 
   async function handleImport() {
     const filePath = await pickAudioFile();
@@ -97,7 +136,14 @@ export function FavoriteList({ favorites, playingPath, onPlay, onChanged }: Prop
           const capturing = capturingId === f.id;
           return (
             <div key={f.id} className="animate-rise">
-              <div className="group flex items-center gap-2 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2.5 text-sm shadow-[0_1px_2px_rgba(26,24,22,0.03)]">
+              <div
+                className="group flex items-center gap-2 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2.5 text-sm shadow-[0_1px_2px_rgba(26,24,22,0.03)]"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setMenu({ x: e.clientX, y: e.clientY, id: f.id });
+                }}
+                title="右键查看更多操作"
+              >
                 <span className="text-[var(--seal)] text-base">⌑</span>
                 <span className="flex-1 break-words text-[var(--ink-900)] leading-snug">{f.note}</span>
                 {/* 快捷键徽章（已设置时显示） */}
@@ -120,43 +166,6 @@ export function FavoriteList({ favorites, playingPath, onPlay, onChanged }: Prop
                 >
                   {playing ? "♪ 播放中" : "▶ 播放"}
                 </button>
-                {/* 设置/更换快捷键 */}
-                <button
-                  onClick={() => setCapturingId(capturing ? null : f.id)}
-                  className={[
-                    "rounded-lg px-1.5 py-1 text-xs transition-colors",
-                    capturing
-                      ? "bg-[var(--ink-100)] text-[var(--ink-900)]"
-                      : "text-[var(--ink-300)] opacity-0 hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)] group-hover:opacity-100",
-                  ].join(" ")}
-                  title="设置快捷播放快捷键"
-                >
-                  ⌨
-                </button>
-                {/* 移除快捷键（已设置时显示） */}
-                {f.hotkey && (
-                  <button
-                    onClick={() => handleRemoveHotkey(f.id)}
-                    className="rounded-lg px-1.5 py-1 text-xs text-[var(--ink-300)] opacity-0 transition-opacity hover:bg-[var(--seal)]/10 hover:text-[var(--seal)] group-hover:opacity-100"
-                    title="移除快捷键"
-                  >
-                    ⌫
-                  </button>
-                )}
-                <button
-                  onClick={() => handleReveal(f.audio_path)}
-                  className="rounded-lg px-1.5 py-1 text-xs text-[var(--ink-300)] opacity-0 transition-opacity hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)] group-hover:opacity-100"
-                  title="在文件夹中显示"
-                >
-                  ⧉
-                </button>
-                <button
-                  onClick={() => handleDelete(f.id)}
-                  className="rounded-lg px-1.5 py-1 text-xs text-[var(--ink-300)] opacity-0 transition-opacity hover:bg-[var(--seal)]/10 hover:text-[var(--seal)] group-hover:opacity-100"
-                  title="删除"
-                >
-                  ×
-                </button>
               </div>
               {/* 快捷键录入（展开在该行下方） */}
               {capturing && (
@@ -177,6 +186,66 @@ export function FavoriteList({ favorites, playingPath, onPlay, onChanged }: Prop
       >
         + 导入音频
       </button>
+
+      {/* 右键菜单 ── portal 挂到 body，document 监听关闭 */}
+      {menu &&
+        menuFavorite &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="fixed z-[9999] min-w-[170px] overflow-hidden rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] py-1 text-sm text-[var(--ink-700)] shadow-[0_8px_24px_rgba(26,24,22,0.18)] animate-fade"
+            style={{ left: menu.x, top: menu.y }}
+          >
+            <button
+              onClick={() => {
+                setMenu(null);
+                onPlay(menuFavorite.audio_path);
+              }}
+              className="block w-full px-4 py-2 text-left transition-colors hover:bg-[var(--amber-200)]/40 hover:text-[var(--ink-900)]"
+            >
+              ▶ 播放
+            </button>
+            <button
+              onClick={() => {
+                setMenu(null);
+                setCapturingId(menuFavorite.id);
+              }}
+              className="block w-full px-4 py-2 text-left transition-colors hover:bg-[var(--amber-200)]/40 hover:text-[var(--ink-900)]"
+            >
+              {menuFavorite.hotkey ? "⌨ 更换快捷键" : "⌨ 设置快捷键"}
+            </button>
+            {menuFavorite.hotkey && (
+              <button
+                onClick={() => {
+                  setMenu(null);
+                  handleRemoveHotkey(menuFavorite.id);
+                }}
+                className="block w-full px-4 py-2 text-left transition-colors hover:bg-[var(--amber-200)]/40 hover:text-[var(--ink-900)]"
+              >
+                ⌫ 移除快捷键
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setMenu(null);
+                handleReveal(menuFavorite.audio_path);
+              }}
+              className="block w-full px-4 py-2 text-left transition-colors hover:bg-[var(--amber-200)]/40 hover:text-[var(--ink-900)]"
+            >
+              ⧉ 在文件夹中显示
+            </button>
+            <button
+              onClick={() => {
+                setMenu(null);
+                handleDelete(menuFavorite.id);
+              }}
+              className="block w-full border-t border-[var(--ink-200)] px-4 py-2 text-left text-[var(--seal)] transition-colors hover:bg-[var(--seal)]/10"
+            >
+              × 删除
+            </button>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

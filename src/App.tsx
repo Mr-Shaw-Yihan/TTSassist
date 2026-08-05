@@ -9,7 +9,7 @@ import { MessageBubble } from "./components/Chat/MessageBubble";
 import { VolumeControl } from "./components/Chat/VolumeSlider";
 import { MicToggle } from "./components/Chat/MicToggle";
 import { FavoriteList } from "./components/Favorites/FavoriteList";
-import { SettingsDrawer } from "./components/Settings/SettingsDrawer";
+import { SettingsPage } from "./components/Settings/SettingsPage";
 import { QuickInput } from "./components/QuickInput/QuickInput";
 import { PluginPage } from "./components/Plugins/PluginPage";
 import { UpdateDialog } from "./components/Settings/UpdateDialog";
@@ -25,7 +25,7 @@ import {
 } from "./services/invoke";
 import type { Message, Favorite } from "./types";
 
-type Tab = "messages" | "favorites" | "plugins";
+type Tab = "messages" | "favorites" | "plugins" | "settings";
 
 function App() {
   // 多窗口路由：检查当前窗口 label
@@ -37,7 +37,6 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [tab, setTab] = useState<Tab>("messages");
-  const [showDrawer, setShowDrawer] = useState(false);
   const [playingPath, setPlayingPath] = useState<string | null>(null);
   const settings = useSettingsStore((s) => s.settings);
   const setSettings = useSettingsStore((s) => s.setSettings);
@@ -212,22 +211,15 @@ function App() {
           <span className="text-[10px] text-[var(--ink-300)] tracking-[0.3em] uppercase">TTSassist</span>
         </div>
         <div className="flex items-center gap-0.5">
-          <MicToggle onOpenSettings={() => setShowDrawer(true)} />
+          <MicToggle onOpenSettings={() => setTab("settings")} />
           <VolumeControl />
-          <button
-            onClick={() => setShowDrawer(true)}
-            className="ml-1 rounded-lg p-1.5 text-[var(--ink-300)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)] transition-colors"
-            title="设置"
-          >
-            <span className="text-base">⋯</span>
-          </button>
         </div>
       </header>
 
       {needKey && (
         <div className="border-b border-[var(--amber-200)]/60 bg-[var(--amber-200)]/20 px-4 py-2 text-xs text-[var(--amber-600)] animate-fade">
           尚未配置 MiMo API Key，
-          <button className="underline underline-offset-2 font-medium" onClick={() => setShowDrawer(true)}>
+          <button className="underline underline-offset-2 font-medium" onClick={() => setTab("settings")}>
             点击配置
           </button>
         </div>
@@ -240,7 +232,7 @@ function App() {
           <SideButton icon="⌑" label="收藏" active={tab === "favorites"} onClick={() => setTab("favorites")} />
           <SideButton icon="⧉" label="插件" active={tab === "plugins"} onClick={() => setTab("plugins")} />
           <div className="flex-1" />
-          <SideButton icon="⋯" label="设置" active={false} dot={updateDot} onClick={() => setShowDrawer(true)} />
+          <SideButton icon="⋯" label="设置" active={tab === "settings"} dot={updateDot} onClick={() => setTab("settings")} />
         </nav>
 
         {/* 右侧内容区（随侧边栏切换） */}
@@ -287,6 +279,13 @@ function App() {
             </main>
           )}
 
+          {/* 设置 */}
+          {tab === "settings" && (
+            <main className="min-h-0 flex-1 overflow-hidden bg-[var(--paper)]">
+              <SettingsPage />
+            </main>
+          )}
+
           {/* 输入框（仅消息视图显示） */}
           {tab === "messages" && (
             <footer className="border-t border-[var(--ink-200)] bg-[var(--paper-card)] p-3">
@@ -295,8 +294,6 @@ function App() {
           )}
         </div>
       </div>
-
-      {showDrawer && <SettingsDrawer onClose={() => setShowDrawer(false)} />}
 
       {/* 版本更新弹窗（有新版本且未忽略该版本时，每次启动提示一次） */}
       {updateLatest &&
