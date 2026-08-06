@@ -34,6 +34,7 @@ export function SettingsPage() {
   const updateLatest = useUpdateStore((s) => s.latest);
   const updateChecked = useUpdateStore((s) => s.checked);
   const checkUpdate = useUpdateStore((s) => s.check);
+  const resetDialog = useUpdateStore((s) => s.resetDialog);
   const updateDot = useUpdateStore(shouldShowUpdateDot);
   const markAboutSeen = useUpdateStore((s) => s.markAboutSeen);
 
@@ -47,6 +48,8 @@ export function SettingsPage() {
     setCheckingUpdate(true);
     try {
       await checkUpdate();
+      // 手动检查后重置弹窗状态，使新版本弹窗可以再次弹出
+      resetDialog();
     } finally {
       setCheckingUpdate(false);
     }

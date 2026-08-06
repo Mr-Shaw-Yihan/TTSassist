@@ -19,6 +19,7 @@ interface UpdateState {
   aboutSeen: boolean;
   check: () => Promise<void>;
   dismissDialog: () => void;
+  resetDialog: () => void;
   markAboutSeen: () => void;
 }
 
@@ -37,6 +38,7 @@ export const useUpdateStore = create<UpdateState>((set) => ({
     }
   },
   dismissDialog: () => set({ dialogDismissed: true }),
+  resetDialog: () => set({ dialogDismissed: false }),
   markAboutSeen: () => set({ aboutSeen: true }),
 }));
 
