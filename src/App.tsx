@@ -229,7 +229,7 @@ function App() {
         {/* 左侧边栏（永久）：消息 / 收藏 / 插件 / 设置 */}
         <nav className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-[var(--ink-200)] bg-[var(--paper)] py-3">
           <SideButton icon="💬" label="消息" active={tab === "messages"} onClick={() => setTab("messages")} />
-          <SideButton icon="⌑" label="收藏" active={tab === "favorites"} onClick={() => setTab("favorites")} />
+          <SideButton icon={<StarIcon />} label="收藏" active={tab === "favorites"} onClick={() => setTab("favorites")} />
           <SideButton icon="⧉" label="插件" active={tab === "plugins"} onClick={() => setTab("plugins")} />
           <div className="flex-1" />
           <SideButton icon="⋯" label="设置" active={tab === "settings"} dot={updateDot} onClick={() => setTab("settings")} />
@@ -324,7 +324,7 @@ function SideButton({
   dot,
   onClick,
 }: {
-  icon: string;
+  icon: React.ReactNode;
   label: string;
   active: boolean;
   dot?: boolean;
@@ -341,12 +341,21 @@ function SideButton({
           : "text-[var(--ink-300)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
       ].join(" ")}
     >
-      <span className="text-base leading-none">{icon}</span>
+      <span className="flex h-4 w-4 items-center justify-center text-base leading-none">{icon}</span>
       <span className="text-[9px] leading-none tracking-wide">{label}</span>
       {dot && (
         <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[var(--seal)]" />
       )}
     </button>
+  );
+}
+
+/** 简约星星图标（收藏用） */
+function StarIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
   );
 }
 
