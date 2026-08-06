@@ -494,7 +494,23 @@ export function SettingsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[var(--ink-400)]">QQ 群</span>
-                  <span className="font-mono text-[var(--ink-600)]">690907648</span>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText("690907648");
+                      const el = document.getElementById("qq-copied-tip");
+                      if (el) { el.style.opacity = "1"; setTimeout(() => el.style.opacity = "0", 1500); }
+                    }}
+                    className="relative font-mono text-[var(--ink-600)] underline decoration-dashed underline-offset-2 hover:text-[var(--amber-600)]"
+                    title="点击复制群号"
+                  >
+                    690907648
+                    <span
+                      id="qq-copied-tip"
+                      className="pointer-events-none absolute -top-6 left-1/2 -translate-x-1/2 rounded bg-[var(--ink-700)] px-1.5 py-0.5 text-[10px] text-[var(--paper)] opacity-0 transition-opacity"
+                    >
+                      已复制
+                    </span>
+                  </button>
                 </div>
               </div>
 
