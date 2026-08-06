@@ -12,7 +12,7 @@ plugin_api::va_tts_plugin! {
     name: "Edge TTS（免费·微软）",
     version: "1.0.0",
     audio_format: "mp3",
-    voices_json: r#"[{"id":"zh-CN-XiaoxiaoNeural","label":"晓晓（女·温暖）"},{"id":"zh-CN-YunxiNeural","label":"云希（男·青年）"},{"id":"zh-CN-YunyangNeural","label":"云扬（男·新闻）"},{"id":"zh-CN-XiaoyiNeural","label":"晓伊（女·活泼）"},{"id":"zh-CN-YunjianNeural","label":"云健（男·体育）"},{"id":"zh-CN-XiaochenNeural","label":"晓辰（女·知性）"}]"#,
+    voices_json: r#"[{"id":"zh-CN-XiaoxiaoNeural","label":"晓晓（女·温暖）"},{"id":"zh-CN-YunxiNeural","label":"云希（男·青年）"},{"id":"zh-CN-YunyangNeural","label":"云扬（男·新闻）"},{"id":"zh-CN-XiaoyiNeural","label":"晓伊（女·活泼）"},{"id":"zh-CN-YunjianNeural","label":"云健（男·体育）"}]"#,
     synthesize: synthesize,
 }
 
@@ -84,9 +84,9 @@ mod tests {
     #[test]
     fn 音色表与宏内json一致() {
         // 与 va_tts_plugin! 里的 voices_json 保持同步（新增音色两处都要改）
-        let json = r#"[{"id":"zh-CN-XiaoxiaoNeural","label":"晓晓（女·温暖）"},{"id":"zh-CN-YunxiNeural","label":"云希（男·青年）"},{"id":"zh-CN-YunyangNeural","label":"云扬（男·新闻）"},{"id":"zh-CN-XiaoyiNeural","label":"晓伊（女·活泼）"},{"id":"zh-CN-YunjianNeural","label":"云健（男·体育）"},{"id":"zh-CN-XiaochenNeural","label":"晓辰（女·知性）"}]"#;
+        let json = r#"[{"id":"zh-CN-XiaoxiaoNeural","label":"晓晓（女·温暖）"},{"id":"zh-CN-YunxiNeural","label":"云希（男·青年）"},{"id":"zh-CN-YunyangNeural","label":"云扬（男·新闻）"},{"id":"zh-CN-XiaoyiNeural","label":"晓伊（女·活泼）"},{"id":"zh-CN-YunjianNeural","label":"云健（男·体育）"}]"#;
         let voices: Vec<plugin_api::VoiceItem> = serde_json::from_str(json).unwrap();
-        assert_eq!(voices.len(), 6);
+        assert_eq!(voices.len(), 5);
         assert_eq!(voices[0].id, DEFAULT_VOICE);
     }
 }
