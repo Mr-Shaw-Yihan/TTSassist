@@ -130,7 +130,7 @@ export function FavoriteList({ favorites, playingPath, onPlay, onChanged }: Prop
 
   return (
     <div className="flex h-full flex-col">
-      <div className="scrollbar-thin flex-1 space-y-2 px-3 py-4">
+      <div className="scrollbar-thin min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-4">
         {favorites.map((f) => {
           const playing = playingPath === f.audio_path;
           const capturing = capturingId === f.id;

@@ -262,7 +262,7 @@ function App() {
 
           {/* 收藏列表 */}
           {tab === "favorites" && (
-            <main className="flex-1 overflow-hidden bg-[var(--paper)]">
+            <main className="min-h-0 flex-1 overflow-hidden bg-[var(--paper)]">
               <FavoriteList
                 favorites={favorites}
                 playingPath={playingPath}
