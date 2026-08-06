@@ -36,6 +36,10 @@ pub struct LoadedPlugin {
     f_list_voices: plugin_api::VaStrFn,
     f_free_bytes: plugin_api::VaFreeBytesFn,
     f_free_cstr: plugin_api::VaFreeCstrFn,
+    /// 可选：环境安装状态查询（本地引擎用 va_tts_plugin_setup! 导出）
+    f_setup_status: Option<plugin_api::VaPluginSetupStatusFn>,
+    /// 可选：执行环境安装（本地引擎用 va_tts_plugin_setup! 导出）
+    f_setup: Option<plugin_api::VaPluginSetupFn>,
 }
 
 // libloading::Library 是 Send+Sync，函数指针天然 Send+Sync
@@ -81,7 +85,7 @@ impl LoadedPlugin {
         // 3. 加载 dll 取符号
         let lib = unsafe { libloading::Library::new(&dll_path) }
             .map_err(|e| PluginError::DlOpen(format!("加载 {} 失败: {e}", manifest.entry)))?;
-        let (f_synthesize, f_free_bytes, f_free_cstr, f_list_voices, dll_id, name, version, audio_format, voices_json) = unsafe {
+        let (f_synthesize, f_free_bytes, f_free_cstr, f_list_voices, f_setup_status, f_setup, dll_id, name, version, audio_format, voices_json) = unsafe {
             let synthesize = get_sym::<plugin_api::VaTtsSynthesizeFn>(&lib, plugin_api::SYM_TTS_SYNTHESIZE)?;
             let free_bytes = get_sym::<plugin_api::VaFreeBytesFn>(&lib, plugin_api::SYM_FREE_BYTES)?;
             let free_cstr = get_sym::<plugin_api::VaFreeCstrFn>(&lib, plugin_api::SYM_FREE_CSTR)?;
@@ -91,12 +95,22 @@ impl LoadedPlugin {
             let f_format = get_sym::<plugin_api::VaStrFn>(&lib, plugin_api::SYM_AUDIO_FORMAT)?;
             let f_voices = get_sym::<plugin_api::VaStrFn>(&lib, plugin_api::SYM_LIST_VOICES)?;
 
+            // 可选符号：环境安装支持（本地引擎才有，缺失不算错误）
+            let f_setup_status = try_get_sym::<plugin_api::VaPluginSetupStatusFn>(
+                &lib,
+                plugin_api::SYM_PLUGIN_SETUP_STATUS,
+            );
+            let f_setup =
+                try_get_sym::<plugin_api::VaPluginSetupFn>(&lib, plugin_api::SYM_PLUGIN_SETUP);
+
             // 4. 立即拷贝元信息
             (
                 synthesize,
                 free_bytes,
                 free_cstr,
                 f_voices,
+                f_setup_status,
+                f_setup,
                 read_cstr(f_id())?,
                 read_cstr(f_name())?,
                 read_cstr(f_version())?,
@@ -130,6 +144,8 @@ impl LoadedPlugin {
             f_list_voices,
             f_free_bytes,
             f_free_cstr,
+            f_setup_status,
+            f_setup,
         }))
     }
 
@@ -142,6 +158,69 @@ impl LoadedPlugin {
         match copied {
             Ok(s) => s,
             Err(_) => self.voices_json.clone(),
+        }
+    }
+
+    /// 插件是否支持环境安装（setup）能力（本地引擎导出可选符号）
+    pub fn has_setup(&self) -> bool {
+        self.f_setup_status.is_some() && self.f_setup.is_some()
+    }
+
+    /// 查询环境安装状态 JSON（插件未导出该能力返回 None）
+    pub fn setup_status(&self) -> Option<String> {
+        let f = self.f_setup_status?;
+        let ptr = unsafe { f() };
+        unsafe { read_cstr(ptr) }.ok()
+    }
+
+    /// 执行环境安装（阻塞调用，需在 blocking 线程执行）。
+    /// options：JSON 选项（如 {"voice":"mika"}）；progress：进度回调（可空）。
+    /// 返回插件给出的中文结果消息；插件报错时 Err 内即插件的中文错误。
+    pub fn run_setup(
+        &self,
+        options: Option<&str>,
+        progress: plugin_api::VaSetupProgressFn,
+    ) -> Result<String, PluginError> {
+        let f_setup = self
+            .f_setup
+            .ok_or_else(|| PluginError::Unsupported("该插件不支持环境安装".into()))?;
+
+        let c_options = match options {
+            Some(s) => Some(
+                CString::new(s)
+                    .map_err(|_| PluginError::Synthesize("安装选项含非法字符（NUL）".into()))?,
+            ),
+            None => None,
+        };
+        let mut out_msg: *mut std::ffi::c_char = std::ptr::null_mut();
+
+        let code = unsafe {
+            f_setup(
+                c_options
+                    .as_ref()
+                    .map(|c| c.as_ptr())
+                    .unwrap_or(std::ptr::null()),
+                progress,
+                &mut out_msg,
+            )
+        };
+
+        let msg = if !out_msg.is_null() {
+            let s = unsafe { CStr::from_ptr(out_msg) }
+                .to_string_lossy()
+                .into_owned();
+            unsafe { (self.f_free_cstr)(out_msg) };
+            s
+        } else if code == plugin_api::VA_OK {
+            "环境安装完成".to_string()
+        } else {
+            format!("环境安装失败（错误码 {code}）")
+        };
+
+        if code == plugin_api::VA_OK {
+            Ok(msg)
+        } else {
+            Err(PluginError::Synthesize(msg))
         }
     }
 
@@ -211,6 +290,14 @@ where
             String::from_utf8_lossy(&name[..end])
         ))
     })
+}
+
+/// 取可选符号：不存在返回 None（不算错误，老插件没有 setup 支持）
+unsafe fn try_get_sym<T>(lib: &libloading::Library, name: &[u8]) -> Option<T>
+where
+    T: Copy,
+{
+    lib.get::<T>(name).map(|sym| *sym).ok()
 }
 
 /// 读取 C 字符串为 String（立即拷贝）

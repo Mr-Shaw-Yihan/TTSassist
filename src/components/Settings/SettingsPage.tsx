@@ -11,6 +11,7 @@ import { importCloneVoice, removeCloneVoice, pickAudioFile, listPlugins } from "
 import type { MossVoice, PluginInfo } from "../../types";
 import { HotkeyRecorder } from "./HotkeyRecorder";
 import { MicSettings } from "./MicSettings";
+import { PluginSetupPanel } from "../Plugins/PluginSetupPanel";
 
 const PRESET_VOICES = [
   { id: "mimo_default", label: "默认 (mimo_default)" },
@@ -70,6 +71,42 @@ export function SettingsPage() {
   useEffect(() => {
     listPlugins().then(setPlugins).catch(() => {});
   }, []);
+
+  // 本地插件环境安装任务（选引擎/选音色时按需触发）
+  const [setupTask, setSetupTask] = useState<{ pluginId: string; options?: string } | null>(null);
+
+  /** 切换引擎：选中未就绪的本地插件时询问是否现在下载运行环境 */
+  function handleEngineChange(engineId: string) {
+    void patch("tts_engine", engineId);
+    const p = plugins.find((x) => x.id === engineId);
+    if (p?.has_setup && !p.setup_status?.ready) {
+      const ok = window.confirm(
+        `「${p.name}」是本地引擎，首次使用需要下载运行环境与语音模型（共约 800MB，需联网）。\n\n` +
+          "是否现在下载？（也可以稍后在插件管理页下载；未下载时首次发消息会自动下载）"
+      );
+      if (ok) setSetupTask({ pluginId: engineId });
+    }
+  }
+
+  /** 切换插件音色：选中未安装的音色时询问是否下载 */
+  function handlePluginVoiceChange(plugin: PluginInfo, voiceId: string) {
+    void patch("plugin_voices", {
+      ...(settings?.plugin_voices ?? {}),
+      [plugin.id]: voiceId,
+    });
+    const installed = plugin.setup_status?.voices ?? [];
+    if (plugin.has_setup && !installed.includes(voiceId)) {
+      const ok = window.confirm(
+        `音色「${voiceId}」尚未下载（约 200MB，需联网）。是否现在下载？`
+      );
+      if (ok) {
+        setSetupTask({
+          pluginId: plugin.id,
+          options: JSON.stringify({ voice: voiceId }),
+        });
+      }
+    }
+  }
 
   async function copyInvite() {
     try {
@@ -183,7 +220,7 @@ export function SettingsPage() {
             <Field label="TTS 引擎">
               <select
                 value={settings?.tts_engine ?? "mimo"}
-                onChange={(e) => patch("tts_engine", e.target.value)}
+                onChange={(e) => handleEngineChange(e.target.value)}
                 className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
               >
                 <option value="mimo">MiMo（小米）</option>
@@ -411,12 +448,7 @@ export function SettingsPage() {
                   <Field label={`${cur.name} 音色`}>
                     <select
                       value={settings?.plugin_voices?.[cur.id] ?? cur.voices[0]?.id ?? ""}
-                      onChange={(e) =>
-                        patch("plugin_voices", {
-                          ...(settings?.plugin_voices ?? {}),
-                          [cur.id]: e.target.value,
-                        })
-                      }
+                      onChange={(e) => handlePluginVoiceChange(cur, e.target.value)}
                       className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
                     >
                       {cur.voices.map((v) => (
@@ -424,6 +456,19 @@ export function SettingsPage() {
                       ))}
                     </select>
                   </Field>
+
+                  {/* 本地插件环境安装进度（选引擎/选音色时触发） */}
+                  {setupTask?.pluginId === cur.id && (
+                    <PluginSetupPanel
+                      pluginId={cur.id}
+                      options={setupTask.options}
+                      onDone={() => {
+                        setSetupTask(null);
+                        // 刷新插件状态（安装完成后音色表/就绪状态会变）
+                        listPlugins().then(setPlugins).catch(() => {});
+                      }}
+                    />
+                  )}
                 </>
               );
             })()}

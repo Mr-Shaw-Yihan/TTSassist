@@ -71,6 +71,28 @@ export interface PluginVoiceItem {
   label: string;
 }
 
+/** 插件环境安装状态（本地引擎：运行环境/资源/音色的就绪情况） */
+export interface PluginSetupStatus {
+  /** 全就绪：可离线合成 */
+  ready: boolean;
+  /** Python 运行时 + 依赖已装 */
+  env_ready: boolean;
+  /** 语音资源已下载 */
+  resources_ready: boolean;
+  /** 已安装的音色包 id */
+  voices: string[];
+  /** 人类可读摘要 */
+  summary: string;
+}
+
+/** 插件环境安装进度事件载荷（plugin-setup-progress） */
+export interface PluginSetupProgress {
+  plugin_id: string;
+  /** 0~100 定量进度；<0 表示不定量（以 message 为准） */
+  percent: number;
+  message: string;
+}
+
 /** 已安装插件信息（list_plugins 返回） */
 export interface PluginInfo {
   id: string;
@@ -86,6 +108,10 @@ export interface PluginInfo {
   audio_format: string;
   /** 引擎类别："local" 本地离线 / "remote" 联网（老插件缺省 remote） */
   category?: string;
+  /** 是否支持环境安装（本地引擎需下载运行环境/模型） */
+  has_setup?: boolean;
+  /** 环境安装状态（has_setup=false 时为 null） */
+  setup_status?: PluginSetupStatus | null;
 }
 
 /** 官方插件索引条目（fetch_plugin_index 返回） */

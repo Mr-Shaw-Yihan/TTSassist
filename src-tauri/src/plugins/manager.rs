@@ -40,6 +40,10 @@ pub struct PluginInfo {
     pub audio_format: String,
     /// 引擎类别（manifest.category）："local" 本地离线 / "remote" 联网
     pub category: String,
+    /// 插件是否支持环境安装（本地引擎需下载运行环境/模型）
+    pub has_setup: bool,
+    /// 环境安装状态（实时查询自插件；has_setup=false 时为 null）
+    pub setup_status: Option<serde_json::Value>,
 }
 
 /// 插件管理器。dll 一经加载常驻到进程退出（运行期卸载有崩溃风险，见 loader.rs 头注）。
@@ -183,6 +187,13 @@ impl PluginManager {
                 .map(|m| m.category.clone())
                 .unwrap_or_else(|| "remote".to_string());
 
+            // 环境安装能力与状态（本地引擎，实时查询；解析失败按"未就绪"兜底）
+            let has_setup = loaded_plugin.as_ref().map(|p| p.has_setup()).unwrap_or(false);
+            let setup_status = loaded_plugin
+                .as_ref()
+                .and_then(|p| p.setup_status())
+                .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok());
+
             result.push(PluginInfo {
                 id: entry.id.clone(),
                 name,
@@ -193,6 +204,8 @@ impl PluginManager {
                 voices,
                 audio_format,
                 category,
+                has_setup,
+                setup_status,
             });
         }
         result

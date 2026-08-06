@@ -80,6 +80,14 @@ pub fn ensure_server(ctx: &Ctx) -> Result<u16, String> {
         .spawn()
         .map_err(|e| format!("启动 Genie 服务失败: {e}"))?;
 
+    // 把子进程挂到带 KILL_ON_JOB_CLOSE 的 Job Object：宿主进程退出时
+    // （句柄随进程关闭）系统自动杀掉服务进程，避免孤儿进程长期占用内存。
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::io::AsRawHandle;
+        win_job::attach_kill_on_close(child.as_raw_handle() as *mut std::ffi::c_void);
+    }
+
     // 记下端口号（调试用）
     if let Ok(mut f) = std::fs::File::create(ctx.port_file()) {
         let _ = f.write_all(port.to_string().as_bytes());
@@ -117,4 +125,100 @@ fn pick_free_port() -> Result<u16, String> {
                 Ok(p)
             }
         })
+}
+
+// ── Windows Job Object：子进程随宿主退出 ──────────────
+//
+// 插件 dll 常驻不卸载、无 drop 时机，没法在"应用退出"时主动杀子进程。
+// 用 Job Object + JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE：job 句柄存在静态槽里
+// 直到宿主进程退出，进程退出时 OS 关闭全部句柄 → job 关闭 → 系统自动
+// 终止 job 内所有进程。全程无需 Rust 侧 drop，天然防孤儿。
+#[cfg(target_os = "windows")]
+mod win_job {
+    use std::ffi::c_void;
+    use std::sync::OnceLock;
+
+    type Handle = *mut c_void;
+
+    #[repr(C)]
+    struct JobObjectBasicLimitInformation {
+        per_process_user_time_limit: i64,
+        per_job_object_user_time_limit: i64,
+        limit_flags: u32,
+        minimum_working_set_size: usize,
+        maximum_working_set_size: usize,
+        active_process_limit: u32,
+        affinity: usize,
+        priority_class: u32,
+        scheduling_class: u32,
+    }
+
+    #[repr(C)]
+    struct IoCounters {
+        read_operation_count: u64,
+        write_operation_count: u64,
+        other_operation_count: u64,
+        read_transfer_count: u64,
+        write_transfer_count: u64,
+        other_transfer_count: u64,
+    }
+
+    #[repr(C)]
+    struct JobObjectExtendedLimitInformation {
+        basic_limit_information: JobObjectBasicLimitInformation,
+        io_info: IoCounters,
+        process_memory_limit: usize,
+        job_memory_limit: usize,
+        peak_process_memory_used: usize,
+        peak_job_memory_used: usize,
+    }
+
+    const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: u32 = 0x0000_2000;
+    const JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS: u32 = 9;
+
+    extern "system" {
+        fn CreateJobObjectW(job_attributes: *mut c_void, name: *const u16) -> Handle;
+        fn SetInformationJobObject(
+            job: Handle,
+            info_class: u32,
+            info: *const JobObjectExtendedLimitInformation,
+            info_len: u32,
+        ) -> i32;
+        fn AssignProcessToJobObject(job: Handle, process: Handle) -> i32;
+    }
+
+    /// 把进程挂到"关闭即杀"的 Job Object。失败静默（尽力而为，不阻塞主流程）。
+    pub fn attach_kill_on_close(process_handle: Handle) {
+        // 裸指针包一层以满足 static 的 Send+Sync 要求（句柄仅本模块使用）
+        struct JobHandle(Handle);
+        unsafe impl Send for JobHandle {}
+        unsafe impl Sync for JobHandle {}
+
+        static JOB: OnceLock<JobHandle> = OnceLock::new();
+        let job = JOB.get_or_init(|| unsafe {
+            let h = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+            if h.is_null() {
+                return JobHandle(std::ptr::null_mut());
+            }
+            let mut info: JobObjectExtendedLimitInformation = std::mem::zeroed();
+            info.basic_limit_information.limit_flags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let ok = SetInformationJobObject(
+                h,
+                JOB_OBJECT_EXTENDED_LIMIT_INFORMATION_CLASS,
+                &info,
+                std::mem::size_of::<JobObjectExtendedLimitInformation>() as u32,
+            );
+            if ok == 0 {
+                return JobHandle(std::ptr::null_mut());
+            }
+            // 故意不关闭句柄：随宿主进程退出时 OS 回收 → 触发 KILL_ON_JOB_CLOSE
+            JobHandle(h)
+        });
+        if job.0.is_null() {
+            return;
+        }
+        unsafe {
+            let _ = AssignProcessToJobObject(job.0, process_handle);
+        }
+    }
 }

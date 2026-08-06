@@ -32,6 +32,10 @@ pub const SYM_TTS_SYNTHESIZE: &[u8] = b"va_tts_synthesize\0";
 pub const SYM_FREE_BYTES: &[u8] = b"va_free_bytes\0";
 pub const SYM_FREE_CSTR: &[u8] = b"va_free_cstr\0";
 
+// 可选符号（本地引擎"环境安装"支持；老插件没有，宿主按 Option 处理）
+pub const SYM_PLUGIN_SETUP_STATUS: &[u8] = b"va_plugin_setup_status\0";
+pub const SYM_PLUGIN_SETUP: &[u8] = b"va_plugin_setup\0";
+
 // ── 函数类型别名（宿主侧 libloading::Symbol<T> 用）──────────────
 
 /// 元信息类：返回 NUL 结尾静态字符串指针（id/name/version/audio_format/list_voices 共用）
@@ -53,6 +57,33 @@ pub type VaFreeBytesFn = unsafe extern "C" fn(ptr: *mut u8, len: usize);
 
 /// 释放 va_tts_synthesize 输出的错误字符串
 pub type VaFreeCstrFn = unsafe extern "C" fn(ptr: *mut c_char);
+
+// ── 可选：环境安装（setup）支持 ───────────────────────
+//
+// 本地引擎首次使用需要下载运行环境/模型。这两个符号可选导出
+// （va_tts_plugin_setup! 宏生成），宿主 libloading 取不到就当插件无此能力。
+
+/// 安装进度回调（宿主提供，插件在 setup 过程中反复调用）。
+/// percent：0~100 定量进度；<0 表示不定量（此时以 message 文案为准）。
+/// message：NUL 结尾 UTF-8 阶段描述（如"正在下载语音模型…"），指针仅在回调期间有效。
+pub type VaSetupProgressFn =
+    Option<unsafe extern "C" fn(percent: f32, message: *const c_char)>;
+
+/// 查询环境安装状态：返回 JSON 字符串（内存约定同 va_list_voices：
+/// 插件静态/缓存存储，宿主立即拷贝，无需释放）。
+/// JSON 约定字段：ready(bool) / env_ready(bool) / resources_ready(bool) /
+/// voices(已安装音色 id 数组) / summary(人类可读摘要)。
+pub type VaPluginSetupStatusFn = unsafe extern "C" fn() -> *const c_char;
+
+/// 执行环境安装/补齐。
+/// options：NUL 结尾 UTF-8 JSON 或 NULL（如 {"voice":"mika"} 指定要确保的音色）；
+/// progress：进度回调（可为 None）；out_msg：结束时写中文结果消息（CString，
+/// 宿主读取后调 va_free_cstr 归还）。返回 VA_OK/VA_ERR。
+pub type VaPluginSetupFn = unsafe extern "C" fn(
+    options: *const c_char,
+    progress: VaSetupProgressFn,
+    out_msg: *mut *mut c_char,
+) -> i32;
 
 // ── 音色条目 ──────────────────────────────────────────
 
@@ -284,6 +315,109 @@ macro_rules! __va_tts_plugin_common {
         pub extern "C" fn va_free_cstr(ptr: *mut ::std::os::raw::c_char) {
             if !ptr.is_null() {
                 unsafe { drop(::std::ffi::CString::from_raw(ptr)); }
+            }
+        }
+    };
+}
+
+/// 插件侧可选导出：环境安装（setup）支持，与 va_tts_plugin! 配合使用。
+///
+/// 用法（插件 crate 的 lib.rs，va_tts_plugin! 之后）：
+/// ```ignore
+/// plugin_api::va_tts_plugin_setup! {
+///     status: my_setup_status,  // fn() -> String（返回 JSON 状态）
+///     setup: my_run_setup,      // fn(Option<&str>, &dyn Fn(f32, &str)) -> Result<String, String>
+/// }
+/// ```
+///
+/// - status：纯探测（磁盘检查），必须快、不触发网络，宿主列表页会频繁查询；
+/// - setup：options 为调用方传入的 JSON（可为 None）；进度回调用 `cb(percent, msg)`
+///   上报（percent<0 = 不定量）；Ok 消息直接展示给用户，Err 为中文错误；
+/// - 宏负责 catch_unwind、CString 分配（由宿主的 va_free_cstr 归还），勿手写导出。
+#[macro_export]
+macro_rules! va_tts_plugin_setup {
+    (
+        status: $status_fn:expr,
+        setup: $setup_fn:expr $(,)?
+    ) => {
+        #[no_mangle]
+        pub extern "C" fn va_plugin_setup_status() -> *const ::std::os::raw::c_char {
+            // 缓存槽约定同动态音色表：宿主调用后立即拷贝
+            static VA__SETUP_STATUS_CACHE: ::std::sync::OnceLock<
+                ::std::sync::Mutex<::std::ffi::CString>,
+            > = ::std::sync::OnceLock::new();
+            let cache = VA__SETUP_STATUS_CACHE.get_or_init(|| {
+                ::std::sync::Mutex::new(::std::ffi::CString::new("{}").unwrap())
+            });
+            let f: fn() -> String = $status_fn;
+            let json = ::std::panic::catch_unwind(f)
+                .unwrap_or_else(|_| "{}".to_string());
+            let c = ::std::ffi::CString::new(json)
+                .unwrap_or_else(|_| ::std::ffi::CString::new("{}").unwrap());
+            let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+            *guard = c;
+            guard.as_ptr()
+        }
+
+        #[no_mangle]
+        pub unsafe extern "C" fn va_plugin_setup(
+            options: *const ::std::os::raw::c_char,
+            progress: $crate::VaSetupProgressFn,
+            out_msg: *mut *mut ::std::os::raw::c_char,
+        ) -> i32 {
+            // 写入结果消息（CString::into_raw，宿主经 va_free_cstr 归还）
+            macro_rules! write_msg {
+                ($s:expr) => {
+                    if !out_msg.is_null() {
+                        let c = ::std::ffi::CString::new($s)
+                            .unwrap_or_else(|_| ::std::ffi::CString::new("setup").unwrap());
+                        *out_msg = c.into_raw();
+                    }
+                };
+            }
+            if out_msg.is_null() {
+                return $crate::VA_ERR;
+            }
+
+            let opts: Option<&str> = if options.is_null() {
+                None
+            } else {
+                match ::std::ffi::CStr::from_ptr(options).to_str() {
+                    Ok(s) => Some(s),
+                    Err(_) => {
+                        write_msg!("安装参数不是合法 UTF-8".to_string());
+                        return $crate::VA_ERR;
+                    }
+                }
+            };
+
+            // 把裸回调指针包成安全闭包（指针仅在 setup 调用期间有效，闭包不逃逸）
+            let cb = |percent: f32, msg: &str| {
+                if let Some(f) = progress {
+                    let c = ::std::ffi::CString::new(msg)
+                        .unwrap_or_else(|_| ::std::ffi::CString::new("").unwrap());
+                    f(percent, c.as_ptr());
+                }
+            };
+
+            let f: fn(Option<&str>, &dyn Fn(f32, &str)) -> Result<String, String> = $setup_fn;
+            let result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
+                f(opts, &cb)
+            }));
+
+            match result {
+                Ok(Ok(msg)) => {
+                    write_msg!(msg);
+                    $crate::VA_OK
+                }
+                Ok(Err(e)) => {
+                    write_msg!(e);
+                    $crate::VA_ERR
+                }
+                Err(_) => {
+                    write_msg!("插件安装流程内部崩溃（panic）".to_string());
+                    $crate::VA_ERR
+                }
             }
         }
     };

@@ -47,6 +47,13 @@ export async function installBundledPlugin(id: string): Promise<string> {
   return invoke<string>("install_bundled_plugin", { id });
 }
 
+/** 执行插件环境安装（本地引擎下载运行环境/模型）。
+ *  options：JSON 字符串，如 {"voice":"mika"} 指定要确保的音色。
+ *  进度经 plugin-setup-progress 事件推送；返回结果文案。 */
+export async function runPluginSetup(id: string, options?: string): Promise<string> {
+  return invoke<string>("run_plugin_setup", { id, options: options ?? null });
+}
+
 // ── 版本更新 ─────────────────────────────────────
 
 /** 检查新版本；无更新或网络失败返回 null */

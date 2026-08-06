@@ -93,6 +93,7 @@ pub fn run() {
             crate::commands::plugins::download_install_plugin,
             crate::commands::plugins::list_bundled_plugins,
             crate::commands::plugins::install_bundled_plugin,
+            crate::commands::plugins::run_plugin_setup,
             crate::commands::update::check_app_update,
             crate::commands::message::list_messages,
             crate::commands::message::delete_message,

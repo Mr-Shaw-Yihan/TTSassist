@@ -58,6 +58,11 @@ pub fn list_voices() -> Vec<VoiceItem> {
     voices
 }
 
+/// 已安装音色包的 id 列表（供 setup 状态探测用）
+pub fn installed_pack_ids() -> Vec<String> {
+    installed_packs().into_iter().map(|(id, _label)| id).collect()
+}
+
 /// 扫描 characters/ 下布局完整的音色包，返回 (目录名, 展示名)
 fn installed_packs() -> Vec<(String, String)> {
     let ctx = match crate::paths::Ctx::get() {

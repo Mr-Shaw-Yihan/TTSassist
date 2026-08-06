@@ -16,8 +16,13 @@ fn http() -> Result<reqwest::blocking::Client, String> {
         .map_err(|e| format!("初始化网络客户端失败: {e}"))
 }
 
-/// 下载文件到指定路径（流式写盘；已存在的完整文件不重复下载由调用方判断）
-pub fn download_file(url: &str, dest: &Path) -> Result<(), String> {
+/// 下载文件到指定路径（流式写盘）。
+/// progress：(已下载字节, 总字节 Option)——服务端不给 Content-Length 时 total 为 None
+pub fn download_file_with_progress(
+    url: &str,
+    dest: &Path,
+    progress: Option<&dyn Fn(u64, Option<u64>)>,
+) -> Result<(), String> {
     let client = http()?;
     let resp = client
         .get(url)
@@ -26,10 +31,12 @@ pub fn download_file(url: &str, dest: &Path) -> Result<(), String> {
     if !resp.status().is_success() {
         return Err(format!("下载失败（HTTP {}）: {url}", resp.status()));
     }
+    let total = resp.content_length();
     let mut file = std::fs::File::create(dest)
         .map_err(|e| format!("创建临时文件失败: {e}"))?;
     let mut resp = resp;
     let mut buf = [0u8; 64 * 1024];
+    let mut done: u64 = 0;
     loop {
         let n = resp
             .read(&mut buf[..])
@@ -39,6 +46,10 @@ pub fn download_file(url: &str, dest: &Path) -> Result<(), String> {
         }
         file.write_all(&buf[..n])
             .map_err(|e| format!("写入磁盘失败（可能空间不足）: {e}"))?;
+        done += n as u64;
+        if let Some(cb) = progress {
+            cb(done, total);
+        }
     }
     Ok(())
 }

@@ -1,8 +1,11 @@
 // 插件管理命令：列表 / 卸载 / 拖入安装 / 在线索引 / 下载安装 / 内置插件库。
 
+use std::ffi::{c_char, CStr};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 use crate::plugins::{InstallOutcome, PluginInfo, PluginManager};
 
 /// 官方插件索引地址（托管在 GitHub Releases 资产）
@@ -228,4 +231,90 @@ pub fn install_bundled_plugin(
             format!("插件「{}」正在运行中，将在重启应用后完成更新。", manifest.name)
         }
     })
+}
+
+// ── 环境安装（本地引擎 setup）──────────────────────
+
+/// 安装进度事件名（前端 useTauriListen 监听）
+pub const EVENT_PLUGIN_SETUP_PROGRESS: &str = "plugin-setup-progress";
+
+/// 安装进度事件载荷
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SetupProgress {
+    pub plugin_id: String,
+    /// 0~100 定量进度；<0 表示不定量（以 message 为准）
+    pub percent: f32,
+    pub message: String,
+}
+
+/// 进度转发槽：extern "C" 回调无法捕获上下文，用全局槽暂存 AppHandle + 插件 id。
+/// 同一时刻只允许一个安装任务（SETUP_BUSY 保证），槽不会串。
+static SETUP_SLOT: OnceLock<Mutex<Option<(tauri::AppHandle, String)>>> = OnceLock::new();
+static SETUP_BUSY: AtomicBool = AtomicBool::new(false);
+
+fn setup_slot() -> &'static Mutex<Option<(tauri::AppHandle, String)>> {
+    SETUP_SLOT.get_or_init(|| Mutex::new(None))
+}
+
+/// 插件侧进度回调：读 C 字符串 → 经全局槽转发为 Tauri 事件
+unsafe extern "C" fn setup_progress_cb(percent: f32, message: *const c_char) {
+    if message.is_null() {
+        return;
+    }
+    let msg = CStr::from_ptr(message).to_string_lossy().into_owned();
+    if let Ok(guard) = setup_slot().lock() {
+        if let Some((app, id)) = &*guard {
+            let _ = app.emit(
+                EVENT_PLUGIN_SETUP_PROGRESS,
+                SetupProgress {
+                    plugin_id: id.clone(),
+                    percent,
+                    message: msg,
+                },
+            );
+        }
+    }
+}
+
+/// 执行插件环境安装（本地引擎下载运行环境/模型）。
+/// options：JSON 字符串（可选，如 {"voice":"mika"}）。
+/// 进度经 EVENT_PLUGIN_SETUP_PROGRESS 事件推送；返回插件的中文结果消息。
+#[tauri::command]
+pub async fn run_plugin_setup(
+    id: String,
+    options: Option<String>,
+    app: tauri::AppHandle,
+    plugins: State<'_, PluginManager>,
+) -> Result<String, String> {
+    let plugin = plugins
+        .get(&id)
+        .ok_or_else(|| format!("插件「{id}」未加载，无法执行环境安装"))?;
+    if !plugin.has_setup() {
+        return Err("该插件不支持环境安装".into());
+    }
+    if SETUP_BUSY.swap(true, Ordering::SeqCst) {
+        return Err("已有环境安装任务正在进行，请等待完成后再试".into());
+    }
+
+    // 登记转发槽（回调只在此窗口内生效）
+    if let Ok(mut guard) = setup_slot().lock() {
+        *guard = Some((app.clone(), id.clone()));
+    }
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        plugin.run_setup(options.as_deref(), Some(setup_progress_cb))
+    })
+    .await;
+
+    // 清理槽位与忙标志
+    if let Ok(mut guard) = setup_slot().lock() {
+        *guard = None;
+    }
+    SETUP_BUSY.store(false, Ordering::SeqCst);
+
+    match result {
+        Ok(Ok(msg)) => Ok(msg),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(e) => Err(format!("安装任务中断: {e}")),
+    }
 }

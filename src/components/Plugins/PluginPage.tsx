@@ -14,6 +14,7 @@ import {
   installBundledPlugin,
 } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { PluginSetupPanel } from "./PluginSetupPanel";
 import type { PluginInfo, PluginIndexEntry, BundledPluginInfo } from "../../types";
 
 /** 版本号比较：a > b 返回 true（按数字段逐段比） */
@@ -46,6 +47,9 @@ export function PluginPage() {
   // 安装/卸载等耗时操作（禁用按钮 + 提示）
   const [busy, setBusy] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+
+  // 环境安装任务（本地插件下载运行环境/模型；options 可指定音色）
+  const [setupTask, setSetupTask] = useState<{ pluginId: string; options?: string } | null>(null);
 
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
@@ -298,11 +302,39 @@ export function PluginPage() {
                     <p className="mt-2 text-xs leading-relaxed text-[var(--ink-500)]">{p.description}</p>
                   )}
 
-                  {/* 本地引擎首次使用提示（运行环境按需自动下载） */}
-                  {p.loaded && p.category === "local" && (
-                    <div className="mt-2 rounded-lg border border-sky-600/20 bg-sky-600/5 px-3 py-2 text-[11px] leading-relaxed text-sky-800">
-                      本地引擎首次合成时会自动下载运行环境与音色模型（约几百 MB，需联网），
-                      首次等待时间较长；下载完成后即可完全离线使用。
+                  {/* 本地引擎环境安装区：状态 / 下载按钮 / 进度面板 */}
+                  {p.loaded && p.has_setup && (
+                    <div className="mt-2">
+                      {setupTask?.pluginId === p.id ? (
+                        <PluginSetupPanel
+                          pluginId={p.id}
+                          options={setupTask.options}
+                          onDone={() => {
+                            setSetupTask(null);
+                            void reload();
+                          }}
+                        />
+                      ) : p.setup_status?.ready ? (
+                        <div className="flex items-center gap-1.5 rounded-lg border border-emerald-600/25 bg-emerald-600/5 px-3 py-2 text-[11px] text-emerald-700">
+                          <span>✓ 环境就绪 · 可离线使用</span>
+                          <span className="text-[var(--ink-300)]">
+                            （已装音色 {p.setup_status.voices.length} 个）
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 rounded-lg border border-sky-600/25 bg-sky-600/5 px-3 py-2">
+                          <span className="min-w-0 flex-1 truncate text-[11px] text-sky-800" title={p.setup_status?.summary ?? ""}>
+                            {p.setup_status?.summary ?? "运行环境未安装"}
+                          </span>
+                          <button
+                            onClick={() => setSetupTask({ pluginId: p.id })}
+                            disabled={setupTask !== null || busy !== null}
+                            className="shrink-0 rounded-lg bg-sky-600 px-3 py-1 text-[11px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                          >
+                            下载运行环境
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
 
