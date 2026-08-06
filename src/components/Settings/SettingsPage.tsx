@@ -481,6 +481,23 @@ export function SettingsPage() {
               <div className="font-display text-sm font-medium text-[var(--ink-900)]">电子声带 TTSassist</div>
               <div className="mt-1.5">为语言障碍者打造的文本转语音沟通助手。</div>
 
+              {/* 项目链接 & QQ 群 */}
+              <div className="mt-2.5 flex flex-col gap-1.5 text-[11px]">
+                <div className="flex items-center gap-2">
+                  <span className="text-[var(--ink-400)]">GitHub</span>
+                  <button
+                    onClick={() => openUrl("https://github.com/Mr-Shaw-Yihan/TTSassist").catch(() => {})}
+                    className="text-[var(--amber-600)] underline underline-offset-2 hover:text-[var(--amber-700)]"
+                  >
+                    github.com/Mr-Shaw-Yihan/TTSassist
+                  </button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[var(--ink-400)]">QQ 群</span>
+                  <span className="font-mono text-[var(--ink-600)]">690907648</span>
+                </div>
+              </div>
+
               {/* 当前版本 + 检查更新 */}
               <div className="mt-3 flex items-center gap-2">
                 <span className="rounded-md bg-[var(--ink-100)] px-2 py-0.5 font-mono text-[11px] text-[var(--ink-500)]">
