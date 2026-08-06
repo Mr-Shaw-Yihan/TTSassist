@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { listMicDevices, checkVbCable, testMic, getMicStatus } from "../../services/invoke";
 import type { AudioDevice, MicStatus } from "../../types";
+import { VbCableInstallDialog } from "./VbCableInstallDialog";
 
 export function MicSettings() {
   const settings = useSettingsStore((s) => s.settings);
@@ -13,6 +14,7 @@ export function MicSettings() {
   const [vbInstalled, setVbInstalled] = useState(true);
   const [micStatus, setMicStatus] = useState<MicStatus | null>(null);
   const [testing, setTesting] = useState(false);
+  const [showInstallDialog, setShowInstallDialog] = useState(false);
 
   useEffect(() => {
     listMicDevices().then(setMicDevices).catch(() => {});
@@ -54,23 +56,19 @@ export function MicSettings() {
           <p className="font-medium">未检测到 VB-CABLE 虚拟声卡</p>
           <p className="mt-1">要让队友听到语音，需先安装 VB-CABLE 驱动：</p>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-            <a
-              href="https://github.com/Mr-Shaw-Yihan/TTSassist/releases/download/v1.1.0/VBCABLE_Driver_Pack45.zip"
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1 rounded-md bg-[var(--amber-500)] px-2 py-1 font-medium text-[var(--paper)] no-underline transition-colors hover:bg-[var(--amber-600)]"
+            <button
+              onClick={() => setShowInstallDialog(true)}
+              className="inline-flex items-center gap-1 rounded-md bg-[var(--amber-500)] px-2 py-1 font-medium text-[var(--paper)] transition-colors hover:bg-[var(--amber-600)]"
             >
-              ⬇ 下载驱动包
-            </a>
+              ⬇ 自动下载安装
+            </button>
+            <span className="text-[var(--ink-300)]">或</span>
             <a href="https://vb-audio.com/Cable/" target="_blank" rel="noreferrer"
                className="underline underline-offset-2 hover:text-[var(--seal)] transition-colors">
-              或访问官网
+              访问官网手动下载
             </a>
           </div>
-          <p className="mt-1.5 text-[10px] text-[var(--amber-600)]/80">
-            解压后右键以管理员身份运行 VBCABLE_Setup_x64.exe，装完重启电脑。
-          </p>
-          <p className="mt-1 text-[10px] text-[var(--ink-300)]">
+          <p className="mt-1.5 text-[10px] text-[var(--ink-300)]">
             VB-CABLE 是捐赠软件（donationware），来源 www.vb-cable.com，欢迎向作者捐赠。
           </p>
         </div>
@@ -144,6 +142,16 @@ export function MicSettings() {
       <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-300)]">
         开启工具栏🎙️开关后，发送的语音会发到所选设备。请在游戏/通话软件里把麦克风设为「CABLE Output」。
       </p>
+      {showInstallDialog && (
+        <VbCableInstallDialog
+          onClose={() => setShowInstallDialog(false)}
+          onInstalled={() => {
+            setShowInstallDialog(false);
+            checkVbCable().then(setVbInstalled).catch(() => {});
+            listMicDevices().then(setMicDevices).catch(() => {});
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -113,6 +113,8 @@ pub fn run() {
             crate::commands::mic::test_mic,
             crate::commands::mic::stop_mic,
             crate::commands::mic::get_mic_status,
+            crate::commands::vbcable::download_vb_cable,
+            crate::commands::vbcable::install_vb_cable,
             crate::hotkey::set_hotkey,
             crate::show_main_window,
         ])

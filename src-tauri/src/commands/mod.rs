@@ -14,6 +14,7 @@ pub mod plugins;
 pub mod settings;
 pub mod tts;
 pub mod update;
+pub mod vbcable;
 
 use std::path::PathBuf;
 use std::sync::RwLock;

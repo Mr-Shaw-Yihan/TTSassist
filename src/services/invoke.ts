@@ -214,3 +214,15 @@ export async function getMicStatus(): Promise<MicStatus> {
 export async function setHotkey(accel: string): Promise<void> {
   return invoke<void>("set_hotkey", { accel });
 }
+
+// ── VB-CABLE 驱动下载与安装 ───────────────────
+
+/** 下载 VB-CABLE 驱动包（返回下载的 zip 路径），进度通过事件推送 */
+export async function downloadVbCable(): Promise<string> {
+  return invoke<string>("download_vb_cable");
+}
+
+/** 解压并启动 VB-CABLE 安装程序（需管理员权限） */
+export async function installVbCable(zipPath: string): Promise<string> {
+  return invoke<string>("install_vb_cable", { zipPath });
+}
