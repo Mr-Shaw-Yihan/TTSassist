@@ -66,17 +66,25 @@ impl PluginManager {
         sweep_orphan_dirs(&manager.plugins_root, &reg);
 
         // 应用 pending 更新：启动时 dll 未被占用，先覆盖安装再加载
+        let mut pending_zips_to_clean: Vec<PathBuf> = Vec::new();
         let mut changed = false;
         for entry in reg.plugins.iter_mut() {
             if let Some(pz) = entry.pending_zip.take() {
+                let zip_path = manager.plugins_root.join(&pz);
                 if let Some(new_manifest) = apply_pending_zip(&manager.plugins_root, &entry.id, &pz) {
                     entry.version = new_manifest.version;
                 }
+                // 先不删 zip，等注册表存盘后再删（防止崩溃后 zip 丢失但注册表仍引用）
+                pending_zips_to_clean.push(zip_path);
                 changed = true;
             }
         }
         if changed {
             let _ = registry::save_registry(&manager.plugins_root, &reg);
+            // 注册表已安全存盘，现在可以安全删除 pending zip
+            for zp in pending_zips_to_clean {
+                let _ = std::fs::remove_file(&zp);
+            }
         }
 
         for entry in &reg.plugins {
@@ -286,13 +294,12 @@ impl PluginManager {
 }
 
 /// 启动时应用 pending 更新 zip：覆盖安装到插件目录。
-/// 成功返回新版本清单（失败返回 None，保留旧版本），无论成败都删除 pending zip。
+/// 成功返回新版本清单（失败返回 None，保留旧版本）。
+/// 注意：此函数不删除 zip 文件，由调用方在注册表存盘后统一删除。
 fn apply_pending_zip(plugins_root: &Path, id: &str, pending_rel: &str) -> Option<PluginManifest> {
     let zip_path = plugins_root.join(pending_rel);
     let result = super::install::extract_and_verify(&zip_path, None)
         .and_then(|staged| copy_staged_to(&staged, plugins_root).map(|_| staged.manifest));
-    // 损坏的 zip 不无限重试
-    let _ = std::fs::remove_file(&zip_path);
     match result {
         Ok(m) => {
             eprintln!("插件 [{id}] 已应用待更新版本 → v{}", m.version);
