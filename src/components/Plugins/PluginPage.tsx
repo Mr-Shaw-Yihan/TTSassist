@@ -254,6 +254,14 @@ export function PluginPage() {
                         ✕ 加载失败
                       </span>
                     )}
+                    {p.category === "local" && (
+                      <span
+                        className="rounded-md bg-sky-600/10 px-1.5 py-0.5 text-[10px] font-medium text-sky-700"
+                        title="本地引擎：合成在本机完成，不依赖云端 API"
+                      >
+                        本地·离线
+                      </span>
+                    )}
                     <div className="flex-1" />
                     {isCurrentEngine ? (
                       <span className="rounded-lg bg-[var(--amber-200)]/50 px-2 py-1 text-[11px] font-medium text-[var(--amber-600)]">
@@ -288,6 +296,14 @@ export function PluginPage() {
                   {/* 描述 */}
                   {p.description && (
                     <p className="mt-2 text-xs leading-relaxed text-[var(--ink-500)]">{p.description}</p>
+                  )}
+
+                  {/* 本地引擎首次使用提示（运行环境按需自动下载） */}
+                  {p.loaded && p.category === "local" && (
+                    <div className="mt-2 rounded-lg border border-sky-600/20 bg-sky-600/5 px-3 py-2 text-[11px] leading-relaxed text-sky-800">
+                      本地引擎首次合成时会自动下载运行环境与音色模型（约几百 MB，需联网），
+                      首次等待时间较长；下载完成后即可完全离线使用。
+                    </div>
                   )}
 
                   {/* 音色清单 */}

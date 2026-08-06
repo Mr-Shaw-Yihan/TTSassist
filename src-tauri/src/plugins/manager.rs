@@ -34,10 +34,12 @@ pub struct PluginInfo {
     pub loaded: bool,
     /// 加载失败原因（loaded=false 时有值）
     pub error: Option<String>,
-    /// 音色列表（解析自 dll 返回的 JSON）
+    /// 音色列表（实时查询自插件，动态音色插件可运行期增减）
     pub voices: Vec<plugin_api::VoiceItem>,
     /// 音频格式（如 mp3）
     pub audio_format: String,
+    /// 引擎类别（manifest.category）："local" 本地离线 / "remote" 联网
+    pub category: String,
 }
 
 /// 插件管理器。dll 一经加载常驻到进程退出（运行期卸载有崩溃风险，见 loader.rs 头注）。
@@ -166,14 +168,20 @@ impl PluginManager {
                 None => (entry.id.clone(), entry.version.clone(), String::new()),
             };
 
+            // 音色表实时重查（动态音色插件运行期新增音色包后能立刻刷出来）
             let voices = loaded_plugin
                 .as_ref()
-                .and_then(|p| serde_json::from_str::<Vec<plugin_api::VoiceItem>>(&p.voices_json).ok())
+                .map(|p| p.query_voices_json())
+                .and_then(|json| serde_json::from_str::<Vec<plugin_api::VoiceItem>>(&json).ok())
                 .unwrap_or_default();
             let audio_format = loaded_plugin
                 .as_ref()
                 .map(|p| p.audio_format.clone())
                 .unwrap_or_default();
+            let category = manifest
+                .as_ref()
+                .map(|m| m.category.clone())
+                .unwrap_or_else(|| "remote".to_string());
 
             result.push(PluginInfo {
                 id: entry.id.clone(),
@@ -184,6 +192,7 @@ impl PluginManager {
                 error,
                 voices,
                 audio_format,
+                category,
             });
         }
         result
@@ -474,6 +483,38 @@ mod tests {
         let pm = PluginManager::load_all(dir.path());
         assert!(pm.get("不存在").is_none());
         assert!(pm.list().is_empty());
+    }
+
+    /// 真机验证：加载本机已安装的 genie-tts 插件（走宿主完整加载链路），
+    /// 校验元信息 / 本地类别 / 动态音色表。不触发合成（避免引导下载几百 MB）。
+    /// 前置：先跑过 plugins/genie-tts/package.ps1 -Install。手动运行：
+    /// cargo test -- --ignored genie插件加载与音色表
+    #[test]
+    #[cfg(target_os = "windows")]
+    #[ignore = "需本机已安装 genie-tts 插件，手动运行"]
+    fn genie插件加载与音色表() {
+        let appdata = std::env::var("APPDATA").expect("APPDATA 环境变量");
+        let plugin_dir = PathBuf::from(appdata).join("com.voiceassist.app/plugins/genie-tts");
+        assert!(plugin_dir.exists(), "genie-tts 插件未安装: {}", plugin_dir.display());
+
+        let plugin = crate::plugins::loader::LoadedPlugin::load(&plugin_dir, APP_VERSION)
+            .expect("genie-tts 插件加载失败");
+        assert_eq!(plugin.dll_id, "genie-tts");
+        assert_eq!(plugin.audio_format, "wav");
+        assert_eq!(plugin.manifest.category, "local", "本地插件类别应为 local");
+        assert!(plugin.manifest.timeout_secs >= 600, "本地引擎超时应放宽");
+
+        // 数据目录环境变量应在加载时注入（指向 <插件目录>/data）
+        let env_key = "VA_PLUGIN_DATA_DIR_GENIE_TTS";
+        let data_dir = std::env::var(env_key).expect("数据目录环境变量应已注入");
+        assert!(data_dir.ends_with("data"), "数据目录应以 data 结尾: {data_dir}");
+
+        // 动态音色表：应含预置角色（磁盘扫描 + 内置清单，不触发网络）
+        let voices_json = plugin.query_voices_json();
+        let voices: Vec<plugin_api::VoiceItem> =
+            serde_json::from_str(&voices_json).expect("音色表应为合法 JSON");
+        assert!(!voices.is_empty(), "动态音色表不应为空");
+        assert!(voices.iter().any(|v| v.id == "feibi"), "应含预置角色 feibi");
     }
 
     /// 实网验证：加载本机已安装的 edge-tts 插件并真实合成。

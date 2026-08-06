@@ -74,7 +74,7 @@ pub fn voices_to_json(voices: &[VoiceItem]) -> String {
 
 /// 插件侧一键生成全部 C ABI 导出函数。
 ///
-/// 用法（插件 crate 的 lib.rs）：
+/// 用法一：静态音色表（音色固定不变的引擎，如 edge-tts）：
 /// ```ignore
 /// plugin_api::va_tts_plugin! {
 ///     id: "edge-tts",
@@ -86,12 +86,27 @@ pub fn voices_to_json(voices: &[VoiceItem]) -> String {
 /// }
 /// ```
 ///
-/// - 前五项必须是字符串字面量（生成 NUL 结尾静态串）；
+/// 用法二：动态音色表（音色可运行期增减的引擎，如本地模型引擎用户自装音色包）：
+/// ```ignore
+/// plugin_api::va_tts_plugin! {
+///     id: "my-local-tts",
+///     name: "本地 TTS",
+///     version: "1.0.0",
+///     audio_format: "wav",
+///     voices: list_voices,         // fn() -> Vec<plugin_api::VoiceItem>
+///     synthesize: my_synthesize,
+/// }
+/// ```
+///
+/// - id/name/version/audio_format 必须是字符串字面量（生成 NUL 结尾静态串）；
+/// - `voices_json` 是字符串字面量；`voices` 是 `fn() -> Vec<VoiceItem>`
+///   （宿主每次查询音色表都会调用它，插件应保证该函数廉价且不 panic）；
 /// - synthesize 是 `fn(&str, Option<&str>) -> Result<Vec<u8>, String>`
 ///   （文本、可选音色 → 音频字节 / 中文错误消息），内部如需异步请自建运行时 block_on；
 /// - 宏内用 catch_unwind 包裹调用，插件 panic 不会跨 FFI 边界（否则未定义行为）。
 #[macro_export]
 macro_rules! va_tts_plugin {
+    // ── 用法一：静态音色表 ──
     (
         id: $id:literal,
         name: $name:literal,
@@ -100,12 +115,79 @@ macro_rules! va_tts_plugin {
         voices_json: $voices:literal,
         synthesize: $synth:expr $(,)?
     ) => {
+        $crate::__va_tts_plugin_common! {
+            id: $id,
+            name: $name,
+            version: $version,
+            audio_format: $fmt,
+            synthesize: $synth,
+        }
+
+        static VA__VOICES: &[u8] = concat!($voices, "\0").as_bytes();
+
+        #[no_mangle]
+        pub extern "C" fn va_list_voices() -> *const ::std::os::raw::c_char {
+            VA__VOICES.as_ptr() as *const ::std::os::raw::c_char
+        }
+    };
+
+    // ── 用法二：动态音色表 ──
+    (
+        id: $id:literal,
+        name: $name:literal,
+        version: $version:literal,
+        audio_format: $fmt:literal,
+        voices: $voices_fn:expr,
+        synthesize: $synth:expr $(,)?
+    ) => {
+        $crate::__va_tts_plugin_common! {
+            id: $id,
+            name: $name,
+            version: $version,
+            audio_format: $fmt,
+            synthesize: $synth,
+        }
+
+        #[no_mangle]
+        pub extern "C" fn va_list_voices() -> *const ::std::os::raw::c_char {
+            // 动态音色表缓存槽：每次调用重算并替换缓存，返回其指针。
+            // 内存约定：宿主调用后立即拷贝，不长期持有指针，故旧缓存失效是安全的。
+            static VA__VOICES_CACHE: ::std::sync::OnceLock<
+                ::std::sync::Mutex<::std::ffi::CString>,
+            > = ::std::sync::OnceLock::new();
+            let cache = VA__VOICES_CACHE.get_or_init(|| {
+                ::std::sync::Mutex::new(::std::ffi::CString::new("[]").unwrap())
+            });
+            let f: fn() -> ::std::vec::Vec<$crate::VoiceItem> = $voices_fn;
+            // 音色函数异常时兜底空表，绝不 panic 跨 FFI 边界
+            let voices = ::std::panic::catch_unwind(f).unwrap_or_default();
+            let json = $crate::voices_to_json(&voices);
+            let c = ::std::ffi::CString::new(json)
+                .unwrap_or_else(|_| ::std::ffi::CString::new("[]").unwrap());
+            let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+            *guard = c;
+            guard.as_ptr()
+        }
+    };
+}
+
+/// 内部宏：va_tts_plugin! 两个分支共用的导出函数
+/// （id/name/version/audio_format + synthesize + 两个 free）。
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __va_tts_plugin_common {
+    (
+        id: $id:literal,
+        name: $name:literal,
+        version: $version:literal,
+        audio_format: $fmt:literal,
+        synthesize: $synth:expr $(,)?
+    ) => {
         // NUL 结尾静态字节串（concat! 编译期拼接）
         static VA__ID: &[u8] = concat!($id, "\0").as_bytes();
         static VA__NAME: &[u8] = concat!($name, "\0").as_bytes();
         static VA__VERSION: &[u8] = concat!($version, "\0").as_bytes();
         static VA__FMT: &[u8] = concat!($fmt, "\0").as_bytes();
-        static VA__VOICES: &[u8] = concat!($voices, "\0").as_bytes();
 
         #[no_mangle]
         pub extern "C" fn va_plugin_id() -> *const ::std::os::raw::c_char {
@@ -125,11 +207,6 @@ macro_rules! va_tts_plugin {
         #[no_mangle]
         pub extern "C" fn va_audio_format() -> *const ::std::os::raw::c_char {
             VA__FMT.as_ptr() as *const ::std::os::raw::c_char
-        }
-
-        #[no_mangle]
-        pub extern "C" fn va_list_voices() -> *const ::std::os::raw::c_char {
-            VA__VOICES.as_ptr() as *const ::std::os::raw::c_char
         }
 
         #[no_mangle]

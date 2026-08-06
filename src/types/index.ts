@@ -84,6 +84,8 @@ export interface PluginInfo {
   voices: PluginVoiceItem[];
   /** 音频格式（如 mp3） */
   audio_format: string;
+  /** 引擎类别："local" 本地离线 / "remote" 联网（老插件缺省 remote） */
+  category?: string;
 }
 
 /** 官方插件索引条目（fetch_plugin_index 返回） */

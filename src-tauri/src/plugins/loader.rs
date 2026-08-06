@@ -27,11 +27,13 @@ pub struct LoadedPlugin {
     pub dll_id: String,
     /// dll 自报的音频格式扩展名（如 "mp3"/"wav"）
     pub audio_format: String,
-    /// va_list_voices 返回的 JSON（加载时已拷贝）
+    /// va_list_voices 返回的 JSON（加载时已拷贝；动态音色插件此为初值，
+    /// 展示用最新音色表请调 query_voices_json）
     pub voices_json: String,
     /// 保持 dll 句柄存活（函数指针有效性依赖它）
     _lib: Arc<libloading::Library>,
     f_synthesize: plugin_api::VaTtsSynthesizeFn,
+    f_list_voices: plugin_api::VaStrFn,
     f_free_bytes: plugin_api::VaFreeBytesFn,
     f_free_cstr: plugin_api::VaFreeCstrFn,
 }
@@ -46,6 +48,19 @@ impl LoadedPlugin {
         // 1. 读清单 + 校验
         let manifest = PluginManifest::load(plugin_dir)?;
         manifest.validate(app_version)?;
+
+        // 1.5 为插件准备数据目录并通过环境变量告知（本地模型类插件在此放模型/缓存）。
+        // 变量名按插件 id 区分（大写、连字符转下划线），多插件互不覆盖；
+        // 加载是串行进行的，此处 set_var 无并发问题。插件应在初始化时读取并缓存。
+        let data_dir = plugin_dir.join("data");
+        if let Err(e) = std::fs::create_dir_all(&data_dir) {
+            eprintln!("提示：插件「{}」数据目录创建失败: {e}", manifest.id);
+        }
+        let env_key = format!(
+            "VA_PLUGIN_DATA_DIR_{}",
+            manifest.id.to_ascii_uppercase().replace('-', "_")
+        );
+        std::env::set_var(&env_key, &data_dir);
 
         // 2. SHA-256 校验 dll
         let dll_path = plugin_dir.join(&manifest.entry);
@@ -66,7 +81,7 @@ impl LoadedPlugin {
         // 3. 加载 dll 取符号
         let lib = unsafe { libloading::Library::new(&dll_path) }
             .map_err(|e| PluginError::DlOpen(format!("加载 {} 失败: {e}", manifest.entry)))?;
-        let (f_synthesize, f_free_bytes, f_free_cstr, dll_id, name, version, audio_format, voices_json) = unsafe {
+        let (f_synthesize, f_free_bytes, f_free_cstr, f_list_voices, dll_id, name, version, audio_format, voices_json) = unsafe {
             let synthesize = get_sym::<plugin_api::VaTtsSynthesizeFn>(&lib, plugin_api::SYM_TTS_SYNTHESIZE)?;
             let free_bytes = get_sym::<plugin_api::VaFreeBytesFn>(&lib, plugin_api::SYM_FREE_BYTES)?;
             let free_cstr = get_sym::<plugin_api::VaFreeCstrFn>(&lib, plugin_api::SYM_FREE_CSTR)?;
@@ -81,6 +96,7 @@ impl LoadedPlugin {
                 synthesize,
                 free_bytes,
                 free_cstr,
+                f_voices,
                 read_cstr(f_id())?,
                 read_cstr(f_name())?,
                 read_cstr(f_version())?,
@@ -111,9 +127,22 @@ impl LoadedPlugin {
             voices_json,
             _lib: Arc::new(lib),
             f_synthesize,
+            f_list_voices,
             f_free_bytes,
             f_free_cstr,
         }))
+    }
+
+    /// 实时重查音色表（调 dll 的 va_list_voices 并立即拷贝）。
+    /// 静态音色插件返回不变的字面量；动态音色插件（本地模型类）返回最新音色列表。
+    /// 失败（dll 返回空指针等）时回退到加载时缓存的 voices_json。
+    pub fn query_voices_json(&self) -> String {
+        let ptr = unsafe { (self.f_list_voices)() };
+        let copied = unsafe { read_cstr(ptr) };
+        match copied {
+            Ok(s) => s,
+            Err(_) => self.voices_json.clone(),
+        }
     }
 
     /// 安全封装的合成调用：文本(+音色) → 音频字节。
@@ -232,22 +261,40 @@ impl TTSEngine for PluginEngine {
     }
 
     fn category(&self) -> EngineCategory {
-        // 插件目前均为联网引擎（edge-tts）；本地插件出现前统一按 Remote 对待
-        EngineCategory::Remote
+        // 按清单 category 字段区分本地/联网引擎（缺省 remote，向后兼容老插件）
+        match self.plugin.manifest.category.as_str() {
+            "local" => EngineCategory::Local,
+            _ => EngineCategory::Remote,
+        }
     }
 
     async fn generate(&self, params: TTSParams<'_>) -> Result<String, TtsError> {
         let plugin = Arc::clone(&self.plugin);
         let text = params.text.to_string();
         let voice = params.voice.map(str::to_string);
+        let timeout_secs = self.plugin.manifest.timeout_secs;
 
-        // FFI 合成是阻塞调用 → 丢到 blocking 线程池，避免卡住异步运行时
-        let audio = tauri::async_runtime::spawn_blocking(move || {
+        // FFI 合成是阻塞调用 → 丢到 blocking 线程池，避免卡住异步运行时。
+        // 本地引擎首次推理可能加载模型（数十秒）甚至引导下载运行环境（数分钟），
+        // 超时上限由清单 timeout_secs 声明（默认 60s）。
+        let fut = tauri::async_runtime::spawn_blocking(move || {
             plugin.synthesize(&text, voice.as_deref())
-        })
+        });
+        let audio = match tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_secs),
+            fut,
+        )
         .await
-        .map_err(|e| TtsError::Network(format!("插件任务中断: {e}")))?
-        .map_err(|e| TtsError::Network(e.to_string()))?;
+        {
+            Ok(join_result) => join_result
+                .map_err(|e| TtsError::Network(format!("插件任务中断: {e}")))?
+                .map_err(|e| TtsError::Network(e.to_string()))?,
+            Err(_) => {
+                return Err(TtsError::Network(format!(
+                    "插件合成超时（超过 {timeout_secs} 秒）。本地引擎首次使用需下载运行环境与模型，请联网后重试；若反复超时请检查插件状态。"
+                )));
+            }
+        };
 
         if audio.is_empty() {
             return Err(TtsError::Network("插件未返回音频".into()));

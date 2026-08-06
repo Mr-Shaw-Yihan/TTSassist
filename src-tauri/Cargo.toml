@@ -38,6 +38,8 @@ libloading = "0.8"
 sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 plugin-api = { path = "../plugins/plugin-api" }
+# 只用 time（插件合成超时控制）；运行时时钟由 tauri 的 tokio 运行时提供
+tokio = { version = "1", features = ["time"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
