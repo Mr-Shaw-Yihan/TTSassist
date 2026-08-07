@@ -10,7 +10,7 @@ use std::sync::{Once, OnceLock};
 plugin_api::va_tts_plugin! {
     id: "edge-tts",
     name: "Edge TTS（免费·微软）",
-    version: "1.0.0",
+    version: "0.1.0",
     audio_format: "mp3",
     voices_json: r#"[{"id":"zh-CN-XiaoxiaoNeural","label":"晓晓（女·温暖）"},{"id":"zh-CN-YunxiNeural","label":"云希（男·青年）"},{"id":"zh-CN-YunyangNeural","label":"云扬（男·新闻）"},{"id":"zh-CN-XiaoyiNeural","label":"晓伊（女·活泼）"},{"id":"zh-CN-YunjianNeural","label":"云健（男·体育）"}]"#,
     synthesize: synthesize,

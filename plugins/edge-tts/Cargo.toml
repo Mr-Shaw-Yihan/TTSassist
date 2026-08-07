@@ -1,6 +1,6 @@
 [package]
 name = "edge-tts"
-version = "1.0.0"
+version = "0.1.0"
 description = "Edge TTS 插件：免费、无需 Key 的微软 Edge 语音（非官方接口，可能不稳定）"
 edition = "2021"
 

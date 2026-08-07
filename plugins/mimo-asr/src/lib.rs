@@ -13,7 +13,7 @@ use base64::Engine;
 plugin_api::va_asr_plugin! {
     id: "mimo-asr",
     name: "MiMo ASR（小米·云端）",
-    version: "1.0.0",
+    version: "0.1.0",
     languages: r#"[{"code":"auto","label":"自动检测"},{"code":"zh","label":"中文"},{"code":"en","label":"English"}]"#,
     transcribe: transcribe,
 }

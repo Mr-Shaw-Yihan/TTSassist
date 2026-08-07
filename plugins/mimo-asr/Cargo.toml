@@ -1,6 +1,6 @@
 [package]
 name = "mimo-asr"
-version = "1.0.0"
+version = "0.1.0"
 description = "MiMo ASR 插件：小米 MiMo-V2.5-ASR 语音识别（云端，需 API Key）"
 edition = "2021"
 

@@ -15,7 +15,7 @@ $ErrorActionPreference = "Stop"
 
 $PluginId   = "mimo-asr"
 $PluginName = "MiMo ASR（小米·云端）"
-$Version    = "1.0.0"
+$Version    = "0.1.0"
 $MinAppVer  = "1.5.0"
 $Desc       = "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测"
 
@@ -71,6 +71,13 @@ $ZipPath = Join-Path $DistDir "$PluginId-$Version.zip"
 Compress-Archive -Path (Join-Path $StageDir "*") -DestinationPath $ZipPath -Force
 Write-Host "打包完成: $ZipPath" -ForegroundColor Green
 Write-Host "  plugin.dll SHA-256: $Hash"
+
+# 同步到安装包资源目录（tauri build 时内置进安装包，供"插件库"安装）
+$ResDir = Join-Path $PluginDir "..\..\src-tauri\resources\plugins"
+New-Item -ItemType Directory -Force -Path $ResDir | Out-Null
+Remove-Item (Join-Path $ResDir "$PluginId-*.zip") -ErrorAction SilentlyContinue
+Copy-Item $ZipPath $ResDir -Force
+Write-Host "已同步到安装包资源: $ResDir" -ForegroundColor Green
 
 # ── 4. 可选：安装到本机 VoiceAssist ──────────────────
 if ($Install) {

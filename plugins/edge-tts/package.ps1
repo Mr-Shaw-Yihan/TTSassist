@@ -15,7 +15,7 @@ $ErrorActionPreference = "Stop"
 
 $PluginId   = "edge-tts"
 $PluginName = "Edge TTS（免费·微软）"
-$Version    = "1.0.0"
+$Version    = "0.1.0"
 $MinAppVer  = "1.3.1"
 $Desc       = "免费、无需 Key 的微软 Edge 语音，非官方接口可能不稳定"
 

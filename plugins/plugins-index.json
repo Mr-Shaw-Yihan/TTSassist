@@ -1,0 +1,20 @@
+{
+    "plugins":  [
+                    {
+                        "id":  "edge-tts",
+                        "name":  "Edge TTS（免费·微软）",
+                        "version":  "0.1.0",
+                        "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/edge-tts-0.1.0.zip",
+                        "checksum":  "db4d7502b7adae21687acc8db6f4cb5fe17dd9d8b4cf3c403b305872e2af5e3b",
+                        "description":  "免费、无需 Key 的微软 Edge 语音（非官方接口，可能不稳定）"
+                    },
+                    {
+                        "id":  "mimo-asr",
+                        "name":  "MiMo ASR（小米·云端）",
+                        "version":  "0.1.0",
+                        "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/mimo-asr-0.1.0.zip",
+                        "checksum":  "5195d1b1a1aa2738f04a2a0849cea0636a874fd5d8181682be77d40cd3be5678",
+                        "description":  "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测"
+                    }
+                ]
+}
