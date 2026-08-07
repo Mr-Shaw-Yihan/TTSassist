@@ -1,5 +1,5 @@
 // 设置页面（主界面侧边栏"设置"项的右侧内容区）：分类收纳（手风琴），消除平铺卡顿。
-// 分类：语音合成 / 虚拟麦克风 / 输入设备（仅装了 ASR 插件时显示） / 快捷键 / 外观 / 关于。
+// 分类：语音合成 / 虚拟麦克风 / 语音输入（仅装了 ASR 插件时显示） / 快捷键 / 外观 / 关于。
 // 虚拟麦克风轮询隔离在 MicSettings 组件，分类收起即停止轮询。
 
 import { useState, useEffect } from "react";
@@ -46,7 +46,7 @@ export function SettingsPage() {
     getVersion().then(setAppVersion).catch(() => {});
   }, []);
 
-  // 「输入设备」分类仅在安装了可用 ASR 插件时显示（与插件绑定，非本体功能）
+  // 「语音输入」分类仅在安装了可用 ASR 插件时显示（与插件绑定，非本体功能）
   const [asrAvailable, setAsrAvailable] = useState(false);
   useEffect(() => {
     listAsrPlugins()
@@ -443,9 +443,9 @@ export function SettingsPage() {
             <MicSettings />
           </Section>
 
-          {/* 输入设备（ASR 插件的语音输入配置，仅装了 ASR 插件时显示） */}
+          {/* 语音输入（ASR 插件的配置，仅装了 ASR 插件时显示） */}
           {asrAvailable && (
-            <Section title="输入设备">
+            <Section title="语音输入">
               <VoiceInputSettings />
             </Section>
           )}
