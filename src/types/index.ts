@@ -61,6 +61,8 @@ export interface Settings {
   voice_input_hotkey: string;
   /** 语音输入功能总开关 */
   voice_input_enabled: boolean;
+  /** 语音输入录音设备 deviceId（空=系统默认麦克风） */
+  voice_input_device: string;
 }
 
 /** 版本更新信息（check_app_update 返回） */

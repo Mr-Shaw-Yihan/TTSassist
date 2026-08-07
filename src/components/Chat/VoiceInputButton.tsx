@@ -65,7 +65,7 @@ export function VoiceInputButton({ onResult }: Props) {
           return;
         }
         const recorder = new AudioRecorder();
-        await recorder.start();
+        await recorder.start(settings?.voice_input_device || undefined);
         recorderRef.current = recorder;
         setPhase("recording");
         startTimer();

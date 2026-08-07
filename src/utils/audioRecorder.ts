@@ -23,25 +23,40 @@ export class AudioRecorder {
     return this.processor !== null;
   }
 
-  /** 开始录音（申请麦克风权限；拒绝时抛错，文案可直接展示） */
-  async start(): Promise<void> {
+  /** 开始录音（申请麦克风权限；拒绝时抛错，文案可直接展示）。
+   * deviceId：指定录音设备（设置页选择），空=系统默认麦克风 */
+  async start(deviceId?: string): Promise<void> {
     if (this.recording) return;
     this.chunks = [];
 
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          // 指定设备：设备拔插后 id 失效会抛 OverconstrainedError，外层降级重试默认设备
+          ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+        },
       });
     } catch (e) {
       const err = e as DOMException;
-      if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+      // 指定设备不可用（已拔插/更换）→ 降级用默认设备再试一次
+      if (err.name === "OverconstrainedError" && deviceId) {
+        this.chunks = [];
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+        }).catch((e2) => {
+          throw new Error(`所选麦克风不可用，默认麦克风也无法打开：${(e2 as DOMException).message || e2}`);
+        });
+      } else if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
         throw new Error("麦克风权限被拒绝，请在系统设置中允许本应用使用麦克风");
-      }
-      if (err.name === "NotFoundError") {
+      } else if (err.name === "NotFoundError") {
         throw new Error("未检测到麦克风设备");
+      } else {
+        throw new Error(`无法打开麦克风：${err.message || err.name}`);
       }
-      throw new Error(`无法打开麦克风：${err.message || err.name}`);
     }
 
     const ctx = new AudioContext();

@@ -56,6 +56,7 @@ pub fn load_settings(data_dir: &Path) -> Settings {
             asr_language: v.get("asr_language").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.asr_language),
             voice_input_hotkey: v.get("voice_input_hotkey").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.voice_input_hotkey),
             voice_input_enabled: v.get("voice_input_enabled").and_then(|x| x.as_bool()).unwrap_or(default.voice_input_enabled),
+            voice_input_device: v.get("voice_input_device").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.voice_input_device),
         },
         Err(_) => default,
     }
@@ -92,6 +93,7 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "asr_language" => if let Some(v) = value.as_str() { s.asr_language = v.to_string() },
         "voice_input_hotkey" => if let Some(v) = value.as_str() { s.voice_input_hotkey = v.to_string() },
         "voice_input_enabled" => if let Some(v) = value.as_bool() { s.voice_input_enabled = v },
+        "voice_input_device" => if let Some(v) = value.as_str() { s.voice_input_device = v.to_string() },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;

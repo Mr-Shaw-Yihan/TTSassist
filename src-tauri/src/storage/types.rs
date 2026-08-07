@@ -98,6 +98,9 @@ pub struct Settings {
     /// 语音输入总开关
     #[serde(default = "default_true")]
     pub voice_input_enabled: bool,
+    /// 语音输入录音设备 id（浏览器 deviceId，空=系统默认麦克风）
+    #[serde(default)]
+    pub voice_input_device: String,
 }
 
 impl Default for Settings {
@@ -128,6 +131,7 @@ impl Default for Settings {
             asr_language: "zh".to_string(),
             voice_input_hotkey: String::new(),
             voice_input_enabled: true,
+            voice_input_device: String::new(),
         }
     }
 }

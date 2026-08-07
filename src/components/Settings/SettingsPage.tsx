@@ -1,5 +1,5 @@
 // 设置页面（主界面侧边栏"设置"项的右侧内容区）：分类收纳（手风琴），消除平铺卡顿。
-// 分类：语音合成 / 虚拟麦克风 / 快捷键 / 外观 / 关于。
+// 分类：语音合成 / 虚拟麦克风 / 语音输入 / 快捷键 / 外观 / 关于。
 // 虚拟麦克风轮询隔离在 MicSettings 组件，分类收起即停止轮询。
 
 import { useState, useEffect } from "react";
@@ -11,6 +11,7 @@ import { importCloneVoice, removeCloneVoice, pickAudioFile, listPlugins } from "
 import type { MossVoice, PluginInfo } from "../../types";
 import { HotkeyRecorder } from "./HotkeyRecorder";
 import { MicSettings } from "./MicSettings";
+import { VoiceInputSettings } from "./VoiceInputSettings";
 
 const PRESET_VOICES = [
   { id: "mimo_default", label: "默认 (mimo_default)" },
@@ -432,6 +433,11 @@ export function SettingsPage() {
           {/* 虚拟麦克风 */}
           <Section title="虚拟麦克风">
             <MicSettings />
+          </Section>
+
+          {/* 语音输入 */}
+          <Section title="语音输入">
+            <VoiceInputSettings />
           </Section>
 
           {/* 快捷键 */}
