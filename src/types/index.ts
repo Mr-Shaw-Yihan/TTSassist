@@ -53,6 +53,14 @@ export interface Settings {
   plugin_voices: Record<string, string>;
   /** 用户选择"忽略"的更新版本号（空=未忽略） */
   update_ignored_version: string;
+  /** 当前选择的 ASR 插件 id（空=未配置，自动用第一个可用的） */
+  asr_plugin: string;
+  /** ASR 识别语言（auto/zh/en） */
+  asr_language: string;
+  /** 语音输入全局快捷键（空=未设置） */
+  voice_input_hotkey: string;
+  /** 语音输入功能总开关 */
+  voice_input_enabled: boolean;
 }
 
 /** 版本更新信息（check_app_update 返回） */
@@ -105,6 +113,17 @@ export interface BundledPluginInfo {
   description: string;
   /** 本机是否已安装 */
   installed: boolean;
+}
+
+/** ASR 插件信息（list_asr_plugins 返回） */
+export interface AsrPluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  /** 是否加载成功可用 */
+  loaded: boolean;
+  /** 支持语言 JSON 字符串，如 [{"code":"zh","label":"中文"}] */
+  languages: string;
 }
 
 /** 音频输出设备 */

@@ -2,7 +2,7 @@
 // 后端每个 #[tauri::command] 对应一个函数，参数名与后端 fn 参数 snake_case 一致。
 
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry, BundledPluginInfo, UpdateInfo } from "../types";
+import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry, BundledPluginInfo, UpdateInfo, AsrPluginInfo } from "../types";
 
 // ── TTS ──────────────────────────────────────────
 
@@ -45,6 +45,26 @@ export async function listBundledPlugins(): Promise<BundledPluginInfo[]> {
 /** 安装内置插件，返回提示文案 */
 export async function installBundledPlugin(id: string): Promise<string> {
   return invoke<string>("install_bundled_plugin", { id });
+}
+
+// ── ASR 语音识别 ──────────────────────────────
+
+/** 列出已安装的 ASR 插件（含加载状态、支持语言） */
+export async function listAsrPlugins(): Promise<AsrPluginInfo[]> {
+  return invoke<AsrPluginInfo[]>("list_asr_plugins");
+}
+
+/** 转写音频：WAV 字节 + 插件 id + 语言代码 → 识别文本 */
+export async function asrTranscribe(
+  audioBytes: Uint8Array,
+  pluginId: string,
+  language: string,
+): Promise<string> {
+  return invoke<string>("asr_transcribe", {
+    audioBytes,
+    pluginId,
+    language,
+  });
 }
 
 // ── 版本更新 ─────────────────────────────────────

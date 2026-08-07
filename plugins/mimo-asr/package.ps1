@@ -1,4 +1,4 @@
-# MiMo ASR 插件打包脚本（PowerShell）
+﻿# MiMo ASR 插件打包脚本（PowerShell）
 #
 # 用法（在 plugins/mimo-asr 目录下）：
 #   powershell -ExecutionPolicy Bypass -File .\package.ps1            # 只打包 zip

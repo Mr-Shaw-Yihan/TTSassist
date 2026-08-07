@@ -1,7 +1,8 @@
-// 输入框组件：回车/按钮发送，调 generate_tts
+// 输入框组件：回车/按钮发送，调 generate_tts；集成语音输入（ASR）
 // 大纲 4.2
 
 import { useState, useRef } from "react";
+import { VoiceInputButton } from "./VoiceInputButton";
 
 interface Props {
   onSend: (text: string) => Promise<void>;
@@ -29,6 +30,13 @@ export function InputBox({ onSend }: Props) {
 
   return (
     <div className="flex gap-2">
+      <VoiceInputButton
+        onResult={(t) => {
+          // 识别结果追加到输入框（已有内容时直接拼接，符合中文习惯）
+          setText((prev) => (prev ? prev + t : t));
+          inputRef.current?.focus();
+        }}
+      />
       <input
         ref={inputRef}
         className="flex-1 rounded-xl border border-[var(--ink-200)] bg-[var(--paper)] px-3.5 py-2.5 text-sm text-[var(--ink-900)] outline-none transition-colors placeholder:text-[var(--ink-300)] focus:border-[var(--amber-500)]"
