@@ -21,6 +21,10 @@ plugin_api::va_asr_plugin! {
 const API_BASE: &str = "https://api.xiaomimimo.com/v1/chat/completions";
 const MODEL: &str = "mimo-v2.5-asr";
 
+/// 音频大小上限：MiMo API 要求 Base64 编码后 ≤ 10MB，
+/// Base64 体积 ≈ 原始体积 × 4/3，故原始音频上限取 7MB（留余量）
+const MAX_AUDIO_BYTES: usize = 7 * 1024 * 1024;
+
 /// 全局 tokio 运行时（转写入口是同步 C ABI，异步 HTTP 在自己的运行时里 block_on）
 static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
@@ -35,6 +39,16 @@ fn runtime() -> &'static tokio::runtime::Runtime {
 
 /// 音频字节 + 可选语言 → 转写文本
 fn transcribe(audio: &[u8], language: Option<&str>) -> Result<String, String> {
+    if audio.is_empty() {
+        return Err("音频为空，无法识别".to_string());
+    }
+    if audio.len() > MAX_AUDIO_BYTES {
+        let mb = audio.len() as f64 / 1024.0 / 1024.0;
+        return Err(format!(
+            "音频过大（{mb:.1} MB），MiMo ASR 单次识别上限约 7 MB，请缩短录音时长"
+        ));
+    }
+
     let api_key = std::env::var("MIMO_API_KEY")
         .map_err(|_| "未配置 MIMO_API_KEY，请在设置中填入 MiMo API Key".to_string())?;
 
@@ -113,6 +127,13 @@ async fn call_mimo_asr(
     let status = resp.status();
     if !status.is_success() {
         let text = resp.text().await.unwrap_or_default();
+        // 常见错误友好提示
+        if status.as_u16() == 401 || status.as_u16() == 403 {
+            return Err(format!("MiMo ASR 鉴权失败（{status}）：API Key 无效或已过期，请在设置中检查"));
+        }
+        if status.as_u16() == 429 {
+            return Err("MiMo ASR 请求过于频繁（429）：已触发限流，请稍后重试".to_string());
+        }
         return Err(format!("MiMo ASR 返回 {status}: {text}"));
     }
 
@@ -162,6 +183,19 @@ mod tests {
     fn 未知格式默认wav() {
         let data = [0x00, 0x01, 0x02, 0x03];
         assert_eq!(detect_audio_mime(&data), "audio/wav");
+    }
+
+    #[test]
+    fn 空音频拒绝() {
+        let err = transcribe(&[], None).unwrap_err();
+        assert!(err.contains("音频为空"), "错误文案不对: {err}");
+    }
+
+    #[test]
+    fn 超大音频拒绝() {
+        let big = vec![0u8; MAX_AUDIO_BYTES + 1];
+        let err = transcribe(&big, None).unwrap_err();
+        assert!(err.contains("音频过大"), "错误文案不对: {err}");
     }
 
     /// 集成测试：需要环境变量 MIMO_API_KEY 为有效的 API Key。
