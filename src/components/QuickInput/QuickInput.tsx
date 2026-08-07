@@ -7,6 +7,9 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getAudioUrl, getSettings } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useTauriListen } from "../../hooks/useTauriListen";
+import { useVoiceInputHotkey } from "../../hooks/useVoiceInputHotkey";
+import { useVoiceInputStore } from "../../stores/voiceInputStore";
+import { VolumeMeter } from "../Chat/VolumeMeter";
 import { MicToggle } from "../Chat/MicToggle";
 
 /** 发送/合成的三态反馈 */
@@ -22,6 +25,29 @@ export function QuickInput() {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const inpRef = useRef<HTMLInputElement | null>(null);
   const setSettings = useSettingsStore((s) => s.setSettings);
+
+  // 语音输入全局快捷键会话（按住说话）：浮窗是游戏内主场景，必须支持
+  useVoiceInputHotkey();
+  const viPhase = useVoiceInputStore((s) => s.phase);
+  const viRecorder = useVoiceInputStore((s) => s.recorder);
+  const viSeconds = useVoiceInputStore((s) => s.seconds);
+  const viError = useVoiceInputStore((s) => s.error);
+
+  // 快捷键识别结果 → 填入浮窗输入框；错误提示 6 秒后自动消失
+  useEffect(() => {
+    const onResult = (e: Event) => {
+      const t = (e as CustomEvent<string>).detail;
+      setText((prev) => (prev ? prev + t : t));
+      inpRef.current?.focus();
+    };
+    window.addEventListener("voice-input:result", onResult);
+    return () => window.removeEventListener("voice-input:result", onResult);
+  }, []);
+  useEffect(() => {
+    if (!viError) return;
+    const t = setTimeout(() => useVoiceInputStore.getState().set({ error: null }), 6000);
+    return () => clearTimeout(t);
+  }, [viError]);
 
   // 应用主题
   function applyTheme(theme?: string) {
@@ -160,18 +186,35 @@ export function QuickInput() {
 
       {/* 状态条（三态反馈，常驻占位避免跳动，内容按需显示） */}
       <div className="px-3 pb-2.5">
-        {status.kind === "converting" && (
+        {viPhase === "recording" && (
+          <div className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[11px] text-red-600 animate-fade">
+            <span className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-red-500" />
+            <span className="shrink-0">录音中 · {viSeconds}s</span>
+            {viRecorder && <VolumeMeter recorder={viRecorder} className="h-1.5 flex-1" barClassName="bg-red-500" />}
+          </div>
+        )}
+        {viPhase === "transcribing" && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[11px] text-red-600 animate-fade">
+            <span className="animate-pulse">正在识别，请稍候…</span>
+          </div>
+        )}
+        {viPhase === "idle" && viError && (
+          <div className="rounded-lg border border-[var(--seal)]/30 bg-[var(--seal)]/10 px-3 py-1.5 text-[11px] leading-snug text-[var(--seal)] animate-fade">
+            ✗ {viError}
+          </div>
+        )}
+        {viPhase === "idle" && !viError && status.kind === "converting" && (
           <div className="flex items-center gap-1.5 rounded-lg bg-[var(--amber-200)]/25 px-3 py-1.5 text-[11px] text-[var(--amber-600)] animate-fade">
             <span className="inline-block h-1.5 w-1.5 animate-ping rounded-full bg-[var(--amber-500)]" />
             正在合成语音…
           </div>
         )}
-        {status.kind === "success" && (
+        {viPhase === "idle" && !viError && status.kind === "success" && (
           <div className="rounded-lg bg-green-500/10 px-3 py-1.5 text-[11px] text-green-600 animate-fade">
             ✓ 已发送并播放
           </div>
         )}
-        {status.kind === "error" && (
+        {viPhase === "idle" && !viError && status.kind === "error" && (
           <div className="rounded-lg border border-[var(--seal)]/30 bg-[var(--seal)]/10 px-3 py-1.5 text-[11px] leading-snug text-[var(--seal)] animate-fade">
             ✗ 合成失败：{status.message}
           </div>

@@ -235,6 +235,11 @@ export async function setHotkey(accel: string): Promise<void> {
   return invoke<void>("set_hotkey", { accel });
 }
 
+/** 设置语音输入快捷键（按住说话）；空串 = 清除 */
+export async function setVoiceInputHotkey(accel: string): Promise<void> {
+  return invoke<void>("set_voice_input_hotkey", { accel });
+}
+
 // ── VB-CABLE 驱动下载与安装 ───────────────────
 
 /** 下载 VB-CABLE 驱动包（返回下载的 zip 路径），进度通过事件推送 */

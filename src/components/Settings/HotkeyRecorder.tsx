@@ -1,15 +1,24 @@
-// 快捷键录入组件：点「录入」→ 按下组合键 → 自动识别 → 「应用」生效。
+// 快捷键录入组件（通用）：点「录入」→ 按下组合键 → 自动识别 → 「应用」生效。
 // 游戏/Discord 标准的快捷键录入交互。
+// 泛化后供浮窗快捷键与语音输入快捷键共用：value 提供当前值，onApply 负责后端注册与持久化。
 
 import { useState, useEffect, useRef } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { setHotkey, getSettings } from "../../services/invoke";
+import { getSettings } from "../../services/invoke";
 import { buildAccelerator } from "../../utils/accelerator";
 
-export function HotkeyRecorder() {
-  const settings = useSettingsStore((s) => s.settings);
+interface Props {
+  /** 当前已设置的快捷键（空串显示「未设置」） */
+  value: string;
+  /** 应用新快捷键（后端验证+注册+持久化） */
+  onApply: (accel: string) => Promise<void>;
+  /** 录入提示文案 */
+  hint?: string;
+}
+
+export function HotkeyRecorder({ value, onApply, hint }: Props) {
   const setSettings = useSettingsStore((s) => s.setSettings);
-  const current = settings?.hotkey_show_window ?? "Alt+V";
+  const current = value;
 
   const [recording, setRecording] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
@@ -47,7 +56,7 @@ export function HotkeyRecorder() {
     setSaving(true);
     setError(null);
     try {
-      await setHotkey(pending);
+      await onApply(pending);
       // 立即刷新 store，让显示即时更新（不等事件异步往返）
       setSettings(await getSettings());
       setRecording(false);
@@ -96,7 +105,7 @@ export function HotkeyRecorder() {
       ) : (
         <div className="flex items-center gap-2">
           <div className="flex-1 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-center font-mono text-sm text-[var(--ink-900)]">
-            {current}
+            {current || <span className="text-[var(--ink-300)]">未设置</span>}
           </div>
           <button
             onClick={startRecording}
@@ -106,10 +115,8 @@ export function HotkeyRecorder() {
           </button>
         </div>
       )}
-      {!recording && (
-        <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-300)]">
-          点「录入」后按下想要的组合键（如 Alt+V、Ctrl+Shift+F1）。
-        </p>
+      {!recording && hint && (
+        <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-300)]">{hint}</p>
       )}
     </div>
   );

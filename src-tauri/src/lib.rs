@@ -75,6 +75,23 @@ pub fn run() {
             });
             app.manage(FavoriteHotkeys::new());
 
+            // 语音输入快捷键（按住说话）：非空才注册，失败只记日志
+            let vi_accel = settings.voice_input_hotkey.clone();
+            let vi_ok = if vi_accel.is_empty() {
+                false
+            } else {
+                match hotkey::register_voice_input_hotkey(app.handle(), &vi_accel) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        eprintln!("注册语音输入快捷键 {vi_accel} 失败: {e}");
+                        false
+                    }
+                }
+            };
+            app.manage(hotkey::VoiceInputHotkeyState {
+                current: Mutex::new(vi_ok.then_some(vi_accel)),
+            });
+
             // 加载收藏用于注册收藏快捷键（data_dir 随后移入 AppState）
             let favorites = storage::favorites::load_favorites(&data_dir);
 
@@ -124,6 +141,7 @@ pub fn run() {
             crate::asr::list_asr_plugins,
             crate::asr::asr_transcribe,
             crate::hotkey::set_hotkey,
+            crate::hotkey::set_voice_input_hotkey,
             crate::show_main_window,
         ])
         .run(tauri::generate_context!())

@@ -4,6 +4,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTauriListen } from "./hooks/useTauriListen";
+import { useVoiceInputHotkey } from "./hooks/useVoiceInputHotkey";
 import { InputBox } from "./components/Chat/InputBox";
 import { MessageBubble } from "./components/Chat/MessageBubble";
 import { VolumeControl } from "./components/Chat/VolumeSlider";
@@ -176,6 +177,9 @@ function App() {
       console.error("重读设置失败", e);
     }
   }, [setSettings]);
+
+  // 语音输入全局快捷键会话（按住说话）：录音状态展示在 InputBox
+  useVoiceInputHotkey();
 
   // 兜底：窗口聚焦时同时刷新收藏
   useEffect(() => {

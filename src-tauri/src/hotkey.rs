@@ -23,6 +23,11 @@ pub struct FavoriteHotkeys {
     pub registered: Mutex<HashSet<String>>,
 }
 
+/// 记录当前已注册的语音输入快捷键（用于切换时注销旧的）
+pub struct VoiceInputHotkeyState {
+    pub current: Mutex<Option<String>>,
+}
+
 impl FavoriteHotkeys {
     pub fn new() -> Self {
         Self { registered: Mutex::new(HashSet::new()) }
@@ -109,6 +114,84 @@ pub fn set_hotkey(
     }
 
     // 广播 settings:changed，让前端 store 刷新（与其它设置项一致）
+    notify_changed(&app, EVENT_SETTINGS_CHANGED);
+
+    Ok(())
+}
+
+/// 注册语音输入全局快捷键：按住说话模式。
+/// 按下 emit "voice-input:pressed"，松开 emit "voice-input:released"，前端可见窗口接管录音会话。
+pub fn register_voice_input_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
+    app.global_shortcut()
+        .on_shortcut(accel, |app, _shortcut, event| {
+            // 总开关关闭 → 不响应
+            let enabled = app
+                .try_state::<AppState>()
+                .and_then(|s| s.settings.read().ok().map(|g| g.voice_input_enabled))
+                .unwrap_or(false);
+            if !enabled {
+                return;
+            }
+            match event.state() {
+                ShortcutState::Pressed => {
+                    let _ = app.emit("voice-input:pressed", ());
+                }
+                ShortcutState::Released => {
+                    let _ = app.emit("voice-input:released", ());
+                }
+            }
+        })
+        .map_err(|e| format!("注册语音输入快捷键失败：{e}"))
+}
+
+/// 设置（更换/清除）语音输入快捷键。空串 = 注销并清除。
+///
+/// 流程：无变化直接返回 → 注册新（非空；失败则旧的保持）→ 注销旧 → 持久化。
+#[tauri::command]
+pub fn set_voice_input_hotkey(
+    app: AppHandle,
+    accel: String,
+    state: State<'_, VoiceInputHotkeyState>,
+    app_state: State<'_, crate::commands::AppState>,
+) -> Result<(), String> {
+    let accel = accel.trim().to_string();
+
+    let current = state
+        .current
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or(None);
+    if current.as_deref() == Some(accel.as_str()) || (accel.is_empty() && current.is_none()) {
+        return Ok(());
+    }
+
+    // 1. 先注册新快捷键（验证有效；失败则旧的保持不动）
+    if !accel.is_empty() {
+        register_voice_input_hotkey(&app, &accel)?;
+    }
+
+    // 2. 注销旧快捷键
+    if let Some(old) = current.as_ref() {
+        if old != &accel {
+            let _ = app.global_shortcut().unregister(old.as_str());
+        }
+    }
+
+    // 3. 更新状态
+    if let Ok(mut g) = state.current.lock() {
+        *g = if accel.is_empty() { None } else { Some(accel.clone()) };
+    }
+
+    // 4. 持久化 + 同步内存 settings + 广播
+    crate::storage::settings::update_setting(
+        &app_state.data_dir,
+        "voice_input_hotkey",
+        serde_json::json!(accel),
+    )
+    .map_err(|e| format!("保存快捷键失败：{e}"))?;
+    if let Ok(mut g) = app_state.settings.write() {
+        g.voice_input_hotkey = accel;
+    }
     notify_changed(&app, EVENT_SETTINGS_CHANGED);
 
     Ok(())
