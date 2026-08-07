@@ -1,6 +1,6 @@
 [package]
 name = "genie-tts"
-version = "1.0.0"
+version = "0.1.0"
 description = "Genie TTS 本地推理插件：GPT-SoVITS ONNX 引擎，CPU 离线合成，音色包可扩展"
 edition = "2021"
 

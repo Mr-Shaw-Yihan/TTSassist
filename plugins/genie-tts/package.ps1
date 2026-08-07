@@ -18,7 +18,7 @@ $ErrorActionPreference = "Stop"
 
 $PluginId   = "genie-tts"
 $PluginName = "Genie TTS（本地·离线）"
-$Version    = "1.0.0"
+$Version    = "0.1.0"
 $MinAppVer  = "1.4.0"
 $Desc       = "GPT-SoVITS ONNX 本地推理引擎，CPU 离线合成，音色包可扩展（首次使用自动下载运行环境）"
 

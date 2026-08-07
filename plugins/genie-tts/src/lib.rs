@@ -30,7 +30,7 @@ mod voices;
 plugin_api::va_tts_plugin! {
     id: "genie-tts",
     name: "Genie TTS（本地·离线）",
-    version: "1.0.0",
+    version: "0.1.0",
     audio_format: "wav",
     voices: voices::list_voices,   // 动态音色表（磁盘扫描，见 voices.rs）
     synthesize: synthesize,
