@@ -79,13 +79,20 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw "未找到 gh CLI，请先安装并登录：winget install GitHub.cli; gh auth login"
 }
 
-$Existing = gh release view $Tag 2>$null
-if ($LASTEXITCODE -eq 0) {
+# 注意：gh 在 Release 不存在时会往 stderr 写 "release not found"，
+# 在 $ErrorActionPreference = "Stop" 下带重定向会直接中断脚本，
+# 所以这里临时降级为 Continue，只看退出码。
+$ErrorActionPreference = "Continue"
+$null = gh release view $Tag 2>&1 | Out-String
+$ReleaseExists = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = "Stop"
+
+if ($ReleaseExists) {
     Write-Host "Release $Tag 已存在，覆盖上传资产..." -ForegroundColor Yellow
-    gh release upload $Tag @Assets --clobber
+    gh release upload $Tag @Assets --clobber 2>&1 | ForEach-Object { "$_" }
 } else {
     Write-Host "创建 Release $Tag ..." -ForegroundColor Cyan
-    gh release create $Tag @Assets --title "插件库 $Tag" --notes "VoiceAssist 官方插件索引与各插件安装包。宿主应用从 releases/latest/download/plugins-index.json 拉取索引。"
+    gh release create $Tag @Assets --title "插件库 $Tag" --notes "VoiceAssist 官方插件索引与各插件安装包。宿主应用从 releases/latest/download/plugins-index.json 拉取索引。" 2>&1 | ForEach-Object { "$_" }
 }
 if ($LASTEXITCODE -ne 0) { throw "gh release 操作失败" }
 
