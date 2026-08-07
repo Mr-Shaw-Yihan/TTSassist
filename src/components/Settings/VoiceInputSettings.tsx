@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { listAsrPlugins, asrTranscribe } from "../../services/invoke";
 import { AudioRecorder } from "../../utils/audioRecorder";
+import { VolumeMeter } from "../Chat/VolumeMeter";
 import type { AsrPluginInfo } from "../../types";
 
 /** enumerateDevices 拿到的输入设备（只留我们需要的字段） */
@@ -29,6 +30,8 @@ export function VoiceInputSettings() {
   const [testSeconds, setTestSeconds] = useState(0);
   /** 测试结果：null=未测试；ok=识别成功；err=失败 */
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
+  // state 副本供 VolumeMeter 渲染用（ref 变更不触发重渲染）
+  const [testRecorder, setTestRecorder] = useState<AudioRecorder | null>(null);
   const testRecorderRef = useRef<AudioRecorder | null>(null);
   const testTimerRef = useRef<number | null>(null);
 
@@ -109,6 +112,7 @@ export function VoiceInputSettings() {
         const recorder = new AudioRecorder();
         await recorder.start(settings?.voice_input_device || undefined);
         testRecorderRef.current = recorder;
+        setTestRecorder(recorder);
         setTestPhase("recording");
         setTestSeconds(0);
         testTimerRef.current = window.setInterval(() => setTestSeconds((s) => s + 1), 1000);
@@ -125,6 +129,7 @@ export function VoiceInputSettings() {
     }
     const recorder = testRecorderRef.current;
     testRecorderRef.current = null;
+    setTestRecorder(null);
     setTestPhase("transcribing");
     try {
       const wav = await (recorder?.stop() ?? Promise.reject(new Error("录音状态异常")));
@@ -246,6 +251,9 @@ export function VoiceInputSettings() {
             {testPhase === "recording" ? "对着麦克风说句话" : "用当前配置录一句并识别"}
           </span>
         </div>
+        {testPhase === "recording" && testRecorder && (
+          <VolumeMeter recorder={testRecorder} className="mt-2 h-2 w-full" barClassName="bg-red-500" />
+        )}
         {testResult && (
           <div
             className={[

@@ -5,6 +5,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AudioRecorder } from "../../utils/audioRecorder";
+import { VolumeMeter } from "./VolumeMeter";
 import { asrTranscribe, listAsrPlugins } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
 
@@ -19,6 +20,8 @@ export function VoiceInputButton({ onResult }: Props) {
   const settings = useSettingsStore((s) => s.settings);
   const [phase, setPhase] = useState<Phase>("idle");
   const [seconds, setSeconds] = useState(0);
+  // state 副本供 VolumeMeter 渲染用（ref 变更不触发重渲染）
+  const [recorder, setRecorder] = useState<AudioRecorder | null>(null);
   const recorderRef = useRef<AudioRecorder | null>(null);
   const timerRef = useRef<number | null>(null);
 
@@ -67,6 +70,7 @@ export function VoiceInputButton({ onResult }: Props) {
         const recorder = new AudioRecorder();
         await recorder.start(settings?.voice_input_device || undefined);
         recorderRef.current = recorder;
+        setRecorder(recorder);
         setPhase("recording");
         startTimer();
       } catch (e) {
@@ -79,6 +83,7 @@ export function VoiceInputButton({ onResult }: Props) {
     stopTimer();
     const recorder = recorderRef.current;
     recorderRef.current = null;
+    setRecorder(null);
     setPhase("transcribing");
     try {
       const wav = await (recorder?.stop() ?? Promise.reject(new Error("录音状态异常")));
@@ -123,9 +128,12 @@ export function VoiceInputButton({ onResult }: Props) {
       {phase === "recording" && (
         <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
       )}
+      {phase === "recording" && recorder && (
+        <VolumeMeter recorder={recorder} className="h-1.5 w-9" barClassName="bg-red-500" />
+      )}
       <span>{phase === "transcribing" ? "…" : "🎙️"}</span>
       <span className="text-xs">
-        {phase === "recording" ? `${seconds}s 停止` : phase === "transcribing" ? "识别中" : "说话"}
+        {phase === "recording" ? `${seconds}s` : phase === "transcribing" ? "识别中" : "说话"}
       </span>
     </button>
   );

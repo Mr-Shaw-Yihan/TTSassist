@@ -18,9 +18,16 @@ export class AudioRecorder {
   private source: MediaStreamAudioSourceNode | null = null;
   private processor: ScriptProcessorNode | null = null;
   private chunks: Float32Array[] = [];
+  /** 当前块的 RMS 音量（仅录音期间更新），供 UI 展示 */
+  private rms = 0;
 
   get recording(): boolean {
     return this.processor !== null;
+  }
+
+  /** 归一化音量 0~1（对 RMS 做平方根压缩 + 增益，安静环境≈ 0，正常说话约 0.5~1） */
+  get volume(): number {
+    return Math.min(1, Math.sqrt(this.rms) * 2.2);
   }
 
   /** 开始录音（申请麦克风权限；拒绝时抛错，文案可直接展示）。
@@ -64,8 +71,13 @@ export class AudioRecorder {
     // ScriptProcessorNode 已废弃但 WebView2 稳定可用；4096 帧一个回调块
     const processor = ctx.createScriptProcessor(4096, 1, 1);
     processor.onaudioprocess = (ev) => {
+      const data = ev.inputBuffer.getChannelData(0);
       // 拷贝一份（inputBuffer 会被复用）
-      this.chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+      this.chunks.push(new Float32Array(data));
+      // 顺手算 RMS 音量供 UI 音量条展示（开销可忽略）
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+      this.rms = Math.sqrt(sum / data.length);
     };
     source.connect(processor);
     processor.connect(ctx.destination);
@@ -109,6 +121,7 @@ export class AudioRecorder {
 
   /** 释放麦克风与音频上下文 */
   private cleanup(): void {
+    this.rms = 0;
     this.processor?.disconnect();
     this.processor = null;
     this.source?.disconnect();
