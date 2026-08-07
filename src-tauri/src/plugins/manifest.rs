@@ -56,9 +56,9 @@ impl PluginManifest {
                 self.id
             )));
         }
-        if self.plugin_type != "tts_engine" {
+        if self.plugin_type != "tts_engine" && self.plugin_type != "asr_engine" {
             return Err(PluginError::Unsupported(format!(
-                "不支持的插件类型「{}」（当前仅支持 tts_engine）",
+                "不支持的插件类型「{}」（当前支持 tts_engine / asr_engine）",
                 self.plugin_type
             )));
         }

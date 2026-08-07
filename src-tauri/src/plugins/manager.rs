@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use super::loader::{LoadedPlugin, PluginEngine};
+use super::loader::{LoadedAsrPlugin, LoadedPlugin, PluginEngine};
 use super::manifest::PluginManifest;
 use super::registry;
 use super::PluginError;
@@ -44,6 +44,8 @@ pub struct PluginInfo {
 pub struct PluginManager {
     plugins_root: PathBuf,
     loaded: RwLock<HashMap<String, Arc<LoadedPlugin>>>,
+    /// ASR 插件（与 TTS 分开存储）
+    loaded_asr: RwLock<HashMap<String, Arc<LoadedAsrPlugin>>>,
     /// id → 失败原因
     failed: RwLock<HashMap<String, String>>,
 }
@@ -58,6 +60,7 @@ impl PluginManager {
         let manager = Self {
             plugins_root,
             loaded: RwLock::new(HashMap::new()),
+            loaded_asr: RwLock::new(HashMap::new()),
             failed: RwLock::new(HashMap::new()),
         };
 
@@ -114,29 +117,63 @@ impl PluginManager {
             .any(|e| e.id == id)
     }
 
-    /// 加载单个插件（id 即目录名）；结果记入 loaded 或 failed。
+    /// 加载单个插件（id 即目录名）；结果记入 loaded/loaded_asr 或 failed。
     /// pub：安装新插件后立即加载用。
     pub fn load_one(&self, id: &str) {
         let dir = self.plugins_root.join(id);
-        match LoadedPlugin::load(&dir, APP_VERSION) {
-            Ok(plugin) => {
-                eprintln!("插件已加载: {id} v{}", plugin.manifest.version);
-                if let Ok(mut map) = self.loaded.write() {
-                    map.insert(id.to_string(), plugin);
-                }
-            }
+        // 先读 manifest 确定插件类型，分别加载
+        let manifest = match PluginManifest::load(&dir) {
+            Ok(m) => m,
             Err(e) => {
                 eprintln!("插件加载失败 [{id}]: {e}");
                 if let Ok(mut map) = self.failed.write() {
                     map.insert(id.to_string(), e.to_string());
                 }
+                return;
+            }
+        };
+
+        if manifest.plugin_type == "asr_engine" {
+            match LoadedAsrPlugin::load(&dir, APP_VERSION) {
+                Ok(plugin) => {
+                    eprintln!("ASR 插件已加载: {id} v{}", plugin.manifest.version);
+                    if let Ok(mut map) = self.loaded_asr.write() {
+                        map.insert(id.to_string(), plugin);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("ASR 插件加载失败 [{id}]: {e}");
+                    if let Ok(mut map) = self.failed.write() {
+                        map.insert(id.to_string(), e.to_string());
+                    }
+                }
+            }
+        } else {
+            match LoadedPlugin::load(&dir, APP_VERSION) {
+                Ok(plugin) => {
+                    eprintln!("插件已加载: {id} v{}", plugin.manifest.version);
+                    if let Ok(mut map) = self.loaded.write() {
+                        map.insert(id.to_string(), plugin);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("插件加载失败 [{id}]: {e}");
+                    if let Ok(mut map) = self.failed.write() {
+                        map.insert(id.to_string(), e.to_string());
+                    }
+                }
             }
         }
     }
 
-    /// 取已加载插件（合成用）
+    /// 取已加载的 TTS 插件（合成用）
     pub fn get(&self, id: &str) -> Option<Arc<LoadedPlugin>> {
         self.loaded.read().ok()?.get(id).cloned()
+    }
+
+    /// 取已加载的 ASR 插件（转写用）
+    pub fn get_asr(&self, id: &str) -> Option<Arc<LoadedAsrPlugin>> {
+        self.loaded_asr.read().ok()?.get(id).cloned()
     }
 
     /// 把插件包装成 TTS 引擎；插件未加载返回 None

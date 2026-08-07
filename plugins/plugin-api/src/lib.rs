@@ -32,6 +32,10 @@ pub const SYM_TTS_SYNTHESIZE: &[u8] = b"va_tts_synthesize\0";
 pub const SYM_FREE_BYTES: &[u8] = b"va_free_bytes\0";
 pub const SYM_FREE_CSTR: &[u8] = b"va_free_cstr\0";
 
+// ── ASR 插件导出符号 ──────────────────────────────────────
+pub const SYM_ASR_TRANSCRIBE: &[u8] = b"va_asr_transcribe\0";
+pub const SYM_ASR_LANGUAGES: &[u8] = b"va_asr_languages\0";
+
 // ── 函数类型别名（宿主侧 libloading::Symbol<T> 用）──────────────
 
 /// 元信息类：返回 NUL 结尾静态字符串指针（id/name/version/audio_format/list_voices 共用）
@@ -54,6 +58,25 @@ pub type VaFreeBytesFn = unsafe extern "C" fn(ptr: *mut u8, len: usize);
 /// 释放 va_tts_synthesize 输出的错误字符串
 pub type VaFreeCstrFn = unsafe extern "C" fn(ptr: *mut c_char);
 
+// ── ASR 函数类型别名 ────────────────────────────────────
+
+/// 音频 → 文本（一次性转写）。
+/// audio：裸 PCM/WAV 字节流指针；audio_len：字节长度；
+/// language：NUL 结尾 UTF-8（如 "zh"、"en"），NULL = 插件自动检测。
+/// 成功返回 VA_OK 并写 out_text（CString）；失败返回 VA_ERR，可选写 out_err。
+/// out_text 内存由插件分配（CString::into_raw），宿主读取后调 va_free_cstr 归还。
+pub type VaAsrTranscribeFn = unsafe extern "C" fn(
+    audio: *const u8,
+    audio_len: usize,
+    language: *const c_char,
+    out_text: *mut *mut c_char,
+    out_err: *mut *mut c_char,
+) -> i32;
+
+/// 返回支持的语言列表 JSON（静态字符串，宿主立即拷贝，无需释放）。
+/// 格式：[{"code":"zh","label":"中文"},{"code":"en","label":"English"}]
+pub type VaAsrLanguagesFn = unsafe extern "C" fn() -> *const c_char;
+
 // ── 音色条目 ──────────────────────────────────────────
 
 /// va_list_voices 返回的 JSON 即 Vec<VoiceItem> 的序列化结果
@@ -74,7 +97,7 @@ pub fn voices_to_json(voices: &[VoiceItem]) -> String {
 
 /// 插件侧一键生成全部 C ABI 导出函数。
 ///
-/// 用法（插件 crate 的 lib.rs）：
+/// 用法一：静态音色表（音色固定不变的引擎，如 edge-tts）：
 /// ```ignore
 /// plugin_api::va_tts_plugin! {
 ///     id: "edge-tts",
@@ -86,12 +109,27 @@ pub fn voices_to_json(voices: &[VoiceItem]) -> String {
 /// }
 /// ```
 ///
-/// - 前五项必须是字符串字面量（生成 NUL 结尾静态串）；
+/// 用法二：动态音色表（音色可运行期增减的引擎，如本地模型引擎用户自装音色包）：
+/// ```ignore
+/// plugin_api::va_tts_plugin! {
+///     id: "my-local-tts",
+///     name: "本地 TTS",
+///     version: "1.0.0",
+///     audio_format: "wav",
+///     voices: list_voices,         // fn() -> Vec<plugin_api::VoiceItem>
+///     synthesize: my_synthesize,
+/// }
+/// ```
+///
+/// - id/name/version/audio_format 必须是字符串字面量（生成 NUL 结尾静态串）；
+/// - `voices_json` 是字符串字面量；`voices` 是 `fn() -> Vec<VoiceItem>`
+///   （宿主每次查询音色表都会调用它，插件应保证该函数廉价且不 panic）；
 /// - synthesize 是 `fn(&str, Option<&str>) -> Result<Vec<u8>, String>`
 ///   （文本、可选音色 → 音频字节 / 中文错误消息），内部如需异步请自建运行时 block_on；
 /// - 宏内用 catch_unwind 包裹调用，插件 panic 不会跨 FFI 边界（否则未定义行为）。
 #[macro_export]
 macro_rules! va_tts_plugin {
+    // ── 用法一：静态音色表 ──
     (
         id: $id:literal,
         name: $name:literal,
@@ -100,12 +138,79 @@ macro_rules! va_tts_plugin {
         voices_json: $voices:literal,
         synthesize: $synth:expr $(,)?
     ) => {
+        $crate::__va_tts_plugin_common! {
+            id: $id,
+            name: $name,
+            version: $version,
+            audio_format: $fmt,
+            synthesize: $synth,
+        }
+
+        static VA__VOICES: &[u8] = concat!($voices, "\0").as_bytes();
+
+        #[no_mangle]
+        pub extern "C" fn va_list_voices() -> *const ::std::os::raw::c_char {
+            VA__VOICES.as_ptr() as *const ::std::os::raw::c_char
+        }
+    };
+
+    // ── 用法二：动态音色表 ──
+    (
+        id: $id:literal,
+        name: $name:literal,
+        version: $version:literal,
+        audio_format: $fmt:literal,
+        voices: $voices_fn:expr,
+        synthesize: $synth:expr $(,)?
+    ) => {
+        $crate::__va_tts_plugin_common! {
+            id: $id,
+            name: $name,
+            version: $version,
+            audio_format: $fmt,
+            synthesize: $synth,
+        }
+
+        #[no_mangle]
+        pub extern "C" fn va_list_voices() -> *const ::std::os::raw::c_char {
+            // 动态音色表缓存槽：每次调用重算并替换缓存，返回其指针。
+            // 内存约定：宿主调用后立即拷贝，不长期持有指针，故旧缓存失效是安全的。
+            static VA__VOICES_CACHE: ::std::sync::OnceLock<
+                ::std::sync::Mutex<::std::ffi::CString>,
+            > = ::std::sync::OnceLock::new();
+            let cache = VA__VOICES_CACHE.get_or_init(|| {
+                ::std::sync::Mutex::new(::std::ffi::CString::new("[]").unwrap())
+            });
+            let f: fn() -> ::std::vec::Vec<$crate::VoiceItem> = $voices_fn;
+            // 音色函数异常时兜底空表，绝不 panic 跨 FFI 边界
+            let voices = ::std::panic::catch_unwind(f).unwrap_or_default();
+            let json = $crate::voices_to_json(&voices);
+            let c = ::std::ffi::CString::new(json)
+                .unwrap_or_else(|_| ::std::ffi::CString::new("[]").unwrap());
+            let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+            *guard = c;
+            guard.as_ptr()
+        }
+    };
+}
+
+/// 内部宏：va_tts_plugin! 两个分支共用的导出函数
+/// （id/name/version/audio_format + synthesize + 两个 free）。
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __va_tts_plugin_common {
+    (
+        id: $id:literal,
+        name: $name:literal,
+        version: $version:literal,
+        audio_format: $fmt:literal,
+        synthesize: $synth:expr $(,)?
+    ) => {
         // NUL 结尾静态字节串（concat! 编译期拼接）
         static VA__ID: &[u8] = concat!($id, "\0").as_bytes();
         static VA__NAME: &[u8] = concat!($name, "\0").as_bytes();
         static VA__VERSION: &[u8] = concat!($version, "\0").as_bytes();
         static VA__FMT: &[u8] = concat!($fmt, "\0").as_bytes();
-        static VA__VOICES: &[u8] = concat!($voices, "\0").as_bytes();
 
         #[no_mangle]
         pub extern "C" fn va_plugin_id() -> *const ::std::os::raw::c_char {
@@ -125,11 +230,6 @@ macro_rules! va_tts_plugin {
         #[no_mangle]
         pub extern "C" fn va_audio_format() -> *const ::std::os::raw::c_char {
             VA__FMT.as_ptr() as *const ::std::os::raw::c_char
-        }
-
-        #[no_mangle]
-        pub extern "C" fn va_list_voices() -> *const ::std::os::raw::c_char {
-            VA__VOICES.as_ptr() as *const ::std::os::raw::c_char
         }
 
         #[no_mangle]
@@ -199,6 +299,120 @@ macro_rules! va_tts_plugin {
                 unsafe {
                     let slice = ::std::slice::from_raw_parts_mut(ptr, len);
                     drop(Box::from_raw(slice));
+                }
+            }
+        }
+
+        #[no_mangle]
+        pub extern "C" fn va_free_cstr(ptr: *mut ::std::os::raw::c_char) {
+            if !ptr.is_null() {
+                unsafe { drop(::std::ffi::CString::from_raw(ptr)); }
+            }
+        }
+    };
+}
+
+// ── ASR 插件导出宏 ──────────────────────────────────────
+
+/// ASR 插件侧一键生成全部 C ABI 导出函数。
+///
+/// 用法：
+/// ```ignore
+/// plugin_api::va_asr_plugin! {
+///     id: "whisper-asr",
+///     name: "Whisper ASR（云端）",
+///     version: "1.0.0",
+///     languages: r#"[{"code":"zh","label":"中文"},{"code":"en","label":"English"}]"#,
+///     transcribe: my_transcribe,  // fn(&[u8], Option<&str>) -> Result<String, String>
+/// }
+/// ```
+///
+/// - id/name/version 必须是字符串字面量；
+/// - languages 是 JSON 字符串字面量（语言列表）；
+/// - transcribe 是 `fn(&[u8], Option<&str>) -> Result<String, String>`
+///   （音频字节、可选语言代码 → 转写文本 / 中文错误消息）。
+#[macro_export]
+macro_rules! va_asr_plugin {
+    (
+        id: $id:literal,
+        name: $name:literal,
+        version: $version:literal,
+        languages: $langs:literal,
+        transcribe: $transcribe:expr $(,)?
+    ) => {
+        // NUL 结尾静态字节串
+        static VA__ID: &[u8] = concat!($id, "\0").as_bytes();
+        static VA__NAME: &[u8] = concat!($name, "\0").as_bytes();
+        static VA__VERSION: &[u8] = concat!($version, "\0").as_bytes();
+        static VA__LANGS: &[u8] = concat!($langs, "\0").as_bytes();
+
+        #[no_mangle]
+        pub extern "C" fn va_plugin_id() -> *const ::std::os::raw::c_char {
+            VA__ID.as_ptr() as *const ::std::os::raw::c_char
+        }
+
+        #[no_mangle]
+        pub extern "C" fn va_plugin_name() -> *const ::std::os::raw::c_char {
+            VA__NAME.as_ptr() as *const ::std::os::raw::c_char
+        }
+
+        #[no_mangle]
+        pub extern "C" fn va_plugin_version() -> *const ::std::os::raw::c_char {
+            VA__VERSION.as_ptr() as *const ::std::os::raw::c_char
+        }
+
+        #[no_mangle]
+        pub extern "C" fn va_asr_languages() -> *const ::std::os::raw::c_char {
+            VA__LANGS.as_ptr() as *const ::std::os::raw::c_char
+        }
+
+        #[no_mangle]
+        pub extern "C" fn va_asr_transcribe(
+            audio: *const u8,
+            audio_len: usize,
+            language: *const ::std::os::raw::c_char,
+            out_text: *mut *mut ::std::os::raw::c_char,
+            out_err: *mut *mut ::std::os::raw::c_char,
+        ) -> i32 {
+            if audio.is_null() || audio_len == 0 || out_text.is_null() {
+                return $crate::VA_ERR;
+            }
+            let audio_slice = unsafe { ::std::slice::from_raw_parts(audio, audio_len) };
+            let lang: Option<&str> = if language.is_null() {
+                None
+            } else {
+                match unsafe { ::std::ffi::CStr::from_ptr(language) }.to_str() {
+                    Ok(s) => Some(s),
+                    Err(_) => return $crate::VA_ERR,
+                }
+            };
+
+            let f: fn(&[u8], Option<&str>) -> Result<String, String> = $transcribe;
+            let result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
+                f(audio_slice, lang)
+            }));
+
+            match result {
+                Ok(Ok(text)) => {
+                    let c = ::std::ffi::CString::new(text)
+                        .unwrap_or_else(|_| ::std::ffi::CString::new("").unwrap());
+                    unsafe { *out_text = c.into_raw(); }
+                    $crate::VA_OK
+                }
+                Ok(Err(e)) => {
+                    if !out_err.is_null() {
+                        let c = ::std::ffi::CString::new(e)
+                            .unwrap_or_else(|_| ::std::ffi::CString::new("unknown error").unwrap());
+                        unsafe { *out_err = c.into_raw(); }
+                    }
+                    $crate::VA_ERR
+                }
+                Err(_) => {
+                    if !out_err.is_null() {
+                        let c = ::std::ffi::CString::new("ASR 插件内部崩溃（panic）").unwrap();
+                        unsafe { *out_err = c.into_raw(); }
+                    }
+                    $crate::VA_ERR
                 }
             }
         }

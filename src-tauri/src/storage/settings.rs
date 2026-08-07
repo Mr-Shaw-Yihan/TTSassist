@@ -52,6 +52,10 @@ pub fn load_settings(data_dir: &Path) -> Settings {
                 .and_then(|x| serde_json::from_value::<std::collections::HashMap<String, String>>(x.clone()).ok())
                 .unwrap_or(default.plugin_voices),
             update_ignored_version: v.get("update_ignored_version").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.update_ignored_version),
+            asr_plugin: v.get("asr_plugin").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.asr_plugin),
+            asr_language: v.get("asr_language").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.asr_language),
+            voice_input_hotkey: v.get("voice_input_hotkey").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.voice_input_hotkey),
+            voice_input_enabled: v.get("voice_input_enabled").and_then(|x| x.as_bool()).unwrap_or(default.voice_input_enabled),
         },
         Err(_) => default,
     }
@@ -84,6 +88,10 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "mic_playback_volume" => if let Some(v) = value.as_f64() { s.mic_playback_volume = v as f32 },
         "plugin_voices" => if let Ok(map) = serde_json::from_value::<std::collections::HashMap<String, String>>(value.clone()) { s.plugin_voices = map },
         "update_ignored_version" => if let Some(v) = value.as_str() { s.update_ignored_version = v.to_string() },
+        "asr_plugin" => if let Some(v) = value.as_str() { s.asr_plugin = v.to_string() },
+        "asr_language" => if let Some(v) = value.as_str() { s.asr_language = v.to_string() },
+        "voice_input_hotkey" => if let Some(v) = value.as_str() { s.voice_input_hotkey = v.to_string() },
+        "voice_input_enabled" => if let Some(v) = value.as_bool() { s.voice_input_enabled = v },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;

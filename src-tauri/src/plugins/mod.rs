@@ -14,7 +14,7 @@ pub mod manager;
 pub mod manifest;
 pub mod registry;
 
-pub use loader::{LoadedPlugin, PluginEngine};
+pub use loader::{LoadedAsrPlugin, LoadedPlugin, PluginEngine};
 pub use manager::{InstallOutcome, PluginInfo, PluginManager};
 pub use manifest::PluginManifest;
 

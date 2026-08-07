@@ -85,6 +85,19 @@ pub struct Settings {
     /// 用户选择"忽略"的更新版本号（启动时不再弹窗，关于页仍提示；空=未忽略）
     #[serde(default)]
     pub update_ignored_version: String,
+    // ── ASR 语音输入设置 ──────────────────────────
+    /// 当前 ASR 插件 id（空=未配置）
+    #[serde(default)]
+    pub asr_plugin: String,
+    /// ASR 语言代码（如 "zh"、"en"）
+    #[serde(default = "default_asr_language")]
+    pub asr_language: String,
+    /// 语音输入全局快捷键（如 "Alt+M"，空=未设置）
+    #[serde(default)]
+    pub voice_input_hotkey: String,
+    /// 语音输入总开关
+    #[serde(default = "default_true")]
+    pub voice_input_enabled: bool,
 }
 
 impl Default for Settings {
@@ -111,6 +124,10 @@ impl Default for Settings {
             mic_playback_volume: 1.0,
             plugin_voices: HashMap::new(),
             update_ignored_version: String::new(),
+            asr_plugin: String::new(),
+            asr_language: "zh".to_string(),
+            voice_input_hotkey: String::new(),
+            voice_input_enabled: true,
         }
     }
 }
@@ -128,6 +145,14 @@ pub fn gen_id(prefix: &str) -> String {
     let ms = chrono::Utc::now().timestamp_millis();
     let n = COUNTER.fetch_add(1, Ordering::SeqCst);
     format!("{prefix}_{ms}_{n}")
+}
+
+fn default_asr_language() -> String {
+    "zh".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// 生成当前时间的 ISO8601 字符串（带本地时区偏移），用于 created_at。

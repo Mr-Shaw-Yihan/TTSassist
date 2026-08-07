@@ -1,0 +1,19 @@
+[package]
+name = "mimo-asr"
+version = "1.0.0"
+description = "MiMo ASR 插件：小米 MiMo-V2.5-ASR 语音识别（云端，需 API Key）"
+edition = "2021"
+
+[lib]
+# 插件必须是动态库（Windows 上产出 mimo_asr.dll，打包时改名 plugin.dll）
+crate-type = ["cdylib"]
+
+[dependencies]
+plugin-api = { path = "../plugin-api" }
+# HTTP 客户端（云端 API 调用）
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# 同步入口内部跑异步
+tokio = { version = "1", features = ["rt-multi-thread"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"

@@ -286,3 +286,129 @@ mod tests {
         );
     }
 }
+
+// ── ASR 插件加载 ──────────────────────────────────────
+
+/// 一个已加载的 ASR 插件（dll 句柄 + 函数指针 + 元信息缓存）
+pub struct LoadedAsrPlugin {
+    /// 清单（含 id/name/version/description 等展示信息）
+    pub manifest: PluginManifest,
+    /// dll 自报的 id（已校验与 manifest.id 一致）
+    pub dll_id: String,
+    /// va_asr_languages 返回的 JSON（加载时已拷贝）
+    pub languages_json: String,
+    /// 保持 dll 句柄存活
+    _lib: Arc<libloading::Library>,
+    f_transcribe: plugin_api::VaAsrTranscribeFn,
+    f_free_cstr: plugin_api::VaFreeCstrFn,
+}
+
+unsafe impl Send for LoadedAsrPlugin {}
+unsafe impl Sync for LoadedAsrPlugin {}
+
+impl LoadedAsrPlugin {
+    /// 加载一个 ASR 插件目录（内含 manifest.json 与 dll）
+    pub fn load(plugin_dir: &Path, app_version: &str) -> Result<Arc<Self>, PluginError> {
+        let manifest = PluginManifest::load(plugin_dir)?;
+        manifest.validate(app_version)?;
+
+        // SHA-256 校验 dll
+        let dll_path = plugin_dir.join(&manifest.entry);
+        if !dll_path.exists() {
+            return Err(PluginError::NotFound(format!(
+                "插件动态库不存在: {}",
+                dll_path.display()
+            )));
+        }
+        let actual = sha256_file(&dll_path)?;
+        if !actual.eq_ignore_ascii_case(manifest.checksum.trim()) {
+            return Err(PluginError::Checksum {
+                expected: manifest.checksum.clone(),
+                actual,
+            });
+        }
+
+        // 加载 dll 取 ASR 符号
+        let lib = unsafe { libloading::Library::new(&dll_path) }
+            .map_err(|e| PluginError::DlOpen(format!("加载 {} 失败: {e}", manifest.entry)))?;
+        let (f_transcribe, f_free_cstr, dll_id, languages_json) = unsafe {
+            let transcribe =
+                get_sym::<plugin_api::VaAsrTranscribeFn>(&lib, plugin_api::SYM_ASR_TRANSCRIBE)?;
+            let free_cstr =
+                get_sym::<plugin_api::VaFreeCstrFn>(&lib, plugin_api::SYM_FREE_CSTR)?;
+            let f_id = get_sym::<plugin_api::VaStrFn>(&lib, plugin_api::SYM_PLUGIN_ID)?;
+            let f_langs =
+                get_sym::<plugin_api::VaAsrLanguagesFn>(&lib, plugin_api::SYM_ASR_LANGUAGES)?;
+
+            (
+                transcribe,
+                free_cstr,
+                read_cstr(f_id())?,
+                read_cstr(f_langs())?,
+            )
+        };
+
+        if dll_id != manifest.id {
+            return Err(PluginError::Unsupported(format!(
+                "dll 自报 id「{dll_id}」与清单 id「{}」不一致，拒绝加载",
+                manifest.id
+            )));
+        }
+
+        Ok(Arc::new(Self {
+            manifest,
+            dll_id,
+            languages_json,
+            _lib: Arc::new(lib),
+            f_transcribe,
+            f_free_cstr,
+        }))
+    }
+
+    /// 安全封装的转写调用：音频字节(+语言) → 文本。
+    /// 阻塞调用，需在 blocking 线程执行。
+    pub fn transcribe(&self, audio: &[u8], language: Option<&str>) -> Result<String, PluginError> {
+        let c_lang = match language {
+            Some(l) => Some(
+                CString::new(l)
+                    .map_err(|_| PluginError::Synthesize("语言代码含非法字符（NUL）".into()))?,
+            ),
+            None => None,
+        };
+
+        let mut out_text: *mut std::ffi::c_char = std::ptr::null_mut();
+        let mut out_err: *mut std::ffi::c_char = std::ptr::null_mut();
+
+        let code = unsafe {
+            (self.f_transcribe)(
+                audio.as_ptr(),
+                audio.len(),
+                c_lang.as_ref().map(|c| c.as_ptr()).unwrap_or(std::ptr::null()),
+                &mut out_text,
+                &mut out_err,
+            )
+        };
+
+        if code == plugin_api::VA_OK {
+            if out_text.is_null() {
+                return Err(PluginError::Synthesize("插件返回成功但未给出文本".into()));
+            }
+            let text = unsafe { CStr::from_ptr(out_text) }
+                .to_string_lossy()
+                .into_owned();
+            unsafe { (self.f_free_cstr)(out_text) };
+            Ok(text)
+        } else {
+            let msg = if !out_err.is_null() {
+                let s = unsafe { CStr::from_ptr(out_err) }
+                    .to_string_lossy()
+                    .into_owned();
+                unsafe { (self.f_free_cstr)(out_err) };
+                s
+            } else {
+                format!("ASR 转写失败（错误码 {code}）")
+            };
+            Err(PluginError::Synthesize(msg))
+        }
+    }
+}

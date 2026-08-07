@@ -1,6 +1,7 @@
 // VoiceAssist Tauri 后端入口。
 // 多窗口架构：main（主窗）+ quick_input（浮窗），跨窗口同步事件。
 
+pub mod asr;
 pub mod commands;
 pub mod hotkey;
 pub mod plugins;
@@ -51,6 +52,11 @@ pub fn run() {
             plugins::migrate_legacy_engine(&data_dir);
 
             let settings: Settings = storage::settings::load_settings(&data_dir);
+
+            // ASR 插件需要 API Key：通过环境变量传递（插件加载时读取）
+            if !settings.mimo_api_key.is_empty() {
+                std::env::set_var("MIMO_API_KEY", &settings.mimo_api_key);
+            }
 
             // 插件系统：加载已安装插件（单个插件失败只记日志，不影响主流程）
             app.manage(plugins::PluginManager::load_all(&data_dir));
@@ -115,6 +121,8 @@ pub fn run() {
             crate::commands::mic::get_mic_status,
             crate::commands::vbcable::download_vb_cable,
             crate::commands::vbcable::install_vb_cable,
+            crate::asr::list_asr_plugins,
+            crate::asr::asr_transcribe,
             crate::hotkey::set_hotkey,
             crate::show_main_window,
         ])
