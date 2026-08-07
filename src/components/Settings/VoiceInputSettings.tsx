@@ -1,10 +1,11 @@
-// 语音输入设置：ASR 插件选择 + 识别语言 + 录音输入设备。
+// 语音输入设置：ASR 插件选择 + 识别语言 + 录音输入设备 + 端到端测试。
 // 设备枚举说明：浏览器只在授予麦克风权限后才返回设备名（label），
 // 未授权时显示「授权麦克风」按钮引导用户开启。
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { listAsrPlugins } from "../../services/invoke";
+import { listAsrPlugins, asrTranscribe } from "../../services/invoke";
+import { AudioRecorder } from "../../utils/audioRecorder";
 import type { AsrPluginInfo } from "../../types";
 
 /** enumerateDevices 拿到的输入设备（只留我们需要的字段） */
@@ -21,6 +22,23 @@ export function VoiceInputSettings() {
   const [devices, setDevices] = useState<InputDevice[]>([]);
   const [hasPermission, setHasPermission] = useState(false);
   const [requesting, setRequesting] = useState(false);
+
+  // ── 测试录音状态 ──
+  type TestPhase = "idle" | "recording" | "transcribing";
+  const [testPhase, setTestPhase] = useState<TestPhase>("idle");
+  const [testSeconds, setTestSeconds] = useState(0);
+  /** 测试结果：null=未测试；ok=识别成功；err=失败 */
+  const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const testRecorderRef = useRef<AudioRecorder | null>(null);
+  const testTimerRef = useRef<number | null>(null);
+
+  // 卸载时兜底释放录音资源
+  useEffect(() => {
+    return () => {
+      testRecorderRef.current?.cancel();
+      if (testTimerRef.current) window.clearInterval(testTimerRef.current);
+    };
+  }, []);
 
   /** 枚举麦克风设备；label 非空说明已有权限 */
   const refreshDevices = useCallback(async () => {
@@ -69,6 +87,62 @@ export function VoiceInputSettings() {
   })();
 
   const loadedPlugins = asrPlugins.filter((p) => p.loaded);
+
+  /** 找可用 ASR 插件：优先设置里选的，否则取第一个已加载的 */
+  function pickPlugin(): AsrPluginInfo | null {
+    if (loadedPlugins.length === 0) return null;
+    return loadedPlugins.find((p) => p.id === settings?.asr_plugin) ?? loadedPlugins[0];
+  }
+
+  /** 测试：录音→转写→展示结果，验证设备/插件/语言三项配置 */
+  async function toggleTest() {
+    if (testPhase === "transcribing") return;
+
+    // ── 空闲 → 开始录音 ──
+    if (testPhase === "idle") {
+      if (!pickPlugin()) {
+        setTestResult({ ok: false, text: "无可用识别插件，请先安装 ASR 插件" });
+        return;
+      }
+      setTestResult(null);
+      try {
+        const recorder = new AudioRecorder();
+        await recorder.start(settings?.voice_input_device || undefined);
+        testRecorderRef.current = recorder;
+        setTestPhase("recording");
+        setTestSeconds(0);
+        testTimerRef.current = window.setInterval(() => setTestSeconds((s) => s + 1), 1000);
+      } catch (e) {
+        setTestResult({ ok: false, text: `${e}` });
+      }
+      return;
+    }
+
+    // ── 录音中 → 停止并转写 ──
+    if (testTimerRef.current) {
+      window.clearInterval(testTimerRef.current);
+      testTimerRef.current = null;
+    }
+    const recorder = testRecorderRef.current;
+    testRecorderRef.current = null;
+    setTestPhase("transcribing");
+    try {
+      const wav = await (recorder?.stop() ?? Promise.reject(new Error("录音状态异常")));
+      const plugin = pickPlugin();
+      if (!plugin) throw new Error("无可用识别插件");
+      const language = settings?.asr_language || "auto";
+      const text = await asrTranscribe(wav, plugin.id, language);
+      setTestResult(
+        text.trim()
+          ? { ok: true, text: text.trim() }
+          : { ok: false, text: "未识别到语音内容，请对着麦克风说句话再试" },
+      );
+    } catch (e) {
+      setTestResult({ ok: false, text: `识别失败：${e}` });
+    } finally {
+      setTestPhase("idle");
+    }
+  }
 
   return (
     <div className="space-y-3">
@@ -145,6 +219,55 @@ export function VoiceInputSettings() {
         <p className="mt-1 text-[10px] text-[var(--ink-300)]">
           所选设备仅用于语音输入录音；设备拔插后会自动回退到系统默认麦克风。
         </p>
+      </div>
+
+      {/* 测试：用当前配置录一句并识别，验证设备/插件/语言是否就绪 */}
+      <div className="rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2.5">
+        <label className="mb-1.5 block text-[11px] text-[var(--ink-300)]">测试</label>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleTest}
+            disabled={testPhase === "transcribing"}
+            className={[
+              "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+              testPhase === "recording"
+                ? "border-red-300 bg-red-50 text-red-600 hover:bg-red-100"
+                : "border-[var(--ink-200)] bg-[var(--paper)] text-[var(--ink-700)] hover:border-[var(--amber-500)] hover:text-[var(--amber-600)]",
+            ].join(" ")}
+          >
+            {testPhase === "recording" && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" />}
+            {testPhase === "recording"
+              ? `${testSeconds}s 点击停止`
+              : testPhase === "transcribing"
+                ? "识别中…"
+                : "🎙️ 开始测试"}
+          </button>
+          <span className="text-[10px] text-[var(--ink-300)]">
+            {testPhase === "recording" ? "对着麦克风说句话" : "用当前配置录一句并识别"}
+          </span>
+        </div>
+        {testResult && (
+          <div
+            className={[
+              "mt-2 rounded-md border px-2.5 py-2 text-[11px] leading-relaxed",
+              testResult.ok
+                ? "border-green-200 bg-green-50 text-green-700"
+                : "border-red-200 bg-red-50 text-red-600",
+            ].join(" ")}
+          >
+            {testResult.ok ? (
+              <>
+                <span className="font-medium">✓ 识别成功：</span>
+                <span className="select-all">“{testResult.text}”</span>
+              </>
+            ) : (
+              <>
+                <span className="font-medium">✗ </span>
+                {testResult.text}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
