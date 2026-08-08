@@ -4,7 +4,7 @@
 #   powershell -ExecutionPolicy Bypass -File .\package.ps1            # 只打包 zip
 #   powershell -ExecutionPolicy Bypass -File .\package.ps1 -Install   # 打包并安装到本机 VoiceAssist
 #
-# -Install 会装进 %APPDATA%/com.voiceassist.app/plugins/edge-tts/ 并更新 registry.json。
+# -Install 会装进 <exe同级>/plugins/edge-tts/（阶段 22 起脱离 AppData）并更新 registry.json。
 # 安装前请先关闭 VoiceAssist（运行中的 dll 被占用无法覆盖）。
 
 param(
@@ -86,9 +86,24 @@ if ($Install) {
         throw "VoiceAssist 正在运行，请先关闭再执行 -Install"
     }
 
-    $DataDir    = Join-Path $env:APPDATA "com.voiceassist.app"
-    $TargetDir  = Join-Path $DataDir "plugins\$PluginId"
-    $PluginsDir = Join-Path $DataDir "plugins"
+    # 阶段 22：插件装在 exe 同级 plugins/ 目录（脱离 APPDATA 系统盘）
+    # 自动探测 exe 位置：优先 release，其次 debug
+    $RepoRoot   = (Resolve-Path (Join-Path $PluginDir "..\..")).Path
+    $ExePaths   = @(
+        (Join-Path $RepoRoot "src-tauri\target\release\TTSassist.exe"),
+        (Join-Path $RepoRoot "src-tauri\target\debug\TTSassist.exe")
+    )
+    $ExePath = $ExePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $ExePath) {
+        throw "找不到 TTSassist.exe（请先 cargo build）。也可设置 VA_PLUGINS_DIR 环境变量指定插件目录。"
+    }
+    # 支持环境变量覆盖（与宿主 resolve_plugins_root 逻辑一致）
+    if ($env:VA_PLUGINS_DIR) {
+        $PluginsDir = $env:VA_PLUGINS_DIR
+    } else {
+        $PluginsDir = Join-Path (Split-Path -Parent $ExePath) "plugins"
+    }
+    $TargetDir  = Join-Path $PluginsDir $PluginId
     New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
 
     Copy-Item (Join-Path $StageDir "plugin.dll")    $TargetDir -Force

@@ -520,8 +520,12 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[ignore = "需联网且本机已安装 edge-tts 插件，手动运行"]
     fn edge插件实网合成() {
-        let appdata = std::env::var("APPDATA").expect("APPDATA 环境变量");
-        let plugin_dir = PathBuf::from(appdata).join("com.voiceassist.app/plugins/edge-tts");
+        // 阶段 22：插件在 exe 同级 plugins/ 目录
+        let exe_dir = std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+            .expect("无法获取 exe 目录");
+        let plugin_dir = exe_dir.join("plugins/edge-tts");
         assert!(plugin_dir.exists(), "edge-tts 插件未安装: {}", plugin_dir.display());
 
         let plugin = crate::plugins::loader::LoadedPlugin::load(&plugin_dir, APP_VERSION)
