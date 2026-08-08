@@ -60,10 +60,11 @@ pub struct PluginManager {
 
 impl PluginManager {
     /// 启动时加载全部已安装插件（registry.json 为准）。
-    pub fn load_all(data_dir: &Path) -> Self {
-        let plugins_root = data_dir.join("plugins");
+    /// `plugins_root`：插件安装根目录（阶段 22 起为 exe 同级 plugins/，不再位于 APPDATA）。
+    pub fn load_all(plugins_root: &Path) -> Self {
         // 目录不存在就建（首次启动）；建不了也不致命
-        let _ = std::fs::create_dir_all(&plugins_root);
+        let _ = std::fs::create_dir_all(plugins_root);
+        let plugins_root = plugins_root.to_path_buf();
 
         let manager = Self {
             plugins_root,
@@ -466,7 +467,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         install_test_plugin(dir.path(), None);
 
-        let pm = PluginManager::load_all(dir.path());
+        let pm = PluginManager::load_all(&dir.path().join("plugins"));
         let plugin = pm.get("test-plugin").expect("测试插件应加载成功");
 
         // 元信息
@@ -493,7 +494,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         install_test_plugin(dir.path(), Some("0000000000000000000000000000000000000000000000000000000000000000".into()));
 
-        let pm = PluginManager::load_all(dir.path());
+        let pm = PluginManager::load_all(&dir.path().join("plugins"));
         assert!(pm.get("test-plugin").is_none(), "校验和不符不得加载");
 
         // 失败原因可在 list 中看到
@@ -506,7 +507,7 @@ mod tests {
     #[test]
     fn 空插件目录加载为空() {
         let dir = tempfile::tempdir().unwrap();
-        let pm = PluginManager::load_all(dir.path());
+        let pm = PluginManager::load_all(&dir.path().join("plugins"));
         assert!(pm.get("不存在").is_none());
         assert!(pm.list().is_empty());
     }
@@ -519,8 +520,11 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[ignore = "需本机已安装 genie-tts 插件，手动运行"]
     fn genie插件加载与音色表() {
-        let appdata = std::env::var("APPDATA").expect("APPDATA 环境变量");
-        let plugin_dir = PathBuf::from(appdata).join("com.voiceassist.app/plugins/genie-tts");
+        // 阶段 22 起插件位于 exe 同级 plugins/ 目录
+        let exe_dir = std::env::current_exe()
+            .expect("获取 exe 路径")
+            .parent().expect("exe 父目录").to_path_buf();
+        let plugin_dir = exe_dir.join("plugins/genie-tts");
         assert!(plugin_dir.exists(), "genie-tts 插件未安装: {}", plugin_dir.display());
 
         let plugin = crate::plugins::loader::LoadedPlugin::load(&plugin_dir, APP_VERSION)
@@ -554,8 +558,11 @@ mod tests {
     #[cfg(target_os = "windows")]
     #[ignore = "需联网且本机已安装 edge-tts 插件，手动运行"]
     fn edge插件实网合成() {
-        let appdata = std::env::var("APPDATA").expect("APPDATA 环境变量");
-        let plugin_dir = PathBuf::from(appdata).join("com.voiceassist.app/plugins/edge-tts");
+        // 阶段 22 起插件位于 exe 同级 plugins/ 目录
+        let exe_dir = std::env::current_exe()
+            .expect("获取 exe 路径")
+            .parent().expect("exe 父目录").to_path_buf();
+        let plugin_dir = exe_dir.join("plugins/edge-tts");
         assert!(plugin_dir.exists(), "edge-tts 插件未安装: {}", plugin_dir.display());
 
         let plugin = crate::plugins::loader::LoadedPlugin::load(&plugin_dir, APP_VERSION)
@@ -610,7 +617,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let plugins_root = dir.path().join("plugins");
         std::fs::create_dir_all(&plugins_root).unwrap();
-        let pm = PluginManager::load_all(dir.path());
+        let pm = PluginManager::load_all(&plugins_root);
 
         // dll 自报 id 固定为 test-plugin，清单 id 必须一致才能通过加载校验
         let zip = dir.path().join("fresh.zip");
@@ -634,7 +641,7 @@ mod tests {
 
         // 阶段一：运行中安装 → pending（用作用域包裹，退出时卸载 dll）
         {
-            let pm = PluginManager::load_all(dir.path());
+            let pm = PluginManager::load_all(&dir.path().join("plugins"));
             assert!(pm.get("test-plugin").is_some());
 
             let zip = dir.path().join("update.zip");
@@ -645,7 +652,7 @@ mod tests {
         } // pm 在此 drop → dll 卸载，模拟进程退出
 
         // 阶段二：重新 load_all（模拟重启）→ pending 被应用，版本变 0.2.0，pending 清除
-        let pm2 = PluginManager::load_all(dir.path());
+        let pm2 = PluginManager::load_all(&dir.path().join("plugins"));
         let plugin = pm2.get("test-plugin").expect("重启后应加载新版");
         assert_eq!(plugin.manifest.version, "0.2.0", "pending 更新应已应用");
         assert!(
@@ -661,7 +668,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let plugins_root = dir.path().join("plugins");
         std::fs::create_dir_all(&plugins_root).unwrap();
-        let pm = PluginManager::load_all(dir.path());
+        let pm = PluginManager::load_all(&plugins_root);
 
         // 随便造个 zip，传错误的 zip checksum
         let zip = dir.path().join("bad.zip");
@@ -680,7 +687,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         install_test_plugin(dir.path(), None);
 
-        let pm = PluginManager::load_all(dir.path());
+        let pm = PluginManager::load_all(&dir.path().join("plugins"));
         let engine = pm.build_engine("test-plugin", dir.path()).expect("引擎构建");
 
         let rel = engine
