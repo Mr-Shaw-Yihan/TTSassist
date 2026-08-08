@@ -46,6 +46,8 @@ pub struct PluginInfo {
     pub setup_status: Option<serde_json::Value>,
     /// 插件是否支持音色管理（安装/卸载/预加载/导入音色包）
     pub has_voice_management: bool,
+    /// 资源需求说明（manifest.requirements，供用户下载前判断配置；可为空）
+    pub requirements: Option<String>,
 }
 
 /// 插件管理器。dll 一经加载常驻到进程退出（运行期卸载有崩溃风险，见 loader.rs 头注）。
@@ -200,6 +202,8 @@ impl PluginManager {
                 .as_ref()
                 .map(|p| p.has_voice_management())
                 .unwrap_or(false);
+            // 资源需求说明（读自磁盘清单，未安装/加载失败的插件也能展示）
+            let requirements = manifest.as_ref().and_then(|m| m.requirements.clone());
 
             result.push(PluginInfo {
                 id: entry.id.clone(),
@@ -214,6 +218,7 @@ impl PluginManager {
                 has_setup,
                 setup_status,
                 has_voice_management,
+                requirements,
             });
         }
         result

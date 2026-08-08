@@ -547,6 +547,11 @@ export function SettingsPage() {
                       <p className="text-[11px] leading-relaxed text-[var(--ink-700)]">
                         「{pendingEnv.name}」是本地引擎，首次使用需下载运行环境与语音模型（共约 800MB，需联网）。现在下载吗？
                       </p>
+                      {cur.requirements && (
+                        <p className="mt-1.5 text-[10px] leading-relaxed text-[var(--ink-500)]">
+                          资源需求：{cur.requirements}
+                        </p>
+                      )}
                       <div className="mt-2 flex gap-2">
                         <button
                           onClick={confirmEnvDownload}

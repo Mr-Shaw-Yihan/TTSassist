@@ -67,6 +67,9 @@ pub struct PluginIndexEntry {
     pub checksum: String,
     #[serde(default)]
     pub description: String,
+    /// 资源需求说明（可选，供用户在线安装前判断配置）
+    #[serde(default)]
+    pub requirements: Option<String>,
 }
 
 fn http_client() -> Result<reqwest::Client, String> {
@@ -156,6 +159,8 @@ pub struct BundledPluginInfo {
     pub name: String,
     pub version: String,
     pub description: String,
+    /// 资源需求说明（供用户安装前判断配置；可为空）
+    pub requirements: Option<String>,
     /// 本机是否已安装（含加载失败的）
     pub installed: bool,
 }
@@ -207,6 +212,7 @@ pub fn list_bundled_plugins(
                 name: m.name,
                 version: m.version,
                 description: m.description,
+                requirements: m.requirements,
             })
         })
         .collect()

@@ -118,6 +118,8 @@ export interface PluginInfo {
   setup_status?: PluginSetupStatus | null;
   /** 是否支持音色管理（安装/卸载/预加载/导入音色包） */
   has_voice_management?: boolean;
+  /** 资源需求说明（供用户下载前判断配置；可为空） */
+  requirements?: string | null;
 }
 
 /** 官方插件索引条目（fetch_plugin_index 返回） */
@@ -129,6 +131,8 @@ export interface PluginIndexEntry {
   /** zip 包的 SHA-256 */
   checksum: string;
   description: string;
+  /** 资源需求说明（可为空） */
+  requirements?: string | null;
 }
 
 /** 内置插件条目（随安装包携带，list_bundled_plugins 返回） */
@@ -137,6 +141,8 @@ export interface BundledPluginInfo {
   name: string;
   version: string;
   description: string;
+  /** 资源需求说明（可为空） */
+  requirements?: string | null;
   /** 本机是否已安装 */
   installed: boolean;
 }

@@ -38,6 +38,10 @@ pub struct PluginManifest {
     /// 可声明更大值（如 1200 = 20 分钟，覆盖首次运行环境下载引导）。
     #[serde(default = "default_timeout_secs")]
     pub timeout_secs: u64,
+    /// 资源需求说明（可选，人类可读）：下载体积/内存占用/CPU 要求等，
+    /// 供用户在下载安装前判断本机配置是否够用。本地推理引擎建议填写。
+    #[serde(default)]
+    pub requirements: Option<String>,
 }
 
 fn default_category() -> String {
@@ -134,6 +138,7 @@ mod tests {
             description: String::new(),
             category: default_category(),
             timeout_secs: default_timeout_secs(),
+            requirements: None,
         }
     }
 
@@ -215,6 +220,7 @@ mod tests {
         let m = PluginManifest::load(dir.path()).unwrap();
         assert_eq!(m.category, "remote", "缺省应为 remote");
         assert_eq!(m.timeout_secs, 60, "缺省超时应为 60 秒");
+        assert!(m.requirements.is_none(), "缺省资源需求应为空");
         assert!(m.validate("1.4.0").is_ok());
     }
 
@@ -231,11 +237,13 @@ mod tests {
             "min_app_version": "1.4.0",
             "checksum": "abc",
             "category": "local",
-            "timeout_secs": 1200
+            "timeout_secs": 1200,
+            "requirements": "首次约 800MB 下载，运行时约占 2–4GB 内存"
         });
         std::fs::write(dir.path().join("manifest.json"), json.to_string()).unwrap();
         let m = PluginManifest::load(dir.path()).unwrap();
         assert_eq!(m.category, "local");
         assert_eq!(m.timeout_secs, 1200);
+        assert!(m.requirements.as_deref().unwrap_or("").contains("800MB"));
     }
 }

@@ -305,6 +305,14 @@ export function PluginPage() {
                     <p className="mt-2 text-xs leading-relaxed text-[var(--ink-500)]">{p.description}</p>
                   )}
 
+                  {/* 资源需求（供用户下载运行环境前判断配置） */}
+                  {p.requirements && (
+                    <div className="mt-2 rounded-lg border border-[var(--ink-200)]/70 bg-[var(--ink-100)]/40 px-2.5 py-1.5 text-[11px] leading-relaxed text-[var(--ink-500)]">
+                      <span className="font-medium text-[var(--ink-700)]">资源需求：</span>
+                      {p.requirements}
+                    </div>
+                  )}
+
                   {/* 本地引擎环境安装区：状态 / 下载按钮 / 进度面板 */}
                   {p.loaded && p.has_setup && (
                     <div className="mt-2">
@@ -381,6 +389,11 @@ export function PluginPage() {
                     {entry.description && (
                       <p className="mt-1 truncate text-[11px] text-[var(--ink-500)]">{entry.description}</p>
                     )}
+                    {entry.requirements && (
+                      <p className="mt-1 text-[10px] leading-relaxed text-[var(--ink-300)]">
+                        资源需求：{entry.requirements}
+                      </p>
+                    )}
                   </div>
                   {entry.installed ? (
                     <span className="shrink-0 text-[11px] text-[var(--ink-300)]">已安装</span>
@@ -446,6 +459,11 @@ export function PluginPage() {
                       </div>
                       {entry.description && (
                         <p className="mt-1 truncate text-[11px] text-[var(--ink-500)]">{entry.description}</p>
+                      )}
+                      {entry.requirements && (
+                        <p className="mt-1 text-[10px] leading-relaxed text-[var(--ink-300)]">
+                          资源需求：{entry.requirements}
+                        </p>
                       )}
                     </div>
                     {!installed && (
