@@ -106,6 +106,22 @@ pub fn load_character(port: u16, voice_id: &str) -> Result<(), String> {
     Err(format!("加载音色失败: {detail}"))
 }
 
+/// 卸载内存中的音色（释放权重与参考音频，不删磁盘文件）。
+/// 服务端幂等：未加载的音色也返回成功。短超时（纯内存操作）。
+pub fn unload_character(port: u16, voice_id: &str) -> Result<(), String> {
+    let client = api_client(30)?;
+    let resp = client
+        .post(format!("http://127.0.0.1:{port}/unload_character"))
+        .json(&serde_json::json!({ "voice_id": voice_id }))
+        .send()
+        .map_err(|e| format!("卸载音色请求失败: {e}"))?;
+    if resp.status().is_success() {
+        return Ok(());
+    }
+    let detail = error_detail(resp);
+    Err(format!("卸载音色失败: {detail}"))
+}
+
 /// 合成：文本 → 完整 WAV 字节
 pub fn tts(port: u16, voice_id: &str, text: &str) -> Result<Vec<u8>, String> {
     let client = api_client(300)?;

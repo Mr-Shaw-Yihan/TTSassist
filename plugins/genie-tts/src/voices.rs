@@ -34,7 +34,7 @@ pub fn list_voices() -> Vec<VoiceItem> {
     // 1. 已安装的音色包（characters/ 子目录，布局完整才算）
     let installed = installed_packs();
 
-    // 预置角色：已装用包内 meta 名，未装标注"首次使用自动下载"
+    // 预置角色：已装用包内 meta 名，未装标注"待下载"（安装走显式流程）
     for p in PREDEFINED {
         match installed.iter().find(|(id, _label)| id == p.id) {
             Some((id, label)) => voices.push(VoiceItem {
@@ -43,7 +43,7 @@ pub fn list_voices() -> Vec<VoiceItem> {
             }),
             None => voices.push(VoiceItem {
                 id: p.id.to_string(),
-                label: format!("{} · 首次使用自动下载", p.label),
+                label: format!("{} · 待下载", p.label),
             }),
         }
     }
@@ -98,4 +98,39 @@ fn read_meta_label(pack_dir: &std::path::Path) -> Option<String> {
     let raw = std::fs::read_to_string(pack_dir.join("meta.json")).ok()?;
     let v: serde_json::Value = serde_json::from_str(raw.trim_start_matches('\u{FEFF}')).ok()?;
     v.get("label")?.as_str().map(|s| s.to_string())
+}
+
+/// 音色 id → 展示名（预置角色用内置名，已装包读 meta，兜底原 id）。
+/// 用于面向用户的文案，避免暴露内部 id。
+pub fn display_label(voice_id: &str) -> String {
+    if let Some(p) = PREDEFINED.iter().find(|p| p.id == voice_id) {
+        return p.label.to_string();
+    }
+    if let Ok(ctx) = crate::paths::Ctx::get() {
+        if let Some(label) = read_meta_label(&ctx.characters_dir().join(voice_id)) {
+            return label;
+        }
+    }
+    voice_id.to_string()
+}
+
+/// 音色 id 合法性（防路径穿越）：仅字母/数字/下划线/连字符，非空且不超过 64 字符
+pub fn is_valid_pack_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// 音色包目录布局校验（tts_models/ + prompt_wav.json 为最低要求）
+pub fn validate_pack_layout(dir: &std::path::Path) -> Result<(), String> {
+    if !dir.is_dir() {
+        return Err("所选路径不是目录".to_string());
+    }
+    if !dir.join("tts_models").is_dir() {
+        return Err("目录里缺少 tts_models/（ONNX 模型目录），不是完整的音色包".to_string());
+    }
+    if !dir.join("prompt_wav.json").is_file() {
+        return Err("目录里缺少 prompt_wav.json（参考音频配置），不是完整的音色包".to_string());
+    }
+    Ok(())
 }

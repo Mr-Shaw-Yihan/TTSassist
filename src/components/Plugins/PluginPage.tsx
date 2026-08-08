@@ -14,6 +14,7 @@ import {
   installBundledPlugin,
 } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { usePluginTaskStore } from "../../stores/pluginTaskStore";
 import { PluginSetupPanel } from "./PluginSetupPanel";
 import type { PluginInfo, PluginIndexEntry, BundledPluginInfo } from "../../types";
 
@@ -48,8 +49,10 @@ export function PluginPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
-  // 环境安装任务（本地插件下载运行环境/模型；options 可指定音色）
-  const [setupTask, setSetupTask] = useState<{ pluginId: string; options?: string } | null>(null);
+  // 环境安装任务走全局任务 store（启动在按钮点击处，面板只订阅）
+  const task = usePluginTaskStore((s) => s.task);
+  const startEnv = usePluginTaskStore((s) => s.startEnv);
+  const taskRunning = task?.status === "running";
 
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
@@ -305,14 +308,10 @@ export function PluginPage() {
                   {/* 本地引擎环境安装区：状态 / 下载按钮 / 进度面板 */}
                   {p.loaded && p.has_setup && (
                     <div className="mt-2">
-                      {setupTask?.pluginId === p.id ? (
+                      {task?.pluginId === p.id ? (
                         <PluginSetupPanel
                           pluginId={p.id}
-                          options={setupTask.options}
-                          onDone={() => {
-                            setSetupTask(null);
-                            void reload();
-                          }}
+                          onClosed={() => void reload()}
                         />
                       ) : p.setup_status?.ready ? (
                         <div className="flex items-center gap-1.5 rounded-lg border border-emerald-600/25 bg-emerald-600/5 px-3 py-2 text-[11px] text-emerald-700">
@@ -327,8 +326,10 @@ export function PluginPage() {
                             {p.setup_status?.summary ?? "运行环境未安装"}
                           </span>
                           <button
-                            onClick={() => setSetupTask({ pluginId: p.id })}
-                            disabled={setupTask !== null || busy !== null}
+                            onClick={() => {
+                              startEnv(p.id, p.name).catch(() => { /* 错误已在 store */ });
+                            }}
+                            disabled={taskRunning || busy !== null}
                             className="shrink-0 rounded-lg bg-sky-600 px-3 py-1 text-[11px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
                           >
                             下载运行环境

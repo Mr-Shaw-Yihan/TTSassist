@@ -88,6 +88,10 @@ export interface PluginSetupStatus {
 /** 插件环境安装进度事件载荷（plugin-setup-progress） */
 export interface PluginSetupProgress {
   plugin_id: string;
+  /** 任务类型：env=引擎环境安装，voice=音色安装 */
+  kind: "env" | "voice";
+  /** 音色 id（kind=voice 时有值） */
+  voice_id?: string | null;
   /** 0~100 定量进度；<0 表示不定量（以 message 为准） */
   percent: number;
   message: string;
@@ -112,6 +116,8 @@ export interface PluginInfo {
   has_setup?: boolean;
   /** 环境安装状态（has_setup=false 时为 null） */
   setup_status?: PluginSetupStatus | null;
+  /** 是否支持音色管理（安装/卸载/预加载/导入音色包） */
+  has_voice_management?: boolean;
 }
 
 /** 官方插件索引条目（fetch_plugin_index 返回） */

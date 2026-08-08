@@ -113,6 +113,18 @@ pub fn ensure_server(ctx: &Ctx) -> Result<u16, String> {
     ))
 }
 
+/// 当前在跑的服务端口（未启动/失联返回 None）。不拉起进程，仅探活。
+/// 音色卸载时用它判断是否需要先让服务端卸载内存中的音色。
+pub fn running_port() -> Option<u16> {
+    let guard = server_slot().lock().ok()?;
+    let state = guard.as_ref()?;
+    if crate::client::health(state.port) {
+        Some(state.port)
+    } else {
+        None
+    }
+}
+
 /// 让系统分配一个空闲 TCP 端口
 fn pick_free_port() -> Result<u16, String> {
     std::net::TcpListener::bind("127.0.0.1:0")

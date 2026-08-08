@@ -40,6 +40,11 @@ pub struct LoadedPlugin {
     f_setup_status: Option<plugin_api::VaPluginSetupStatusFn>,
     /// 可选：执行环境安装（本地引擎用 va_tts_plugin_setup! 导出）
     f_setup: Option<plugin_api::VaPluginSetupFn>,
+    /// 可选：音色管理（本地引擎用 va_tts_plugin_voices! 导出）
+    f_voice_install: Option<plugin_api::VaVoiceInstallFn>,
+    f_voice_uninstall: Option<plugin_api::VaVoiceUninstallFn>,
+    f_voice_preload: Option<plugin_api::VaVoicePreloadFn>,
+    f_voice_import: Option<plugin_api::VaVoiceImportFn>,
 }
 
 // libloading::Library 是 Send+Sync，函数指针天然 Send+Sync
@@ -119,6 +124,16 @@ impl LoadedPlugin {
             )
         };
 
+        // 3.5 可选符号：音色管理四件套（本地引擎才有，缺失不算错误）
+        let (f_voice_install, f_voice_uninstall, f_voice_preload, f_voice_import) = unsafe {
+            (
+                try_get_sym::<plugin_api::VaVoiceInstallFn>(&lib, plugin_api::SYM_VOICE_INSTALL),
+                try_get_sym::<plugin_api::VaVoiceUninstallFn>(&lib, plugin_api::SYM_VOICE_UNINSTALL),
+                try_get_sym::<plugin_api::VaVoicePreloadFn>(&lib, plugin_api::SYM_VOICE_PRELOAD),
+                try_get_sym::<plugin_api::VaVoiceImportFn>(&lib, plugin_api::SYM_VOICE_IMPORT),
+            )
+        };
+
         // 5. dll 自报 id 必须与清单一致；dll 自报版本仅记录（清单为准）
         if dll_id != manifest.id {
             return Err(PluginError::Unsupported(format!(
@@ -146,6 +161,10 @@ impl LoadedPlugin {
             f_free_cstr,
             f_setup_status,
             f_setup,
+            f_voice_install,
+            f_voice_uninstall,
+            f_voice_preload,
+            f_voice_import,
         }))
     }
 
@@ -217,6 +236,90 @@ impl LoadedPlugin {
             format!("环境安装失败（错误码 {code}）")
         };
 
+        if code == plugin_api::VA_OK {
+            Ok(msg)
+        } else {
+            Err(PluginError::Synthesize(msg))
+        }
+    }
+
+    /// 插件是否支持音色管理（本地引擎导出 va_tts_plugin_voices! 可选符号）。
+    /// 至少要有 install 符号才算支持。
+    pub fn has_voice_management(&self) -> bool {
+        self.f_voice_install.is_some()
+    }
+
+    /// 安装指定音色（阻塞调用，需在 blocking 线程执行）。
+    /// progress：进度回调（可空）。返回插件的中文结果消息。
+    pub fn install_voice(
+        &self,
+        voice_id: &str,
+        progress: plugin_api::VaSetupProgressFn,
+    ) -> Result<String, PluginError> {
+        let f = self
+            .f_voice_install
+            .ok_or_else(|| PluginError::Unsupported("该插件不支持音色管理".into()))?;
+        let c_id = CString::new(voice_id)
+            .map_err(|_| PluginError::Synthesize("音色 id 含非法字符（NUL）".into()))?;
+        let mut out_msg: *mut std::ffi::c_char = std::ptr::null_mut();
+        let code = unsafe { f(c_id.as_ptr(), progress, &mut out_msg) };
+        self.read_voice_result(code, out_msg, "音色安装")
+    }
+
+    /// 卸载指定音色（阻塞调用）。
+    pub fn uninstall_voice(&self, voice_id: &str) -> Result<String, PluginError> {
+        let f = self
+            .f_voice_uninstall
+            .ok_or_else(|| PluginError::Unsupported("该插件不支持音色卸载".into()))?;
+        let c_id = CString::new(voice_id)
+            .map_err(|_| PluginError::Synthesize("音色 id 含非法字符（NUL）".into()))?;
+        let mut out_msg: *mut std::ffi::c_char = std::ptr::null_mut();
+        let code = unsafe { f(c_id.as_ptr(), &mut out_msg) };
+        self.read_voice_result(code, out_msg, "音色卸载")
+    }
+
+    /// 预加载已安装音色到内存（阻塞调用；不触发下载）。
+    pub fn preload_voice(&self, voice_id: &str) -> Result<String, PluginError> {
+        let f = self
+            .f_voice_preload
+            .ok_or_else(|| PluginError::Unsupported("该插件不支持音色预加载".into()))?;
+        let c_id = CString::new(voice_id)
+            .map_err(|_| PluginError::Synthesize("音色 id 含非法字符（NUL）".into()))?;
+        let mut out_msg: *mut std::ffi::c_char = std::ptr::null_mut();
+        let code = unsafe { f(c_id.as_ptr(), &mut out_msg) };
+        self.read_voice_result(code, out_msg, "音色预加载")
+    }
+
+    /// 导入用户自备音色包目录（阻塞调用；插件校验布局后复制）。
+    pub fn import_voice_pack(&self, src_dir: &str) -> Result<String, PluginError> {
+        let f = self
+            .f_voice_import
+            .ok_or_else(|| PluginError::Unsupported("该插件不支持导入自定义音色".into()))?;
+        let c_src = CString::new(src_dir)
+            .map_err(|_| PluginError::Synthesize("路径含非法字符（NUL）".into()))?;
+        let mut out_msg: *mut std::ffi::c_char = std::ptr::null_mut();
+        let code = unsafe { f(c_src.as_ptr(), &mut out_msg) };
+        self.read_voice_result(code, out_msg, "音色导入")
+    }
+
+    /// 音色管理调用共用的结果解读：读 out_msg（va_free_cstr 归还）→ Result
+    fn read_voice_result(
+        &self,
+        code: i32,
+        out_msg: *mut std::ffi::c_char,
+        what: &str,
+    ) -> Result<String, PluginError> {
+        let msg = if !out_msg.is_null() {
+            let s = unsafe { CStr::from_ptr(out_msg) }
+                .to_string_lossy()
+                .into_owned();
+            unsafe { (self.f_free_cstr)(out_msg) };
+            s
+        } else if code == plugin_api::VA_OK {
+            format!("{what}完成")
+        } else {
+            format!("{what}失败（错误码 {code}）")
+        };
         if code == plugin_api::VA_OK {
             Ok(msg)
         } else {

@@ -44,6 +44,8 @@ pub struct PluginInfo {
     pub has_setup: bool,
     /// 环境安装状态（实时查询自插件；has_setup=false 时为 null）
     pub setup_status: Option<serde_json::Value>,
+    /// 插件是否支持音色管理（安装/卸载/预加载/导入音色包）
+    pub has_voice_management: bool,
 }
 
 /// 插件管理器。dll 一经加载常驻到进程退出（运行期卸载有崩溃风险，见 loader.rs 头注）。
@@ -193,6 +195,11 @@ impl PluginManager {
                 .as_ref()
                 .and_then(|p| p.setup_status())
                 .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok());
+            // 音色管理能力（本地引擎可选导出）
+            let has_voice_management = loaded_plugin
+                .as_ref()
+                .map(|p| p.has_voice_management())
+                .unwrap_or(false);
 
             result.push(PluginInfo {
                 id: entry.id.clone(),
@@ -206,6 +213,7 @@ impl PluginManager {
                 category,
                 has_setup,
                 setup_status,
+                has_voice_management,
             });
         }
         result
@@ -516,6 +524,10 @@ mod tests {
         assert_eq!(plugin.audio_format, "wav");
         assert_eq!(plugin.manifest.category, "local", "本地插件类别应为 local");
         assert!(plugin.manifest.timeout_secs >= 600, "本地引擎超时应放宽");
+
+        // 能力符号：本地引擎应同时导出 setup 与音色管理（阶段 21）
+        assert!(plugin.has_setup(), "genie-tts 应支持环境安装");
+        assert!(plugin.has_voice_management(), "genie-tts 应支持音色管理");
 
         // 数据目录环境变量应在加载时注入（指向 <插件目录>/data）
         let env_key = "VA_PLUGIN_DATA_DIR_GENIE_TTS";
