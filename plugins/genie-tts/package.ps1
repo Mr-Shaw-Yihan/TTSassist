@@ -22,7 +22,7 @@ $Version    = "0.1.0"
 $MinAppVer  = "1.4.0"
 $Desc       = "GPT-SoVITS ONNX 本地推理引擎，CPU 离线合成，音色包可扩展（首次使用自动下载运行环境）"
 # 资源需求说明：供用户在下载安装运行环境前判断本机配置是否够用
-$Requirements = "首次使用需联网下载运行环境约 800MB，每个音色另约 200MB；本机 CPU 推理（无需显卡），运行时内存占用约 2–4GB，建议内存 8GB 以上、磁盘预留 2GB。"
+$Requirements = "首次使用需联网下载运行环境约 1.1GB，每个音色另约 320MB；本机 CPU 推理（无需显卡），运行时内存占用约 2–4GB，建议内存 8GB 以上、磁盘预留 3GB。"
 
 $PluginDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DistDir   = Join-Path $PluginDir "dist"
