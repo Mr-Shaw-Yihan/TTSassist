@@ -42,7 +42,7 @@ VoiceAssist 的核心是"打字 → 播报"。装上这个插件后，未来可�
 powershell -ExecutionPolicy Bypass -File .\package.ps1 -Install
 ```
 
-脚本会自动：构建插件 → 生成清单（含 SHA-256 校验）→ 安装到 `%APPDATA%/com.voiceassist.app/plugins/mimo-asr/`
+脚本会自动：构建插件 → 生成清单（含 SHA-256 校验）→ 安装到 `<exe同级>/plugins/mimo-asr/`（阶段 22 起脱离 AppData）
 
 ### 方式二：打包后手动安装
 
@@ -109,5 +109,5 @@ powershell -ExecutionPolicy Bypass -File .\package.ps1
 ## 卸载
 
 1. 关闭 VoiceAssist
-2. 删除目录 `%APPDATA%/com.voiceassist.app/plugins/mimo-asr/`
-3. 编辑 `%APPDATA%/com.voiceassist.app/plugins/registry.json`，移除 `id` 为 `mimo-asr` 的条目
+2. 删除目录 `<exe同级>/plugins/mimo-asr/`（阶段 22 起插件在 exe 同级，不在 AppData）
+3. 编辑 `<exe同级>/plugins/registry.json`，移除 `id` 为 `mimo-asr` 的条目

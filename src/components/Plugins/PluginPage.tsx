@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   listPlugins,
   uninstallPlugin,
@@ -167,6 +168,14 @@ export function PluginPage() {
     }
   }
 
+  async function handleOpenLocation(p: PluginInfo) {
+    try {
+      await revealItemInDir(p.path);
+    } catch (e) {
+      window.alert(`打开插件目录失败：${e}`);
+    }
+  }
+
   async function handleOnlineInstall(entry: PluginIndexEntry) {
     setBusy(`正在下载安装「${entry.name}」…`);
     try {
@@ -269,6 +278,12 @@ export function PluginPage() {
                         </button>
                       )
                     )}
+                    <button
+                      onClick={() => handleOpenLocation(p)}
+                      className="rounded-lg px-2 py-1 text-[11px] text-[var(--ink-300)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-600)]"
+                    >
+                      打开位置
+                    </button>
                     <button
                       onClick={() => handleUninstall(p)}
                       disabled={busy !== null}

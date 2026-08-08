@@ -38,6 +38,8 @@ pub struct PluginInfo {
     pub voices: Vec<plugin_api::VoiceItem>,
     /// 音频格式（如 mp3）
     pub audio_format: String,
+    /// 插件目录绝对路径（前端「打开所在位置」用）
+    pub path: String,
 }
 
 /// 插件管理器。dll 一经加载常驻到进程退出（运行期卸载有崩溃风险，见 loader.rs 头注）。
@@ -221,6 +223,7 @@ impl PluginManager {
                 error,
                 voices,
                 audio_format,
+                path: dir.to_string_lossy().into_owned(),
             });
         }
         result

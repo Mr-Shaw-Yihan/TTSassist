@@ -94,6 +94,8 @@ export interface PluginInfo {
   voices: PluginVoiceItem[];
   /** 音频格式（如 mp3） */
   audio_format: string;
+  /** 插件目录绝对路径（「打开所在位置」用） */
+  path: string;
 }
 
 /** 官方插件索引条目（fetch_plugin_index 返回） */
