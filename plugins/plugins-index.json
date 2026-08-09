@@ -5,7 +5,7 @@
                         "name":  "Edge TTS（免费·微软）",
                         "version":  "0.1.0",
                         "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/edge-tts-0.1.0.zip",
-                        "checksum":  "d26e07e120311f0f4112adb523177aa92d47efc80d9a15432be71e8d4c87fd18",
+                        "checksum":  "c05c6e51d39fa3da6514dc793e393d6cd5e2c1ad4836d70fcf8dc0dded9e2f8b",
                         "description":  "免费、无需 Key 的微软 Edge 语音（非官方接口，可能不稳定）"
                     },
                     {
@@ -13,7 +13,7 @@
                         "name":  "MiMo ASR（小米·云端）",
                         "version":  "0.1.0",
                         "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/mimo-asr-0.1.0.zip",
-                        "checksum":  "0f86421991f3a0e08f2ab31a3495bebf2080274e1c6309bb48d5031e2b26bef4",
+                        "checksum":  "61bd041284543cb60236a2e4943c3da96a2f246a4002582d2061016ede3fbb1f",
                         "description":  "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测"
                     },
                     {
@@ -21,7 +21,7 @@
                         "name":  "Genie TTS（本地·离线）",
                         "version":  "0.1.0",
                         "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/genie-tts-0.1.0.zip",
-                        "checksum":  "cf45300dd04fdf246268b605f886b5a511dce63f7f36ff4da55dfc4ea0f8a651",
+                        "checksum":  "11deeb2c9c68b02d37a99fd990acb5a5dd5b131a9fda49e9da258e4891bc5620",
                         "description":  "GPT-SoVITS ONNX 本地推理引擎，CPU 离线合成，音色包可扩展（首次使用自动下载运行环境约 1.1GB，每个音色另约 320MB）"
                     }
                 ]
