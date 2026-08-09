@@ -7,11 +7,14 @@ import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "../../stores/updateStore";
-import { importCloneVoice, removeCloneVoice, pickAudioFile, listPlugins, listAsrPlugins, setHotkey } from "../../services/invoke";
+import { usePluginTaskStore } from "../../stores/pluginTaskStore";
+import { importCloneVoice, removeCloneVoice, pickAudioFile, listPlugins, listAsrPlugins, setHotkey, preloadVoice } from "../../services/invoke";
 import type { MossVoice, PluginInfo } from "../../types";
 import { HotkeyRecorder } from "./HotkeyRecorder";
 import { MicSettings } from "./MicSettings";
 import { VoiceInputSettings } from "./VoiceInputSettings";
+import { PluginSetupPanel } from "../Plugins/PluginSetupPanel";
+import { VoiceManager } from "./VoiceManager";
 
 const PRESET_VOICES = [
   { id: "mimo_default", label: "默认 (mimo_default)" },
@@ -79,6 +82,93 @@ export function SettingsPage() {
   useEffect(() => {
     listPlugins().then(setPlugins).catch(() => {});
   }, []);
+
+  // 安装任务走全局 store（启动在用户确认处，进度面板只订阅）
+  const task = usePluginTaskStore((s) => s.task);
+  const startEnv = usePluginTaskStore((s) => s.startEnv);
+  const startVoice = usePluginTaskStore((s) => s.startVoice);
+  const taskRunning = task?.status === "running";
+
+  // 待确认项（页内确认卡片，替代 window.confirm，且确认前不改配置）
+  const [pendingEnv, setPendingEnv] = useState<{ pluginId: string; name: string } | null>(null);
+  const [pendingVoice, setPendingVoice] = useState<
+    { pluginId: string; voiceId: string; label: string } | null
+  >(null);
+  // 正在预加载的音色（切换已装音色时的瞬时指示）
+  const [preloadingVoice, setPreloadingVoice] = useState<string | null>(null);
+
+  /** 取插件音色的干净展示名（去掉"· 待下载"后缀） */
+  function voiceLabel(plugin: PluginInfo, voiceId: string): string {
+    const v = plugin.voices.find((x) => x.id === voiceId);
+    return (v?.label ?? voiceId).replace(/\s*·\s*待下载$/, "");
+  }
+
+  /** 切换引擎：选中未就绪的本地插件时，用页内卡片询问是否现在下载运行环境 */
+  function handleEngineChange(engineId: string) {
+    void patch("tts_engine", engineId);
+    setPendingEnv(null);
+    const p = plugins.find((x) => x.id === engineId);
+    if (p?.has_setup && !p.setup_status?.ready) {
+      setPendingEnv({ pluginId: engineId, name: p.name });
+    }
+  }
+
+  /** 切换插件音色：
+   *  - 已安装 → 立即切换 + 后台预加载（有瞬时指示）；
+   *  - 未安装 → 先弹页内确认卡片，确认并【安装成功后】才切换（确认前不动配置）。 */
+  function handlePluginVoiceChange(plugin: PluginInfo, voiceId: string) {
+    const installed = plugin.setup_status?.voices ?? [];
+    if (installed.includes(voiceId)) {
+      void patch("plugin_voices", {
+        ...(settings?.plugin_voices ?? {}),
+        [plugin.id]: voiceId,
+      });
+      // 后台预加载（秒级），失败不拦截——合成时还会幂等补齐
+      setPreloadingVoice(voiceId);
+      preloadVoice(plugin.id, voiceId)
+        .catch(() => {})
+        .finally(() => setPreloadingVoice((v) => (v === voiceId ? null : v)));
+      return;
+    }
+    // 未安装：有任务在跑就不开新确认（入口禁用语义）
+    if (taskRunning) return;
+    setPendingVoice({ pluginId: plugin.id, voiceId, label: voiceLabel(plugin, voiceId) });
+  }
+
+  /** 确认卡片：确认下载音色 → 启动安装任务，成功后才切换音色 */
+  function confirmVoiceDownload() {
+    if (!pendingVoice) return;
+    const { pluginId, voiceId, label } = pendingVoice;
+    setPendingVoice(null);
+    startVoice(pluginId, voiceId, label).then(
+      () => {
+        // 安装成功 → 切到该音色 + 刷新插件状态
+        void patch("plugin_voices", {
+          ...(settings?.plugin_voices ?? {}),
+          [pluginId]: voiceId,
+        });
+        listPlugins().then(setPlugins).catch(() => {});
+      },
+      () => {
+        /* 错误已记录在 store，进度面板展示 */
+      },
+    );
+  }
+
+  /** 确认卡片：确认下载引擎运行环境 → 启动环境安装任务 */
+  function confirmEnvDownload() {
+    if (!pendingEnv) return;
+    const { pluginId, name } = pendingEnv;
+    setPendingEnv(null);
+    startEnv(pluginId, name).then(
+      () => {
+        listPlugins().then(setPlugins).catch(() => {});
+      },
+      () => {
+        /* 错误已记录在 store */
+      },
+    );
+  }
 
   async function copyInvite() {
     try {
@@ -192,7 +282,7 @@ export function SettingsPage() {
             <Field label="TTS 引擎">
               <select
                 value={settings?.tts_engine ?? "mimo"}
-                onChange={(e) => patch("tts_engine", e.target.value)}
+                onChange={(e) => handleEngineChange(e.target.value)}
                 className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
               >
                 <option value="mimo">MiMo（小米）</option>
@@ -420,19 +510,92 @@ export function SettingsPage() {
                   <Field label={`${cur.name} 音色`}>
                     <select
                       value={settings?.plugin_voices?.[cur.id] ?? cur.voices[0]?.id ?? ""}
-                      onChange={(e) =>
-                        patch("plugin_voices", {
-                          ...(settings?.plugin_voices ?? {}),
-                          [cur.id]: e.target.value,
-                        })
-                      }
-                      className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
+                      onChange={(e) => handlePluginVoiceChange(cur, e.target.value)}
+                      disabled={taskRunning}
+                      className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)] disabled:opacity-60"
                     >
                       {cur.voices.map((v) => (
                         <option key={v.id} value={v.id}>{v.label}</option>
                       ))}
                     </select>
+                    {/* 切换已装音色时的瞬时预加载指示 */}
+                    {preloadingVoice !== null && (
+                      <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-[var(--ink-500)]">
+                        <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--amber-500)]" />
+                        正在加载音色…
+                      </div>
+                    )}
                   </Field>
+
+                  {/* 未安装音色：页内确认卡片（确认前不改配置） */}
+                  {pendingVoice && pendingVoice.pluginId === cur.id && (
+                    <div className="rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/15 px-3 py-2.5">
+                      <p className="text-[11px] leading-relaxed text-[var(--ink-700)]">
+                        音色「{pendingVoice.label}」尚未下载（约 200MB，需联网）。现在下载吗？
+                      </p>
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          onClick={confirmVoiceDownload}
+                          className="rounded-lg bg-[var(--amber-500)] px-3 py-1 text-[11px] font-medium text-white transition-opacity hover:opacity-90"
+                        >
+                          下载并切换
+                        </button>
+                        <button
+                          onClick={() => setPendingVoice(null)}
+                          className="rounded-lg border border-[var(--ink-200)] px-3 py-1 text-[11px] text-[var(--ink-500)] hover:border-[var(--ink-300)]"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 引擎环境未就绪：页内确认卡片 */}
+                  {pendingEnv && pendingEnv.pluginId === cur.id && (
+                    <div className="rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/15 px-3 py-2.5">
+                      <p className="text-[11px] leading-relaxed text-[var(--ink-700)]">
+                        「{pendingEnv.name}」是本地引擎，首次使用需下载运行环境与语音模型（共约 800MB，需联网）。现在下载吗？
+                      </p>
+                      {cur.requirements && (
+                        <p className="mt-1.5 text-[10px] leading-relaxed text-[var(--ink-500)]">
+                          资源需求：{cur.requirements}
+                        </p>
+                      )}
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          onClick={confirmEnvDownload}
+                          className="rounded-lg bg-[var(--amber-500)] px-3 py-1 text-[11px] font-medium text-white transition-opacity hover:opacity-90"
+                        >
+                          现在下载
+                        </button>
+                        <button
+                          onClick={() => setPendingEnv(null)}
+                          className="rounded-lg border border-[var(--ink-200)] px-3 py-1 text-[11px] text-[var(--ink-500)] hover:border-[var(--ink-300)]"
+                        >
+                          稍后
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 安装进度面板（纯订阅 store；无匹配任务时自动隐藏） */}
+                  <PluginSetupPanel
+                    pluginId={cur.id}
+                    onClosed={() => {
+                      listPlugins().then(setPlugins).catch(() => {});
+                    }}
+                  />
+
+                  {/* 音色管理（支持音色安装的本地引擎） */}
+                  {cur.has_voice_management && (
+                    <VoiceManager
+                      plugin={cur}
+                      currentVoiceId={settings?.plugin_voices?.[cur.id] ?? cur.voices[0]?.id ?? ""}
+                      onChanged={() => {
+                        listPlugins().then(setPlugins).catch(() => {});
+                      }}
+                    />
+                  )}
                 </>
               );
             })()}

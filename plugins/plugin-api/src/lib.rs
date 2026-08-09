@@ -36,6 +36,16 @@ pub const SYM_FREE_CSTR: &[u8] = b"va_free_cstr\0";
 pub const SYM_ASR_TRANSCRIBE: &[u8] = b"va_asr_transcribe\0";
 pub const SYM_ASR_LANGUAGES: &[u8] = b"va_asr_languages\0";
 
+// 可选符号（本地引擎"环境安装"支持；老插件没有，宿主按 Option 处理）
+pub const SYM_PLUGIN_SETUP_STATUS: &[u8] = b"va_plugin_setup_status\0";
+pub const SYM_PLUGIN_SETUP: &[u8] = b"va_plugin_setup\0";
+
+// 可选符号（本地引擎"音色管理"支持；va_tts_plugin_voices! 宏生成，老插件没有）
+pub const SYM_VOICE_INSTALL: &[u8] = b"va_voice_install\0";
+pub const SYM_VOICE_UNINSTALL: &[u8] = b"va_voice_uninstall\0";
+pub const SYM_VOICE_PRELOAD: &[u8] = b"va_voice_preload\0";
+pub const SYM_VOICE_IMPORT: &[u8] = b"va_voice_import\0";
+
 // ── 函数类型别名（宿主侧 libloading::Symbol<T> 用）──────────────
 
 /// 元信息类：返回 NUL 结尾静态字符串指针（id/name/version/audio_format/list_voices 共用）
@@ -76,6 +86,62 @@ pub type VaAsrTranscribeFn = unsafe extern "C" fn(
 /// 返回支持的语言列表 JSON（静态字符串，宿主立即拷贝，无需释放）。
 /// 格式：[{"code":"zh","label":"中文"},{"code":"en","label":"English"}]
 pub type VaAsrLanguagesFn = unsafe extern "C" fn() -> *const c_char;
+
+// ── 可选：环境安装（setup）支持 ───────────────────────
+//
+// 本地引擎首次使用需要下载运行环境/模型。这两个符号可选导出
+// （va_tts_plugin_setup! 宏生成），宿主 libloading 取不到就当插件无此能力。
+
+/// 安装进度回调（宿主提供，插件在 setup 过程中反复调用）。
+/// percent：0~100 定量进度；<0 表示不定量（此时以 message 文案为准）。
+/// message：NUL 结尾 UTF-8 阶段描述（如"正在下载语音模型…"），指针仅在回调期间有效。
+pub type VaSetupProgressFn =
+    Option<unsafe extern "C" fn(percent: f32, message: *const c_char)>;
+
+/// 查询环境安装状态：返回 JSON 字符串（内存约定同 va_list_voices：
+/// 插件静态/缓存存储，宿主立即拷贝，无需释放）。
+/// JSON 约定字段：ready(bool) / env_ready(bool) / resources_ready(bool) /
+/// voices(已安装音色 id 数组) / summary(人类可读摘要)。
+pub type VaPluginSetupStatusFn = unsafe extern "C" fn() -> *const c_char;
+
+/// 执行环境安装/补齐。
+/// options：NUL 结尾 UTF-8 JSON 或 NULL（如 {"voice":"mika"} 指定要确保的音色）；
+/// progress：进度回调（可为 None）；out_msg：结束时写中文结果消息（CString，
+/// 宿主读取后调 va_free_cstr 归还）。返回 VA_OK/VA_ERR。
+pub type VaPluginSetupFn = unsafe extern "C" fn(
+    options: *const c_char,
+    progress: VaSetupProgressFn,
+    out_msg: *mut *mut c_char,
+) -> i32;
+
+// ── 可选：音色管理（本地引擎的安装/卸载/预加载/导入音色包）──────
+//
+// 与 setup 符号同理：可选导出（va_tts_plugin_voices! 宏生成），
+// 宿主 libloading 取不到就当插件无此能力。所有 out_msg 均为 CString，
+// 宿主读取后调 va_free_cstr 归还；返回 VA_OK/VA_ERR。
+
+/// 安装指定音色（预置角色首次会联网下载）。
+/// voice_id：NUL 结尾 UTF-8，必传；progress：进度回调（可为 None，
+/// 约定同 va_plugin_setup）。插件内部若发现运行环境未就绪会先补环境，
+/// 进度文案应如实报告当前阶段。
+pub type VaVoiceInstallFn = unsafe extern "C" fn(
+    voice_id: *const c_char,
+    progress: VaSetupProgressFn,
+    out_msg: *mut *mut c_char,
+) -> i32;
+
+/// 卸载指定音色（删除本地音色包文件）。
+pub type VaVoiceUninstallFn =
+    unsafe extern "C" fn(voice_id: *const c_char, out_msg: *mut *mut c_char) -> i32;
+
+/// 预加载已安装音色到内存（不触发下载；加载模型权重，秒级）。
+pub type VaVoicePreloadFn =
+    unsafe extern "C" fn(voice_id: *const c_char, out_msg: *mut *mut c_char) -> i32;
+
+/// 导入用户自备音色包目录（插件校验布局后复制进自己的数据目录）。
+/// src_dir：NUL 结尾 UTF-8 绝对路径。
+pub type VaVoiceImportFn =
+    unsafe extern "C" fn(src_dir: *const c_char, out_msg: *mut *mut c_char) -> i32;
 
 // ── 音色条目 ──────────────────────────────────────────
 
@@ -312,6 +378,7 @@ macro_rules! __va_tts_plugin_common {
     };
 }
 
+
 // ── ASR 插件导出宏 ──────────────────────────────────────
 
 /// ASR 插件侧一键生成全部 C ABI 导出函数。
@@ -425,6 +492,242 @@ macro_rules! va_asr_plugin {
         }
     };
 }
+
+/// 插件侧可选导出：环境安装（setup）支持，与 va_tts_plugin! 配合使用。
+///
+/// 用法（插件 crate 的 lib.rs，va_tts_plugin! 之后）：
+/// ```ignore
+/// plugin_api::va_tts_plugin_setup! {
+///     status: my_setup_status,  // fn() -> String（返回 JSON 状态）
+///     setup: my_run_setup,      // fn(Option<&str>, &dyn Fn(f32, &str)) -> Result<String, String>
+/// }
+/// ```
+///
+/// - status：纯探测（磁盘检查），必须快、不触发网络，宿主列表页会频繁查询；
+/// - setup：options 为调用方传入的 JSON（可为 None）；进度回调用 `cb(percent, msg)`
+///   上报（percent<0 = 不定量）；Ok 消息直接展示给用户，Err 为中文错误；
+/// - 宏负责 catch_unwind、CString 分配（由宿主的 va_free_cstr 归还），勿手写导出。
+#[macro_export]
+macro_rules! va_tts_plugin_setup {
+    (
+        status: $status_fn:expr,
+        setup: $setup_fn:expr $(,)?
+    ) => {
+        #[no_mangle]
+        pub extern "C" fn va_plugin_setup_status() -> *const ::std::os::raw::c_char {
+            // 缓存槽约定同动态音色表：宿主调用后立即拷贝
+            static VA__SETUP_STATUS_CACHE: ::std::sync::OnceLock<
+                ::std::sync::Mutex<::std::ffi::CString>,
+            > = ::std::sync::OnceLock::new();
+            let cache = VA__SETUP_STATUS_CACHE.get_or_init(|| {
+                ::std::sync::Mutex::new(::std::ffi::CString::new("{}").unwrap())
+            });
+            let f: fn() -> String = $status_fn;
+            let json = ::std::panic::catch_unwind(f)
+                .unwrap_or_else(|_| "{}".to_string());
+            let c = ::std::ffi::CString::new(json)
+                .unwrap_or_else(|_| ::std::ffi::CString::new("{}").unwrap());
+            let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+            *guard = c;
+            guard.as_ptr()
+        }
+
+        #[no_mangle]
+        pub unsafe extern "C" fn va_plugin_setup(
+            options: *const ::std::os::raw::c_char,
+            progress: $crate::VaSetupProgressFn,
+            out_msg: *mut *mut ::std::os::raw::c_char,
+        ) -> i32 {
+            // 写入结果消息（CString::into_raw，宿主经 va_free_cstr 归还）
+            macro_rules! write_msg {
+                ($s:expr) => {
+                    if !out_msg.is_null() {
+                        let c = ::std::ffi::CString::new($s)
+                            .unwrap_or_else(|_| ::std::ffi::CString::new("setup").unwrap());
+                        *out_msg = c.into_raw();
+                    }
+                };
+            }
+            if out_msg.is_null() {
+                return $crate::VA_ERR;
+            }
+
+            let opts: Option<&str> = if options.is_null() {
+                None
+            } else {
+                match ::std::ffi::CStr::from_ptr(options).to_str() {
+                    Ok(s) => Some(s),
+                    Err(_) => {
+                        write_msg!("安装参数不是合法 UTF-8".to_string());
+                        return $crate::VA_ERR;
+                    }
+                }
+            };
+
+            // 把裸回调指针包成安全闭包（指针仅在 setup 调用期间有效，闭包不逃逸）
+            let cb = |percent: f32, msg: &str| {
+                if let Some(f) = progress {
+                    let c = ::std::ffi::CString::new(msg)
+                        .unwrap_or_else(|_| ::std::ffi::CString::new("").unwrap());
+                    f(percent, c.as_ptr());
+                }
+            };
+
+            let f: fn(Option<&str>, &dyn Fn(f32, &str)) -> Result<String, String> = $setup_fn;
+            let result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
+                f(opts, &cb)
+            }));
+
+            match result {
+                Ok(Ok(msg)) => {
+                    write_msg!(msg);
+                    $crate::VA_OK
+                }
+                Ok(Err(e)) => {
+                    write_msg!(e);
+                    $crate::VA_ERR
+                }
+                Err(_) => {
+                    write_msg!("插件安装流程内部崩溃（panic）".to_string());
+                    $crate::VA_ERR
+                }
+            }
+        }
+    };
+}
+
+/// 插件侧可选导出：音色管理支持（本地引擎的安装/卸载/预加载/导入音色包）。
+///
+/// 用法（插件 crate 的 lib.rs，va_tts_plugin! 之后）：
+/// ```ignore
+/// plugin_api::va_tts_plugin_voices! {
+///     install: my_install_voice,      // fn(&str, &dyn Fn(f32, &str)) -> Result<String, String>
+///     uninstall: my_uninstall_voice,  // fn(&str) -> Result<String, String>
+///     preload: my_preload_voice,      // fn(&str) -> Result<String, String>
+///     import: my_import_voice_pack,   // fn(&str) -> Result<String, String>（源目录绝对路径）
+/// }
+/// ```
+///
+/// - install：voice_id 必传；进度回调约定同 setup；若运行环境未就绪应先补环境
+///   并在进度文案中如实报告；
+/// - uninstall：删除本地音色包（插件自行决定目录布局）；
+/// - preload：仅对已安装音色加载权重，不得触发下载；
+/// - import：校验用户目录布局后复制进插件数据目录（保留用户原文件）；
+/// - 四个函数 Ok 消息直接展示给用户，Err 为中文错误；宏负责 catch_unwind
+///   与 CString 分配（宿主经 va_free_cstr 归还），勿手写导出。
+#[macro_export]
+macro_rules! va_tts_plugin_voices {
+    (
+        install: $install_fn:expr,
+        uninstall: $uninstall_fn:expr,
+        preload: $preload_fn:expr,
+        import: $import_fn:expr $(,)?
+    ) => {
+        /// 内部共用：把 Result<String,String> 写入 out_msg 并返回 VA_OK/VA_ERR
+        #[doc(hidden)]
+        unsafe fn __va_voice_write_result(
+            result: Result<String, String>,
+            out_msg: *mut *mut ::std::os::raw::c_char,
+        ) -> i32 {
+            let (code, msg) = match result {
+                Ok(m) => ($crate::VA_OK, m),
+                Err(e) => ($crate::VA_ERR, e),
+            };
+            if !out_msg.is_null() {
+                let c = ::std::ffi::CString::new(msg)
+                    .unwrap_or_else(|_| ::std::ffi::CString::new("voice operation").unwrap());
+                *out_msg = c.into_raw();
+            }
+            code
+        }
+
+        /// 内部共用：读 NUL 结尾 UTF-8 入参（NULL/非法 UTF-8 返回 Err 文案）
+        #[doc(hidden)]
+        unsafe fn __va_voice_read_cstr<'a>(
+            ptr: *const ::std::os::raw::c_char,
+            what: &str,
+        ) -> Result<&'a str, String> {
+            if ptr.is_null() {
+                return Err(format!("{what}不能为空"));
+            }
+            ::std::ffi::CStr::from_ptr(ptr)
+                .to_str()
+                .map_err(|_| format!("{what}不是合法 UTF-8"))
+        }
+
+        #[no_mangle]
+        pub unsafe extern "C" fn va_voice_install(
+            voice_id: *const ::std::os::raw::c_char,
+            progress: $crate::VaSetupProgressFn,
+            out_msg: *mut *mut ::std::os::raw::c_char,
+        ) -> i32 {
+            let id = match unsafe { __va_voice_read_cstr(voice_id, "音色 id") } {
+                Ok(s) => s,
+                Err(e) => return __va_voice_write_result(Err(e), out_msg),
+            };
+            // 裸回调指针包成安全闭包（指针仅在本调用期间有效，闭包不逃逸）
+            let cb = |percent: f32, msg: &str| {
+                if let Some(f) = progress {
+                    let c = ::std::ffi::CString::new(msg)
+                        .unwrap_or_else(|_| ::std::ffi::CString::new("").unwrap());
+                    f(percent, c.as_ptr());
+                }
+            };
+            let f: fn(&str, &dyn Fn(f32, &str)) -> Result<String, String> = $install_fn;
+            let result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
+                f(id, &cb)
+            }));
+            let flat = result.unwrap_or_else(|_| Err("插件音色安装流程内部崩溃（panic）".to_string()));
+            __va_voice_write_result(flat, out_msg)
+        }
+
+        #[no_mangle]
+        pub unsafe extern "C" fn va_voice_uninstall(
+            voice_id: *const ::std::os::raw::c_char,
+            out_msg: *mut *mut ::std::os::raw::c_char,
+        ) -> i32 {
+            let id = match unsafe { __va_voice_read_cstr(voice_id, "音色 id") } {
+                Ok(s) => s,
+                Err(e) => return __va_voice_write_result(Err(e), out_msg),
+            };
+            let f: fn(&str) -> Result<String, String> = $uninstall_fn;
+            let result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| f(id)));
+            let flat = result.unwrap_or_else(|_| Err("插件音色卸载流程内部崩溃（panic）".to_string()));
+            __va_voice_write_result(flat, out_msg)
+        }
+
+        #[no_mangle]
+        pub unsafe extern "C" fn va_voice_preload(
+            voice_id: *const ::std::os::raw::c_char,
+            out_msg: *mut *mut ::std::os::raw::c_char,
+        ) -> i32 {
+            let id = match unsafe { __va_voice_read_cstr(voice_id, "音色 id") } {
+                Ok(s) => s,
+                Err(e) => return __va_voice_write_result(Err(e), out_msg),
+            };
+            let f: fn(&str) -> Result<String, String> = $preload_fn;
+            let result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| f(id)));
+            let flat = result.unwrap_or_else(|_| Err("插件音色预加载流程内部崩溃（panic）".to_string()));
+            __va_voice_write_result(flat, out_msg)
+        }
+
+        #[no_mangle]
+        pub unsafe extern "C" fn va_voice_import(
+            src_dir: *const ::std::os::raw::c_char,
+            out_msg: *mut *mut ::std::os::raw::c_char,
+        ) -> i32 {
+            let src = match unsafe { __va_voice_read_cstr(src_dir, "音色包目录路径") } {
+                Ok(s) => s,
+                Err(e) => return __va_voice_write_result(Err(e), out_msg),
+            };
+            let f: fn(&str) -> Result<String, String> = $import_fn;
+            let result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| f(src)));
+            let flat = result.unwrap_or_else(|_| Err("插件音色导入流程内部崩溃（panic）".to_string()));
+            __va_voice_write_result(flat, out_msg)
+        }
+    };
+}
+
 
 #[cfg(test)]
 mod tests {

@@ -16,6 +16,7 @@ import { PluginPage } from "./components/Plugins/PluginPage";
 import { UpdateDialog } from "./components/Settings/UpdateDialog";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "./stores/updateStore";
+import { usePluginTaskStore } from "./stores/pluginTaskStore";
 import {
   generateTTS,
   listMessages,
@@ -24,7 +25,7 @@ import {
   getAudioUrl,
   playToMic,
 } from "./services/invoke";
-import type { Message, Favorite } from "./types";
+import type { Message, Favorite, PluginSetupProgress } from "./types";
 
 type Tab = "messages" | "favorites" | "plugins" | "settings";
 
@@ -180,6 +181,14 @@ function App() {
 
   // 语音输入全局快捷键会话（按住说话）：录音状态展示在 InputBox
   useVoiceInputHotkey();
+
+  // 插件安装进度 → 全局任务 store（面板只订阅 store，启动在用户动作处）
+  const applyTaskProgress = usePluginTaskStore((s) => s.applyProgress);
+  useTauriListen<PluginSetupProgress>(
+    "plugin-setup-progress",
+    (p) => applyTaskProgress(p),
+    [applyTaskProgress],
+  );
 
   // 兜底：窗口聚焦时同时刷新收藏
   useEffect(() => {

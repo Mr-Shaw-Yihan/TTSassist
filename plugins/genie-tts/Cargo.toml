@@ -1,0 +1,18 @@
+[package]
+name = "genie-tts"
+version = "0.1.0"
+description = "Genie TTS 本地推理插件：GPT-SoVITS ONNX 引擎，CPU 离线合成，音色包可扩展"
+edition = "2021"
+
+[lib]
+# 插件必须是动态库（Windows 上产出 genie_tts.dll，打包时改名 plugin.dll）
+crate-type = ["cdylib"]
+
+[dependencies]
+plugin-api = { path = "../plugin-api" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# blocking 客户端：插件合成入口是同步 C ABI，不引入 tokio
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+# 解压 Python embeddable 运行时
+zip = { version = "2", default-features = false, features = ["deflate"] }

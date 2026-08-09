@@ -34,12 +34,22 @@ pub struct PluginInfo {
     pub loaded: bool,
     /// 加载失败原因（loaded=false 时有值）
     pub error: Option<String>,
-    /// 音色列表（解析自 dll 返回的 JSON）
+    /// 音色列表（实时查询自插件，动态音色插件可运行期增减）
     pub voices: Vec<plugin_api::VoiceItem>,
     /// 音频格式（如 mp3）
     pub audio_format: String,
     /// 插件目录绝对路径（前端「打开所在位置」用）
     pub path: String,
+    /// 引擎类别（manifest.category）："local" 本地离线 / "remote" 联网
+    pub category: String,
+    /// 插件是否支持环境安装（本地引擎需下载运行环境/模型）
+    pub has_setup: bool,
+    /// 环境安装状态（实时查询自插件；has_setup=false 时为 null）
+    pub setup_status: Option<serde_json::Value>,
+    /// 插件是否支持音色管理（安装/卸载/预加载/导入音色包）
+    pub has_voice_management: bool,
+    /// 资源需求说明（manifest.requirements，供用户下载前判断配置；可为空）
+    pub requirements: Option<String>,
 }
 
 /// 插件管理器。dll 一经加载常驻到进程退出（运行期卸载有崩溃风险，见 loader.rs 头注）。
@@ -54,10 +64,11 @@ pub struct PluginManager {
 
 impl PluginManager {
     /// 启动时加载全部已安装插件（registry.json 为准）。
-    pub fn load_all(data_dir: &Path) -> Self {
-        let plugins_root = data_dir.join("plugins");
+    /// `plugins_root`：插件安装根目录（阶段 22 起为 exe 同级 plugins/，不再位于 APPDATA）。
+    pub fn load_all(plugins_root: &Path) -> Self {
         // 目录不存在就建（首次启动）；建不了也不致命
-        let _ = std::fs::create_dir_all(&plugins_root);
+        let _ = std::fs::create_dir_all(plugins_root);
+        let plugins_root = plugins_root.to_path_buf();
 
         let manager = Self {
             plugins_root,
@@ -205,14 +216,34 @@ impl PluginManager {
                 None => (entry.id.clone(), entry.version.clone(), String::new()),
             };
 
+            // 音色表实时重查（动态音色插件运行期新增音色包后能立刻刷出来）
             let voices = loaded_plugin
                 .as_ref()
-                .and_then(|p| serde_json::from_str::<Vec<plugin_api::VoiceItem>>(&p.voices_json).ok())
+                .map(|p| p.query_voices_json())
+                .and_then(|json| serde_json::from_str::<Vec<plugin_api::VoiceItem>>(&json).ok())
                 .unwrap_or_default();
             let audio_format = loaded_plugin
                 .as_ref()
                 .map(|p| p.audio_format.clone())
                 .unwrap_or_default();
+            let category = manifest
+                .as_ref()
+                .map(|m| m.category.clone())
+                .unwrap_or_else(|| "remote".to_string());
+
+            // 环境安装能力与状态（本地引擎，实时查询；解析失败按"未就绪"兜底）
+            let has_setup = loaded_plugin.as_ref().map(|p| p.has_setup()).unwrap_or(false);
+            let setup_status = loaded_plugin
+                .as_ref()
+                .and_then(|p| p.setup_status())
+                .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok());
+            // 音色管理能力（本地引擎可选导出）
+            let has_voice_management = loaded_plugin
+                .as_ref()
+                .map(|p| p.has_voice_management())
+                .unwrap_or(false);
+            // 资源需求说明（读自磁盘清单，未安装/加载失败的插件也能展示）
+            let requirements = manifest.as_ref().and_then(|m| m.requirements.clone());
 
             result.push(PluginInfo {
                 id: entry.id.clone(),
@@ -224,6 +255,11 @@ impl PluginManager {
                 voices,
                 audio_format,
                 path: dir.to_string_lossy().into_owned(),
+                category,
+                has_setup,
+                setup_status,
+                has_voice_management,
+                requirements,
             });
         }
         result
@@ -471,7 +507,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         install_test_plugin(dir.path(), None);
 
-        let pm = PluginManager::load_all(dir.path());
+        let pm = PluginManager::load_all(&dir.path().join("plugins"));
         let plugin = pm.get("test-plugin").expect("测试插件应加载成功");
 
         // 元信息
@@ -498,7 +534,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         install_test_plugin(dir.path(), Some("0000000000000000000000000000000000000000000000000000000000000000".into()));
 
-        let pm = PluginManager::load_all(dir.path());
+        let pm = PluginManager::load_all(&dir.path().join("plugins"));
         assert!(pm.get("test-plugin").is_none(), "校验和不符不得加载");
 
         // 失败原因可在 list 中看到
@@ -511,9 +547,48 @@ mod tests {
     #[test]
     fn 空插件目录加载为空() {
         let dir = tempfile::tempdir().unwrap();
-        let pm = PluginManager::load_all(dir.path());
+        let pm = PluginManager::load_all(&dir.path().join("plugins"));
         assert!(pm.get("不存在").is_none());
         assert!(pm.list().is_empty());
+    }
+
+    /// 真机验证：加载本机已安装的 genie-tts 插件（走宿主完整加载链路），
+    /// 校验元信息 / 本地类别 / 动态音色表。不触发合成（避免引导下载几百 MB）。
+    /// 前置：先跑过 plugins/genie-tts/package.ps1 -Install。手动运行：
+    /// cargo test -- --ignored genie插件加载与音色表
+    #[test]
+    #[cfg(target_os = "windows")]
+    #[ignore = "需本机已安装 genie-tts 插件，手动运行"]
+    fn genie插件加载与音色表() {
+        // 阶段 22 起插件位于 exe 同级 plugins/ 目录
+        let exe_dir = std::env::current_exe()
+            .expect("获取 exe 路径")
+            .parent().expect("exe 父目录").to_path_buf();
+        let plugin_dir = exe_dir.join("plugins/genie-tts");
+        assert!(plugin_dir.exists(), "genie-tts 插件未安装: {}", plugin_dir.display());
+
+        let plugin = crate::plugins::loader::LoadedPlugin::load(&plugin_dir, APP_VERSION)
+            .expect("genie-tts 插件加载失败");
+        assert_eq!(plugin.dll_id, "genie-tts");
+        assert_eq!(plugin.audio_format, "wav");
+        assert_eq!(plugin.manifest.category, "local", "本地插件类别应为 local");
+        assert!(plugin.manifest.timeout_secs >= 600, "本地引擎超时应放宽");
+
+        // 能力符号：本地引擎应同时导出 setup 与音色管理（阶段 21）
+        assert!(plugin.has_setup(), "genie-tts 应支持环境安装");
+        assert!(plugin.has_voice_management(), "genie-tts 应支持音色管理");
+
+        // 数据目录环境变量应在加载时注入（指向 <插件目录>/data）
+        let env_key = "VA_PLUGIN_DATA_DIR_GENIE_TTS";
+        let data_dir = std::env::var(env_key).expect("数据目录环境变量应已注入");
+        assert!(data_dir.ends_with("data"), "数据目录应以 data 结尾: {data_dir}");
+
+        // 动态音色表：应含预置角色（磁盘扫描 + 内置清单，不触发网络）
+        let voices_json = plugin.query_voices_json();
+        let voices: Vec<plugin_api::VoiceItem> =
+            serde_json::from_str(&voices_json).expect("音色表应为合法 JSON");
+        assert!(!voices.is_empty(), "动态音色表不应为空");
+        assert!(voices.iter().any(|v| v.id == "feibi"), "应含预置角色 feibi");
     }
 
     /// 实网验证：加载本机已安装的 edge-tts 插件并真实合成。
@@ -583,7 +658,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let plugins_root = dir.path().join("plugins");
         std::fs::create_dir_all(&plugins_root).unwrap();
-        let pm = PluginManager::load_all(dir.path());
+        let pm = PluginManager::load_all(&plugins_root);
 
         // dll 自报 id 固定为 test-plugin，清单 id 必须一致才能通过加载校验
         let zip = dir.path().join("fresh.zip");
@@ -607,7 +682,7 @@ mod tests {
 
         // 阶段一：运行中安装 → pending（用作用域包裹，退出时卸载 dll）
         {
-            let pm = PluginManager::load_all(dir.path());
+            let pm = PluginManager::load_all(&dir.path().join("plugins"));
             assert!(pm.get("test-plugin").is_some());
 
             let zip = dir.path().join("update.zip");
@@ -618,7 +693,7 @@ mod tests {
         } // pm 在此 drop → dll 卸载，模拟进程退出
 
         // 阶段二：重新 load_all（模拟重启）→ pending 被应用，版本变 0.2.0，pending 清除
-        let pm2 = PluginManager::load_all(dir.path());
+        let pm2 = PluginManager::load_all(&dir.path().join("plugins"));
         let plugin = pm2.get("test-plugin").expect("重启后应加载新版");
         assert_eq!(plugin.manifest.version, "0.2.0", "pending 更新应已应用");
         assert!(
@@ -634,7 +709,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let plugins_root = dir.path().join("plugins");
         std::fs::create_dir_all(&plugins_root).unwrap();
-        let pm = PluginManager::load_all(dir.path());
+        let pm = PluginManager::load_all(&plugins_root);
 
         // 随便造个 zip，传错误的 zip checksum
         let zip = dir.path().join("bad.zip");
@@ -653,7 +728,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         install_test_plugin(dir.path(), None);
 
-        let pm = PluginManager::load_all(dir.path());
+        let pm = PluginManager::load_all(&dir.path().join("plugins"));
         let engine = pm.build_engine("test-plugin", dir.path()).expect("引擎构建");
 
         let rel = engine

@@ -67,6 +67,37 @@ export async function asrTranscribe(
   });
 }
 
+// ── 插件环境安装与音色管理 ────────────────────
+
+/** 执行插件环境安装（本地引擎下载运行环境/模型）。
+ *  options：JSON 字符串，如 {"voice":"mika"} 指定要确保的音色。
+ *  进度经 plugin-setup-progress 事件推送；返回结果文案。 */
+export async function runPluginSetup(id: string, options?: string): Promise<string> {
+  return invoke<string>("run_plugin_setup", { id, options: options ?? null });
+}
+
+/** 安装指定音色（预置音色首次联网下载；环境未就绪会先补环境）。
+ *  进度经 plugin-setup-progress 事件推送（kind="voice"）；返回结果文案。 */
+export async function installVoice(id: string, voiceId: string): Promise<string> {
+  return invoke<string>("install_voice", { id, voiceId });
+}
+
+/** 卸载指定音色（删本地音色包；服务端在跑会先释放内存）。返回结果文案。 */
+export async function uninstallVoice(id: string, voiceId: string): Promise<string> {
+  return invoke<string>("uninstall_voice", { id, voiceId });
+}
+
+/** 预加载已安装音色到内存（切换音色时调用，秒级；不触发下载）。
+ *  有安装任务进行时后端直接跳过（仍返回成功）。 */
+export async function preloadVoice(id: string, voiceId: string): Promise<string> {
+  return invoke<string>("preload_voice", { id, voiceId });
+}
+
+/** 导入用户自备音色包目录（插件校验布局后复制进数据目录，保留原文件）。 */
+export async function importVoicePack(id: string, srcDir: string): Promise<string> {
+  return invoke<string>("import_voice_pack", { id, srcDir });
+}
+
 // ── 版本更新 ─────────────────────────────────────
 
 /** 检查新版本；无更新或网络失败返回 null */
@@ -147,6 +178,17 @@ export async function pickAudioFile(): Promise<string | null> {
   const selected = await open({
     multiple: false,
     filters: [{ name: "音频", extensions: ["mp3", "wav", "m4a", "ogg", "flac"] }],
+  });
+  if (typeof selected === "string") return selected;
+  return null;
+}
+
+/** 弹文件夹选择器，选自定义音色包目录；返回绝对路径或 null（用户取消） */
+export async function pickVoicePackFolder(): Promise<string | null> {
+  const selected = await open({
+    multiple: false,
+    directory: true,
+    title: "选择音色包文件夹（内含 tts_models/ 与 prompt_wav.json）",
   });
   if (typeof selected === "string") return selected;
   return null;

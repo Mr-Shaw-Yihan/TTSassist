@@ -1,8 +1,11 @@
 // 插件管理命令：列表 / 卸载 / 拖入安装 / 在线索引 / 下载安装 / 内置插件库。
 
+use std::ffi::{c_char, CStr};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 use crate::plugins::{InstallOutcome, PluginInfo, PluginManager};
 
 /// 官方插件索引地址（托管在 GitHub Releases 资产）
@@ -64,6 +67,9 @@ pub struct PluginIndexEntry {
     pub checksum: String,
     #[serde(default)]
     pub description: String,
+    /// 资源需求说明（可选，供用户在线安装前判断配置）
+    #[serde(default)]
+    pub requirements: Option<String>,
 }
 
 fn http_client() -> Result<reqwest::Client, String> {
@@ -153,6 +159,8 @@ pub struct BundledPluginInfo {
     pub name: String,
     pub version: String,
     pub description: String,
+    /// 资源需求说明（供用户安装前判断配置；可为空）
+    pub requirements: Option<String>,
     /// 本机是否已安装（含加载失败的）
     pub installed: bool,
 }
@@ -204,6 +212,7 @@ pub fn list_bundled_plugins(
                 name: m.name,
                 version: m.version,
                 description: m.description,
+                requirements: m.requirements,
             })
         })
         .collect()
@@ -228,4 +237,216 @@ pub fn install_bundled_plugin(
             format!("插件「{}」正在运行中，将在重启应用后完成更新。", manifest.name)
         }
     })
+}
+
+// ── 环境安装与音色管理（本地引擎 setup / voice ops）──────────────────────
+//
+// 阶段 21 起，引擎环境安装与音色安装共用全局单任务槽（INSTALL_BUSY）：
+// 插件内部本就把这些操作串行在同一把锁上，宿主层不再制造"假并行"。
+// 前端依据任务状态禁用其他安装入口，被拒只作为竞态兜底。
+
+/// 安装进度事件名（前端 useTauriListen 监听）
+pub const EVENT_PLUGIN_SETUP_PROGRESS: &str = "plugin-setup-progress";
+
+/// 安装进度事件载荷
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SetupProgress {
+    pub plugin_id: String,
+    /// 任务类型："env" 引擎环境安装 / "voice" 音色安装
+    pub kind: String,
+    /// 音色 id（kind="voice" 时有值）
+    pub voice_id: Option<String>,
+    /// 0~100 定量进度；<0 表示不定量（以 message 为准）
+    pub percent: f32,
+    pub message: String,
+}
+
+/// 转发槽内容：AppHandle + 插件 id + 任务类型 + 音色 id
+struct ProgressSlot {
+    app: tauri::AppHandle,
+    plugin_id: String,
+    kind: &'static str,
+    voice_id: Option<String>,
+}
+
+/// 进度转发槽：extern "C" 回调无法捕获上下文，用全局槽暂存上下文。
+/// 同一时刻只允许一个安装任务（INSTALL_BUSY 保证），槽不会串。
+static SETUP_SLOT: OnceLock<Mutex<Option<ProgressSlot>>> = OnceLock::new();
+static INSTALL_BUSY: AtomicBool = AtomicBool::new(false);
+
+fn setup_slot() -> &'static Mutex<Option<ProgressSlot>> {
+    SETUP_SLOT.get_or_init(|| Mutex::new(None))
+}
+
+/// 插件侧进度回调：读 C 字符串 → 经全局槽转发为 Tauri 事件
+unsafe extern "C" fn setup_progress_cb(percent: f32, message: *const c_char) {
+    if message.is_null() {
+        return;
+    }
+    let msg = CStr::from_ptr(message).to_string_lossy().into_owned();
+    if let Ok(guard) = setup_slot().lock() {
+        if let Some(slot) = &*guard {
+            let _ = slot.app.emit(
+                EVENT_PLUGIN_SETUP_PROGRESS,
+                SetupProgress {
+                    plugin_id: slot.plugin_id.clone(),
+                    kind: slot.kind.to_string(),
+                    voice_id: slot.voice_id.clone(),
+                    percent,
+                    message: msg,
+                },
+            );
+        }
+    }
+}
+
+/// 占用全局安装任务槽；已有任务时返回 Err（前端已按状态禁用入口，此为竞态兜底）
+fn acquire_install_slot(
+    app: tauri::AppHandle,
+    plugin_id: String,
+    kind: &'static str,
+    voice_id: Option<String>,
+) -> Result<(), String> {
+    if INSTALL_BUSY.swap(true, Ordering::SeqCst) {
+        return Err("有安装任务正在进行，请等待完成后再试".into());
+    }
+    if let Ok(mut guard) = setup_slot().lock() {
+        *guard = Some(ProgressSlot {
+            app,
+            plugin_id,
+            kind,
+            voice_id,
+        });
+    }
+    Ok(())
+}
+
+/// 释放全局安装任务槽（与 acquire_install_slot 成对）
+fn release_install_slot() {
+    if let Ok(mut guard) = setup_slot().lock() {
+        *guard = None;
+    }
+    INSTALL_BUSY.store(false, Ordering::SeqCst);
+}
+
+/// 执行插件环境安装（本地引擎下载运行环境/模型）。
+/// options：JSON 字符串（可选，如 {"voice":"mika"}）。
+/// 进度经 EVENT_PLUGIN_SETUP_PROGRESS 事件推送（kind="env"）；
+/// 返回插件的中文结果消息。
+#[tauri::command]
+pub async fn run_plugin_setup(
+    id: String,
+    options: Option<String>,
+    app: tauri::AppHandle,
+    plugins: State<'_, PluginManager>,
+) -> Result<String, String> {
+    let plugin = plugins
+        .get(&id)
+        .ok_or_else(|| format!("插件「{id}」未加载，无法执行环境安装"))?;
+    if !plugin.has_setup() {
+        return Err("该插件不支持环境安装".into());
+    }
+    acquire_install_slot(app, id.clone(), "env", None)?;
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        plugin.run_setup(options.as_deref(), Some(setup_progress_cb))
+    })
+    .await;
+
+    release_install_slot();
+
+    match result {
+        Ok(Ok(msg)) => Ok(msg),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(e) => Err(format!("安装任务中断: {e}")),
+    }
+}
+
+/// 安装指定音色（预置音色首次会联网下载；环境未就绪会先补环境）。
+/// 进度经 EVENT_PLUGIN_SETUP_PROGRESS 事件推送（kind="voice"）。
+#[tauri::command]
+pub async fn install_voice(
+    id: String,
+    voice_id: String,
+    app: tauri::AppHandle,
+    plugins: State<'_, PluginManager>,
+) -> Result<String, String> {
+    let plugin = plugins
+        .get(&id)
+        .ok_or_else(|| format!("插件「{id}」未加载，无法安装音色"))?;
+    if !plugin.has_voice_management() {
+        return Err("该插件不支持音色管理".into());
+    }
+    acquire_install_slot(app, id.clone(), "voice", Some(voice_id.clone()))?;
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        plugin.install_voice(&voice_id, Some(setup_progress_cb))
+    })
+    .await;
+
+    release_install_slot();
+
+    match result {
+        Ok(Ok(msg)) => Ok(msg),
+        Ok(Err(e)) => Err(e.to_string()),
+        Err(e) => Err(format!("音色安装任务中断: {e}")),
+    }
+}
+
+/// 卸载指定音色（删本地音色包；服务端在跑会先释放内存）。
+#[tauri::command]
+pub async fn uninstall_voice(
+    id: String,
+    voice_id: String,
+    plugins: State<'_, PluginManager>,
+) -> Result<String, String> {
+    let plugin = plugins
+        .get(&id)
+        .ok_or_else(|| format!("插件「{id}」未加载，无法卸载音色"))?;
+    if INSTALL_BUSY.load(Ordering::SeqCst) {
+        return Err("有安装任务正在进行，请等待完成后再卸载".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || plugin.uninstall_voice(&voice_id))
+        .await
+        .map_err(|e| format!("卸载任务中断: {e}"))?
+        .map_err(|e| e.to_string())
+}
+
+/// 预加载已安装音色到内存（切换音色时调用，秒级；不触发下载）。
+/// 有安装任务进行时直接跳过（返回 Ok），避免在插件锁上长时间阻塞。
+#[tauri::command]
+pub async fn preload_voice(
+    id: String,
+    voice_id: String,
+    plugins: State<'_, PluginManager>,
+) -> Result<String, String> {
+    if INSTALL_BUSY.load(Ordering::SeqCst) {
+        return Ok("有安装任务正在进行，已跳过预加载".into());
+    }
+    let plugin = plugins
+        .get(&id)
+        .ok_or_else(|| format!("插件「{id}」未加载，无法预加载音色"))?;
+    tauri::async_runtime::spawn_blocking(move || plugin.preload_voice(&voice_id))
+        .await
+        .map_err(|e| format!("预加载任务中断: {e}"))?
+        .map_err(|e| e.to_string())
+}
+
+/// 导入用户自备音色包目录（插件校验布局后复制进数据目录，保留原文件）。
+#[tauri::command]
+pub async fn import_voice_pack(
+    id: String,
+    src_dir: String,
+    plugins: State<'_, PluginManager>,
+) -> Result<String, String> {
+    let plugin = plugins
+        .get(&id)
+        .ok_or_else(|| format!("插件「{id}」未加载，无法导入音色"))?;
+    if INSTALL_BUSY.load(Ordering::SeqCst) {
+        return Err("有安装任务正在进行，请等待完成后再导入".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || plugin.import_voice_pack(&src_dir))
+        .await
+        .map_err(|e| format!("导入任务中断: {e}"))?
+        .map_err(|e| e.to_string())
 }

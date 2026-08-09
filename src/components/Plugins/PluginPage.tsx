@@ -15,6 +15,8 @@ import {
   installBundledPlugin,
 } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { usePluginTaskStore } from "../../stores/pluginTaskStore";
+import { PluginSetupPanel } from "./PluginSetupPanel";
 import type { PluginInfo, PluginIndexEntry, BundledPluginInfo } from "../../types";
 
 /** 版本号比较：a > b 返回 true（按数字段逐段比） */
@@ -47,6 +49,11 @@ export function PluginPage() {
   // 安装/卸载等耗时操作（禁用按钮 + 提示）
   const [busy, setBusy] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+
+  // 环境安装任务走全局任务 store（启动在按钮点击处，面板只订阅）
+  const task = usePluginTaskStore((s) => s.task);
+  const startEnv = usePluginTaskStore((s) => s.startEnv);
+  const taskRunning = task?.status === "running";
 
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
@@ -263,6 +270,14 @@ export function PluginPage() {
                         ✕ 加载失败
                       </span>
                     )}
+                    {p.category === "local" && (
+                      <span
+                        className="rounded-md bg-sky-600/10 px-1.5 py-0.5 text-[10px] font-medium text-sky-700"
+                        title="本地引擎：合成在本机完成，不依赖云端 API"
+                      >
+                        本地·离线
+                      </span>
+                    )}
                     <div className="flex-1" />
                     {isCurrentEngine ? (
                       <span className="rounded-lg bg-[var(--amber-200)]/50 px-2 py-1 text-[11px] font-medium text-[var(--amber-600)]">
@@ -303,6 +318,48 @@ export function PluginPage() {
                   {/* 描述 */}
                   {p.description && (
                     <p className="mt-2 text-xs leading-relaxed text-[var(--ink-500)]">{p.description}</p>
+                  )}
+
+                  {/* 资源需求（供用户下载运行环境前判断配置） */}
+                  {p.requirements && (
+                    <div className="mt-2 rounded-lg border border-[var(--ink-200)]/70 bg-[var(--ink-100)]/40 px-2.5 py-1.5 text-[11px] leading-relaxed text-[var(--ink-500)]">
+                      <span className="font-medium text-[var(--ink-700)]">资源需求：</span>
+                      {p.requirements}
+                    </div>
+                  )}
+
+                  {/* 本地引擎环境安装区：状态 / 下载按钮 / 进度面板 */}
+                  {p.loaded && p.has_setup && (
+                    <div className="mt-2">
+                      {task?.pluginId === p.id ? (
+                        <PluginSetupPanel
+                          pluginId={p.id}
+                          onClosed={() => void reload()}
+                        />
+                      ) : p.setup_status?.ready ? (
+                        <div className="flex items-center gap-1.5 rounded-lg border border-emerald-600/25 bg-emerald-600/5 px-3 py-2 text-[11px] text-emerald-700">
+                          <span>✓ 环境就绪 · 可离线使用</span>
+                          <span className="text-[var(--ink-300)]">
+                            （已装音色 {p.setup_status.voices.length} 个）
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 rounded-lg border border-sky-600/25 bg-sky-600/5 px-3 py-2">
+                          <span className="min-w-0 flex-1 truncate text-[11px] text-sky-800" title={p.setup_status?.summary ?? ""}>
+                            {p.setup_status?.summary ?? "运行环境未安装"}
+                          </span>
+                          <button
+                            onClick={() => {
+                              startEnv(p.id, p.name).catch(() => { /* 错误已在 store */ });
+                            }}
+                            disabled={taskRunning || busy !== null}
+                            className="shrink-0 rounded-lg bg-sky-600 px-3 py-1 text-[11px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                          >
+                            下载运行环境
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {/* 音色清单 */}
@@ -346,6 +403,11 @@ export function PluginPage() {
                     </div>
                     {entry.description && (
                       <p className="mt-1 truncate text-[11px] text-[var(--ink-500)]">{entry.description}</p>
+                    )}
+                    {entry.requirements && (
+                      <p className="mt-1 text-[10px] leading-relaxed text-[var(--ink-300)]">
+                        资源需求：{entry.requirements}
+                      </p>
                     )}
                   </div>
                   {entry.installed ? (
@@ -412,6 +474,11 @@ export function PluginPage() {
                       </div>
                       {entry.description && (
                         <p className="mt-1 truncate text-[11px] text-[var(--ink-500)]">{entry.description}</p>
+                      )}
+                      {entry.requirements && (
+                        <p className="mt-1 text-[10px] leading-relaxed text-[var(--ink-300)]">
+                          资源需求：{entry.requirements}
+                        </p>
                       )}
                     </div>
                     {!installed && (

@@ -30,6 +30,26 @@ pub struct PluginManifest {
     /// 描述（可选）
     #[serde(default)]
     pub description: String,
+    /// 引擎类别（可选）："local"（本地离线）或 "remote"（联网），默认 remote。
+    /// 本地插件（如本地推理引擎）应声明 "local"，UI 据此展示「本地·离线」标识。
+    #[serde(default = "default_category")]
+    pub category: String,
+    /// 单次合成超时秒数（可选），默认 60。本地引擎首次推理含模型加载，
+    /// 可声明更大值（如 1200 = 20 分钟，覆盖首次运行环境下载引导）。
+    #[serde(default = "default_timeout_secs")]
+    pub timeout_secs: u64,
+    /// 资源需求说明（可选，人类可读）：下载体积/内存占用/CPU 要求等，
+    /// 供用户在下载安装前判断本机配置是否够用。本地推理引擎建议填写。
+    #[serde(default)]
+    pub requirements: Option<String>,
+}
+
+fn default_category() -> String {
+    "remote".to_string()
+}
+
+fn default_timeout_secs() -> u64 {
+    60
 }
 
 impl PluginManifest {
@@ -116,6 +136,9 @@ mod tests {
             min_app_version: "1.3.0".into(),
             checksum: "abc123".into(),
             description: String::new(),
+            category: default_category(),
+            timeout_secs: default_timeout_secs(),
+            requirements: None,
         }
     }
 
@@ -177,5 +200,50 @@ mod tests {
         std::fs::write(dir.path().join("manifest.json"), json).unwrap();
         let loaded = PluginManifest::load(dir.path()).expect("带 BOM 应能解析");
         assert_eq!(loaded.id, m.id);
+    }
+
+    #[test]
+    fn 新字段缺省时取默认值() {
+        // 老插件清单没有 category / timeout_secs，必须向后兼容
+        let dir = tempfile::tempdir().unwrap();
+        let json = serde_json::json!({
+            "id": "old-plugin",
+            "name": "老插件",
+            "version": "1.0.0",
+            "type": "tts_engine",
+            "platform": ["windows"],
+            "entry": "plugin.dll",
+            "min_app_version": "1.0.0",
+            "checksum": "abc"
+        });
+        std::fs::write(dir.path().join("manifest.json"), json.to_string()).unwrap();
+        let m = PluginManifest::load(dir.path()).unwrap();
+        assert_eq!(m.category, "remote", "缺省应为 remote");
+        assert_eq!(m.timeout_secs, 60, "缺省超时应为 60 秒");
+        assert!(m.requirements.is_none(), "缺省资源需求应为空");
+        assert!(m.validate("1.4.0").is_ok());
+    }
+
+    #[test]
+    fn 本地插件清单字段解析() {
+        let dir = tempfile::tempdir().unwrap();
+        let json = serde_json::json!({
+            "id": "genie-tts",
+            "name": "Genie TTS",
+            "version": "1.0.0",
+            "type": "tts_engine",
+            "platform": ["windows"],
+            "entry": "plugin.dll",
+            "min_app_version": "1.4.0",
+            "checksum": "abc",
+            "category": "local",
+            "timeout_secs": 1200,
+            "requirements": "首次约 800MB 下载，运行时约占 2–4GB 内存"
+        });
+        std::fs::write(dir.path().join("manifest.json"), json.to_string()).unwrap();
+        let m = PluginManifest::load(dir.path()).unwrap();
+        assert_eq!(m.category, "local");
+        assert_eq!(m.timeout_secs, 1200);
+        assert!(m.requirements.as_deref().unwrap_or("").contains("800MB"));
     }
 }

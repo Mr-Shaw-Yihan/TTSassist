@@ -16,6 +16,56 @@ use crate::commands::AppState;
 use crate::hotkey::{FavoriteHotkeys, HotkeyState};
 use crate::storage::types::Settings;
 
+/// 解析插件根目录（阶段 22：脱离 APPDATA，跟随 exe 安装位置）。
+/// 优先级：环境变量 VA_PLUGINS_DIR > exe 同级 plugins/ 目录。
+fn resolve_plugins_root() -> std::path::PathBuf {
+    // 1. 环境变量覆盖（开发/测试/高级用户自定义）
+    if let Ok(dir) = std::env::var("VA_PLUGINS_DIR") {
+        return std::path::PathBuf::from(dir);
+    }
+    // 2. 默认：exe 所在目录的 plugins/ 子目录
+    let exe = std::env::current_exe().expect("无法获取 exe 路径");
+    exe.parent()
+        .expect("exe 无父目录")
+        .join("plugins")
+}
+
+/// 首次运行迁移：把旧 APPDATA 下的插件复制到新位置（exe 同级 plugins/）。
+/// 旧目录保留不删（安全起见）；新位置已有 registry.json 则跳过（避免覆盖）。
+fn migrate_plugins_if_needed(data_dir: &std::path::Path, plugins_root: &std::path::Path) {
+    let old_root = data_dir.join("plugins");
+    let old_registry = old_root.join("registry.json");
+    let new_registry = plugins_root.join("registry.json");
+
+    // 旧位置没插件，或新位置已有注册表 → 无需迁移
+    if !old_registry.exists() || new_registry.exists() {
+        return;
+    }
+
+    eprintln!("检测到旧位置插件，正在迁移: {} → {}", old_root.display(), plugins_root.display());
+    if let Err(e) = copy_dir_all(&old_root, plugins_root) {
+        eprintln!("插件迁移失败（不影响启动，可手动复制）: {e}");
+    } else {
+        eprintln!("插件迁移完成。旧目录保留在 {}，确认无误后可手动删除。", old_root.display());
+    }
+}
+
+/// 递归复制目录（迁移用）
+fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let dest = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &dest)?;
+        } else {
+            std::fs::copy(entry.path(), &dest)?;
+        }
+    }
+    Ok(())
+}
+
 /// 显示并聚焦主窗口（从浮窗按钮调用），同时隐藏浮窗（避免两窗同现）
 #[tauri::command]
 fn show_main_window(app: tauri::AppHandle) -> Result<(), String> {
@@ -58,8 +108,12 @@ pub fn run() {
                 std::env::set_var("MIMO_API_KEY", &settings.mimo_api_key);
             }
 
+            // 阶段 22：插件根目录改为 exe 同级 plugins/（脱离 APPDATA 系统盘）
+            let plugins_root = resolve_plugins_root();
+            migrate_plugins_if_needed(&data_dir, &plugins_root);
+
             // 插件系统：加载已安装插件（单个插件失败只记日志，不影响主流程）
-            app.manage(plugins::PluginManager::load_all(&data_dir));
+            app.manage(plugins::PluginManager::load_all(&plugins_root));
 
             // 浮窗呼出快捷键：读设置 → 注册（失败只记日志，不影响主功能）
             let accel = settings.hotkey_show_window.clone();
@@ -116,6 +170,11 @@ pub fn run() {
             crate::commands::plugins::download_install_plugin,
             crate::commands::plugins::list_bundled_plugins,
             crate::commands::plugins::install_bundled_plugin,
+            crate::commands::plugins::run_plugin_setup,
+            crate::commands::plugins::install_voice,
+            crate::commands::plugins::uninstall_voice,
+            crate::commands::plugins::preload_voice,
+            crate::commands::plugins::import_voice_pack,
             crate::commands::update::check_app_update,
             crate::commands::message::list_messages,
             crate::commands::message::delete_message,

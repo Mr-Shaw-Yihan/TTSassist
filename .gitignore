@@ -21,6 +21,8 @@ plugins/edge-tts/dist/
 plugins/mimo-asr/target/
 plugins/mimo-asr/dist/
 plugins/mimo-asr/Cargo.lock
+plugins/genie-tts/target/
+plugins/genie-tts/dist/
 
 # Editor directories and files
 .vscode/*
