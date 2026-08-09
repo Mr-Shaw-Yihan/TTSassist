@@ -1,6 +1,6 @@
 ﻿# 插件库一键发布脚本（PowerShell）
 #
-# 把全部可发布插件（edge-tts / mimo-asr）打包、生成官方索引 plugins-index.json，
+# 把全部可发布插件（edge-tts / mimo-asr / genie-tts）打包、生成官方索引 plugins-index.json，
 # 并上传到 GitHub Release。VoiceAssist 宿主从以下地址拉取索引：
 #   https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/plugins-index.json
 #
@@ -29,7 +29,8 @@ $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 # 可发布插件清单（id / 显示名 / 描述），版本与 checksum 由打包产物自动得出
 $Plugins = @(
     @{ Id = "edge-tts"; Name = "Edge TTS（免费·微软）";    Desc = "免费、无需 Key 的微软 Edge 语音（非官方接口，可能不稳定）" },
-    @{ Id = "mimo-asr"; Name = "MiMo ASR（小米·云端）";    Desc = "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测" }
+    @{ Id = "mimo-asr"; Name = "MiMo ASR（小米·云端）";    Desc = "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测" },
+    @{ Id = "genie-tts"; Name = "Genie TTS（本地·离线）";  Desc = "GPT-SoVITS ONNX 本地推理引擎，CPU 离线合成，音色包可扩展（首次使用自动下载运行环境约 1.1GB，每个音色另约 320MB）" }
 )
 
 # ── 1. 逐个打包（复用各插件自己的 package.ps1）─────────────
