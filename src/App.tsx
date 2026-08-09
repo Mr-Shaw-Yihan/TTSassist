@@ -155,14 +155,35 @@ function App() {
     }
   }, []);
 
-  /** 消息列表滚动：接近顶部时翻上一页；记录是否在底部（新消息自动滚动/定位按钮判据） */
+  /** 消息列表滚动：接近顶部时翻上一页；记录是否在底部（新消息自动滚动/定位按钮判据）；
+   *  持续记录滚动位置，供切 tab 回来后恢复（条件渲染重挂载会丢 scrollTop） */
   function onMessagesScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
-    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 60);
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    setAtBottom(near);
+    savedScrollRef.current = el.scrollTop;
+    savedAtBottomRef.current = near;
     if (el.scrollTop < 80 && hasMoreMessages && !loadingOlderRef.current) {
       void loadOlderMessages(messages[0]?.id);
     }
   }
+
+  // 切回消息 tab 时恢复位置：列表 DOM 重建后 scrollTop 归零，
+  // 按离开前连续记录的位置恢复；离开前在底部则恢复为贴底（期间来了新消息也能看到最新）
+  const savedScrollRef = useRef<number | null>(null);
+  const savedAtBottomRef = useRef(false);
+  useEffect(() => {
+    if (tab !== "messages" || !initialLoaded) return;
+    const saved = savedScrollRef.current;
+    if (saved === null) return;
+    const run = () => {
+      const el = listRef.current;
+      if (!el) return;
+      el.scrollTop = savedAtBottomRef.current ? el.scrollHeight : saved;
+    };
+    run();
+    requestAnimationFrame(run);
+  }, [tab, initialLoaded]);
 
   // 初始定位：首屏消息提交到 DOM 后滚到底（每次启动默认看最新），
   // 150ms 后再补一次（音频/字体等内容异步撑高也能到底）
