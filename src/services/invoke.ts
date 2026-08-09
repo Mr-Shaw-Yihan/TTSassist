@@ -107,8 +107,18 @@ export async function checkAppUpdate(): Promise<UpdateInfo | null> {
 
 // ── Messages ──────────────────────────────────────
 
-export async function listMessages(): Promise<Message[]> {
-  return invoke<Message[]>("list_messages");
+/** 消息分页结果：窗口消息（旧→新）+ 是否还有更早的 */
+export interface MessagePage {
+  messages: Message[];
+  has_more: boolean;
+}
+
+/** 分页读消息：取 beforeId（不含）之前最近 limit 条；不传参取最新一页 */
+export async function listMessages(limit?: number, beforeId?: string): Promise<MessagePage> {
+  return invoke<MessagePage>("list_messages", {
+    limit: limit ?? null,
+    beforeId: beforeId ?? null,
+  });
 }
 
 export async function deleteMessage(id: string): Promise<boolean> {

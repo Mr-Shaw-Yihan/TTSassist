@@ -32,6 +32,26 @@ pub fn load_messages(data_dir: &Path) -> Vec<Message> {
     }
 }
 
+/// 分页读消息：取 before_id（不含该条）之前的最近 limit 条，按存储顺序（旧→新）返回。
+/// before_id=None 表示取到最新；limit=None/0 表示不限（退化为读全部）。
+/// before_id 不存在时（如已被删）退化为取到最新。返回 (窗口消息, 前面是否还有更早的)。
+pub fn load_messages_page(
+    data_dir: &Path,
+    limit: Option<usize>,
+    before_id: Option<&str>,
+) -> (Vec<Message>, bool) {
+    let all = load_messages(data_dir);
+    let end = match before_id {
+        Some(id) => all.iter().position(|m| m.id == id).unwrap_or(all.len()),
+        None => all.len(),
+    };
+    let start = match limit {
+        Some(n) if n > 0 => end.saturating_sub(n),
+        _ => 0,
+    };
+    (all[start..end].to_vec(), start > 0)
+}
+
 /// 追加一条消息并原子写回。
 pub fn add_message(data_dir: &Path, message: Message) -> Result<()> {
     let mut list = load_messages(data_dir);
@@ -182,5 +202,48 @@ mod tests {
 
         delete_message(&d, &m.id).unwrap();
         assert!(d.join(&audio).exists(), "被收藏引用，音频保留");
+    }
+
+    #[test]
+    fn 分页读消息() {
+        let dir = tempdir().unwrap();
+        let d = dir.path().to_path_buf();
+        // 写入 5 条（存储顺序即时间序）
+        let mut ids = Vec::new();
+        for i in 0..5 {
+            let m = make_msg(&format!("msg{i}"), &format!("audio/p{i}.mp3"));
+            ids.push(m.id.clone());
+            add_message(&d, m).unwrap();
+        }
+
+        // 取最新 2 条：应为后两条，且 has_more
+        let (page, more) = load_messages_page(&d, Some(2), None);
+        assert_eq!(page.len(), 2);
+        assert_eq!(page[0].content, "msg3");
+        assert_eq!(page[1].content, "msg4");
+        assert!(more);
+
+        // 以 msg2 为上界向前翻：取到 msg0/msg1
+        let (page, more) = load_messages_page(&d, Some(2), Some(&ids[2]));
+        assert_eq!(page.len(), 2);
+        assert_eq!(page[0].content, "msg0");
+        assert_eq!(page[1].content, "msg1");
+        assert!(!more, "msg0 之前没有更早的了");
+
+        // 窗口小于剩余量：上界 msg4，limit 2 → msg2/msg3，还有更早
+        let (page, more) = load_messages_page(&d, Some(2), Some(&ids[4]));
+        assert_eq!(page.len(), 2);
+        assert_eq!(page[0].content, "msg2");
+        assert_eq!(page[1].content, "msg3");
+        assert!(more);
+
+        // 上界 id 不存在（已被删）→ 退化为取到最新
+        let (page, _) = load_messages_page(&d, Some(2), Some("不存在的id"));
+        assert_eq!(page[1].content, "msg4");
+
+        // limit=None 读全部
+        let (page, more) = load_messages_page(&d, None, None);
+        assert_eq!(page.len(), 5);
+        assert!(!more);
     }
 }

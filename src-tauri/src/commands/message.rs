@@ -5,10 +5,27 @@ use crate::commands::AppState;
 use crate::storage::types::Message;
 use crate::sync::{notify_changed, EVENT_MESSAGE_CHANGED};
 
-/// 读取全部消息（按存储顺序）。
+/// 消息分页结果：窗口消息（旧→新）+ 前面是否还有更早的
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MessagePage {
+    pub messages: Vec<Message>,
+    pub has_more: bool,
+}
+
+/// 分页读消息：取 before_id（不含）之前的最近 limit 条。
+/// 前端首屏不传参取最新一页，上滑翻页时传当前最早一条的 id。
 #[tauri::command]
-pub fn list_messages(state: State<'_, AppState>) -> Vec<Message> {
-    crate::storage::messages::load_messages(&state.data_dir)
+pub fn list_messages(
+    limit: Option<usize>,
+    before_id: Option<String>,
+    state: State<'_, AppState>,
+) -> MessagePage {
+    let (messages, has_more) = crate::storage::messages::load_messages_page(
+        &state.data_dir,
+        limit,
+        before_id.as_deref(),
+    );
+    MessagePage { messages, has_more }
 }
 
 /// 删除一条消息（连带：收藏来源置 None + 音频无引用则删）。

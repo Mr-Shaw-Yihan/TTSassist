@@ -29,6 +29,9 @@ import type { Message, Favorite, PluginSetupProgress } from "./types";
 
 type Tab = "messages" | "favorites" | "plugins" | "settings";
 
+/** 消息列表每页条数：首屏只载最近一页，上滑再翻页加载更早的 */
+const MESSAGE_PAGE_SIZE = 20;
+
 function App() {
   // 多窗口路由：检查当前窗口 label
   const win = getCurrentWindow();
@@ -37,6 +40,9 @@ function App() {
   }
 
   const [messages, setMessages] = useState<Message[]>([]);
+  // 消息分页：是否还有更早的 / 翻页加载中（防重入）
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const loadingOlderRef = useRef(false);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [tab, setTab] = useState<Tab>("messages");
   const [playingPath, setPlayingPath] = useState<string | null>(null);
@@ -63,7 +69,7 @@ function App() {
     }
   }, []);
 
-  // 启动时：加载设置 + 加载消息 + 收藏
+  // 启动时：加载设置 + 加载最近一页消息 + 收藏
   useEffect(() => {
     (async () => {
       try {
@@ -73,8 +79,10 @@ function App() {
         console.error("加载设置失败", e);
       }
       try {
-        const msgs = await listMessages();
-        setMessages(msgs);
+        const page = await listMessages(MESSAGE_PAGE_SIZE);
+        setMessages(page.messages);
+        setHasMoreMessages(page.has_more);
+        scrollToBottom();
       } catch (e) {
         console.error("加载消息失败", e);
       }
@@ -98,17 +106,70 @@ function App() {
     if (tab === "favorites") reloadFavorites();
   }, [tab, reloadFavorites]);
 
-  // 监听 message:changed 事件，重读消息列表（跨窗口同步 + 双保险）
+  // 监听 message:changed 事件（跨窗口同步：浮窗也会生成消息）：
+  // 重取最新一页并与已加载的更早消息合并（去重），不打断用户向上翻阅
   useTauriListen("message:changed", async () => {
-    setMessages(await listMessages());
+    await reloadLatestMessages();
   }, []);
 
-  // 滚动管理：新消息来时滚到底
-  const listRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
+  /** 重取最新一页并合并：保留已加载且不在新窗口里的更早消息 */
+  const reloadLatestMessages = useCallback(async () => {
+    try {
+      const page = await listMessages(MESSAGE_PAGE_SIZE);
+      setHasMoreMessages(page.has_more);
+      setMessages((prev) => {
+        const inWindow = new Set(page.messages.map((m) => m.id));
+        const older = prev.filter((m) => !inWindow.has(m.id));
+        return [...older, ...page.messages];
+      });
+    } catch { /* 刷新失败静默，下次事件再试 */ }
+  }, []);
+
+  /** 上滑翻页：加载更早一页并 prepend，保持视口位置不跳 */
+  const loadOlderMessages = useCallback(async (firstId?: string) => {
+    if (loadingOlderRef.current || !firstId) return;
     const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages]);
+    if (!el) return;
+    loadingOlderRef.current = true;
+    const distFromBottom = el.scrollHeight - el.scrollTop;
+    try {
+      const page = await listMessages(MESSAGE_PAGE_SIZE, firstId);
+      setHasMoreMessages(page.has_more);
+      if (page.messages.length > 0) {
+        setMessages((prev) => [...page.messages, ...prev]);
+        requestAnimationFrame(() => {
+          const node = listRef.current;
+          if (node) node.scrollTop = node.scrollHeight - distFromBottom;
+        });
+      }
+    } catch (e) {
+      console.error("加载更早消息失败", e);
+    } finally {
+      loadingOlderRef.current = false;
+    }
+  }, []);
+
+  /** 消息列表滚动：接近顶部时翻上一页；记录是否在底部（新消息自动滚动判据） */
+  const atBottomRef = useRef(true);
+  function onMessagesScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    if (el.scrollTop < 80 && hasMoreMessages && !loadingOlderRef.current) {
+      void loadOlderMessages(messages[0]?.id);
+    }
+  }
+
+  // 滚动管理：滚到底工具（首屏/新消息用；翻页加载保持视口不用它）。
+  // 双保险：rAF 等一次布局，50ms 后再补一次（内容异步撑高时也能到底）
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const scrollToBottom = useCallback(() => {
+    const run = () => {
+      const el = listRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    };
+    requestAnimationFrame(run);
+    setTimeout(run, 50);
+  }, []);
 
   // 播放音量与播放速度
   const volume = settings?.playback_volume ?? 0.8;
@@ -190,7 +251,7 @@ function App() {
     [applyTaskProgress],
   );
 
-  // 兜底：窗口聚焦时同时刷新收藏
+  // 兜底：窗口聚焦时刷新收藏 + 静默同步最新一页消息
   useEffect(() => {
     const win = getCurrentWindow();
     let unlisten: (() => void) | null = null;
@@ -198,7 +259,7 @@ function App() {
       const u = await win.onFocusChanged(async ({ payload: focused }) => {
         if (focused) {
           try {
-            setMessages(await listMessages());
+            await reloadLatestMessages();
             await reloadFavorites();
           } catch { /* ignore */ }
         }
@@ -206,11 +267,13 @@ function App() {
       unlisten = u;
     })();
     return () => { unlisten?.(); };
-  }, [reloadFavorites]);
+  }, [reloadLatestMessages, reloadFavorites]);
 
   async function handleSend(text: string) {
     const msg = await generateTTS(text);
     setMessages((prev) => [...prev, msg]);
+    // 新消息滚到底（用户正在向上翻阅时不打断）
+    if (atBottomRef.current) scrollToBottom();
     // 自动播放延迟 0.4 秒（避免刚生成时卡音）
     setTimeout(() => playAudio(msg.audio_path), 400);
   }
@@ -250,9 +313,18 @@ function App() {
 
         {/* 右侧内容区（随侧边栏切换） */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {/* 消息列表 */}
+          {/* 消息列表（首屏仅最近一页，上滑翻页加载更早） */}
           {tab === "messages" && (
-            <main ref={listRef} className="scrollbar-thin flex-1 space-y-3 overflow-y-auto px-4 py-5">
+            <main
+              ref={listRef}
+              onScroll={onMessagesScroll}
+              className="scrollbar-thin flex-1 space-y-3 overflow-y-auto px-4 py-5"
+            >
+              {hasMoreMessages && (
+                <div className="py-1 text-center text-[10px] text-[var(--ink-300)]">
+                  {loadingOlderRef.current ? "正在加载更早的消息…" : "向上滑动查看更早的消息"}
+                </div>
+              )}
               {messages.length === 0 ? (
                 <div className="mt-16 flex flex-col items-center gap-3 text-[var(--ink-300)] animate-fade">
                   <span className="font-display text-3xl text-[var(--ink-200)]">·</span>
