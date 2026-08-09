@@ -43,6 +43,10 @@ function App() {
   // 消息分页：是否还有更早的 / 翻页加载中（防重入）
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const loadingOlderRef = useRef(false);
+  // 首屏消息是否已加载完成（初始定位滚底的触发器）
+  const [initialLoaded, setInitialLoaded] = useState(false);
+  // 视口是否贴近底部（新消息自动滚动判据 + 定位按钮显示条件）
+  const [atBottom, setAtBottom] = useState(true);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [tab, setTab] = useState<Tab>("messages");
   const [playingPath, setPlayingPath] = useState<string | null>(null);
@@ -82,7 +86,9 @@ function App() {
         const page = await listMessages(MESSAGE_PAGE_SIZE);
         setMessages(page.messages);
         setHasMoreMessages(page.has_more);
-        scrollToBottom();
+        // 不在此处直接滚底：DOM 尚未提交新消息，滚的是旧高度；
+        // 置位后由下方初始定位 effect 在提交后可靠滚底
+        setInitialLoaded(true);
       } catch (e) {
         console.error("加载消息失败", e);
       }
@@ -149,17 +155,29 @@ function App() {
     }
   }, []);
 
-  /** 消息列表滚动：接近顶部时翻上一页；记录是否在底部（新消息自动滚动判据） */
-  const atBottomRef = useRef(true);
+  /** 消息列表滚动：接近顶部时翻上一页；记录是否在底部（新消息自动滚动/定位按钮判据） */
   function onMessagesScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
-    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 60);
     if (el.scrollTop < 80 && hasMoreMessages && !loadingOlderRef.current) {
       void loadOlderMessages(messages[0]?.id);
     }
   }
 
-  // 滚动管理：滚到底工具（首屏/新消息用；翻页加载保持视口不用它）。
+  // 初始定位：首屏消息提交到 DOM 后滚到底（每次启动默认看最新），
+  // 150ms 后再补一次（音频/字体等内容异步撑高也能到底）
+  useEffect(() => {
+    if (!initialLoaded) return;
+    const run = () => {
+      const el = listRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    };
+    run();
+    const t = window.setTimeout(run, 150);
+    return () => window.clearTimeout(t);
+  }, [initialLoaded]);
+
+  // 滚动管理：滚到底工具（定位按钮/新消息用；翻页加载保持视口不用它）。
   // 双保险：rAF 等一次布局，50ms 后再补一次（内容异步撑高时也能到底）
   const listRef = useRef<HTMLDivElement | null>(null);
   const scrollToBottom = useCallback(() => {
@@ -272,8 +290,8 @@ function App() {
   async function handleSend(text: string) {
     const msg = await generateTTS(text);
     setMessages((prev) => [...prev, msg]);
-    // 新消息滚到底（用户正在向上翻阅时不打断）
-    if (atBottomRef.current) scrollToBottom();
+    // 新消息滚到底（用户正在向上翻阅时不打断，可用定位按钮回底部）
+    if (atBottom) scrollToBottom();
     // 自动播放延迟 0.4 秒（避免刚生成时卡音）
     setTimeout(() => playAudio(msg.audio_path), 400);
   }
@@ -315,11 +333,12 @@ function App() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {/* 消息列表（首屏仅最近一页，上滑翻页加载更早） */}
           {tab === "messages" && (
-            <main
-              ref={listRef}
-              onScroll={onMessagesScroll}
-              className="scrollbar-thin flex-1 space-y-3 overflow-y-auto px-4 py-5"
-            >
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              <main
+                ref={listRef}
+                onScroll={onMessagesScroll}
+                className="scrollbar-thin flex-1 space-y-3 overflow-y-auto px-4 py-5"
+              >
               {hasMoreMessages && (
                 <div className="py-1 text-center text-[10px] text-[var(--ink-300)]">
                   {loadingOlderRef.current ? "正在加载更早的消息…" : "向上滑动查看更早的消息"}
@@ -342,7 +361,19 @@ function App() {
                   />
                 ))
               )}
-            </main>
+              </main>
+
+              {/* 定位到底部（向上翻阅后一键回到最新消息） */}
+              {messages.length > 0 && !atBottom && (
+                <button
+                  onClick={scrollToBottom}
+                  title="定位到最新消息"
+                  className="absolute bottom-4 left-4 z-10 flex items-center gap-1 rounded-full border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-1.5 text-[11px] text-[var(--ink-500)] shadow-[0_2px_8px_rgba(26,24,22,0.08)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)] animate-fade"
+                >
+                  <span aria-hidden>↓</span> 最新
+                </button>
+              )}
+            </div>
           )}
 
           {/* 收藏列表 */}
