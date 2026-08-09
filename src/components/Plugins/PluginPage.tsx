@@ -522,11 +522,20 @@ export function PluginPage() {
   }) {
     return (
       <section>
-        <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <h2 className="text-[11px] font-medium uppercase tracking-[0.25em] text-[var(--ink-300)]">
-            {title}
-          </h2>
-          <span className="text-[10px] text-[var(--ink-300)]">{subtitle}</span>
+        {/* 分类头部：固定两行结构（标题行 + 描述行），两个分类格式统一 */}
+        <div className="mb-3">
+          <div className="flex items-center gap-2">
+            <span className="h-3.5 w-[3px] shrink-0 rounded-full bg-[var(--amber-500)]" aria-hidden />
+            <h2 className="font-display text-sm font-semibold tracking-wide text-[var(--ink-900)]">
+              {title}
+            </h2>
+            <span className="rounded-md bg-[var(--ink-100)] px-1.5 py-0.5 text-[10px] text-[var(--ink-500)]">
+              已装 {installed.length}
+            </span>
+          </div>
+          <p className="mt-1 pl-[11px] text-[11px] leading-relaxed text-[var(--ink-300)]">
+            {subtitle}
+          </p>
         </div>
 
         {installed.length === 0 && candidates.length === 0 && !loading && !error && (
