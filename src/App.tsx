@@ -368,9 +368,18 @@ function App() {
                 <button
                   onClick={scrollToBottom}
                   title="定位到最新消息"
-                  className="absolute bottom-4 left-4 z-10 flex items-center gap-1 rounded-full border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-1.5 text-[11px] text-[var(--ink-500)] shadow-[0_2px_8px_rgba(26,24,22,0.08)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)] animate-fade"
+                  aria-label="定位到最新消息"
+                  className="absolute bottom-4 left-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[var(--ink-200)] bg-[var(--paper-card)] text-[var(--ink-500)] shadow-[0_2px_8px_rgba(26,24,22,0.08)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)] animate-fade"
                 >
-                  <span aria-hidden>↓</span> 最新
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
+                    <path
+                      d="M8 2v9m0 0 3.5-3.5M8 11 4.5 7.5M3 13.5h10"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
                 </button>
               )}
             </div>
