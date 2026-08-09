@@ -287,9 +287,9 @@ export function SettingsPage() {
               >
                 <option value="mimo">MiMo（小米）</option>
                 <option value="moss">Moss-TTS（Mossland）</option>
-                {/* 插件引擎（动态，来自插件管理） */}
+                {/* 插件引擎（动态，来自插件管理；排除 ASR 插件） */}
                 {plugins
-                  .filter((p) => p.loaded)
+                  .filter((p) => p.loaded && p.plugin_type !== "asr_engine")
                   .map((p) => (
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
@@ -497,8 +497,32 @@ export function SettingsPage() {
 
             {/* === 插件引擎配置（音色表来自插件本身，通用） === */}
             {(() => {
-              const cur = plugins.find((p) => p.id === settings?.tts_engine && p.loaded);
-              if (!cur) return null;
+              const engineId = settings?.tts_engine ?? "mimo";
+              if (engineId === "mimo" || engineId === "moss") return null;
+              const cur = plugins.find((p) => p.id === engineId && p.loaded);
+              if (!cur) {
+                // 当前引擎是插件但不可用：未安装（卸载/换机）或加载失败。
+                // 配置块无渲染对象时不能留白，给警示卡片 + 一键切回内置引擎
+                const failed = plugins.find((p) => p.id === engineId);
+                return (
+                  <div className="rounded-lg border border-[var(--seal)]/40 bg-[var(--seal)]/10 px-3 py-2.5">
+                    <p className="text-xs font-medium text-[var(--seal)]">
+                      {failed ? `当前引擎「${failed.name}」加载失败` : "当前引擎对应的插件未安装"}
+                    </p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-[var(--ink-500)]">
+                      {failed
+                        ? `原因：${failed.error ?? "未知"}。可到插件管理页查看详情，或先切换到其他引擎。`
+                        : `配置中记录的引擎「${engineId}」对应的插件尚未安装（可能已卸载或在别的设备上安装）。语音合成暂不可用，可先切回内置引擎，或到插件管理页安装。`}
+                    </p>
+                    <button
+                      onClick={() => handleEngineChange("mimo")}
+                      className="mt-2 rounded-lg bg-[var(--ink-900)] px-3 py-1.5 text-[11px] font-medium text-[var(--paper)] transition-colors hover:bg-[var(--ink-700)]"
+                    >
+                      切换回 MiMo 引擎
+                    </button>
+                  </div>
+                );
+              }
               return (
                 <>
                   {cur.id === "edge-tts" && (

@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getAudioUrl, getSettings } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -74,13 +75,16 @@ export function QuickInput() {
     } catch { /* ignore */ }
   }, [setSettings]);
 
-  // 失去焦点时隐藏浮窗（点击外部自动关闭）
+  // 失去焦点时隐藏浮窗（点击外部自动关闭）；录音中不隐藏，避免会话被打断
   useEffect(() => {
     const win = getCurrentWindow();
     let unlisten: (() => void) | null = null;
     (async () => {
       const u = await win.onFocusChanged(({ payload: focused }) => {
-        if (!focused) void win.hide();
+        if (focused) return;
+        const phase = useVoiceInputStore.getState().phase;
+        if (phase !== "idle") return;
+        void win.hide();
       });
       unlisten = u;
     })();
@@ -133,6 +137,17 @@ export function QuickInput() {
     void invoke("show_main_window");
   }
 
+  // 语音输入按钮（点击切换）：emit 与全局快捷键相同的事件，复用快捷键会话链路
+  const viHotkey = useSettingsStore((s) => s.settings?.voice_input_hotkey);
+  function toggleVoiceInput() {
+    if (viPhase === "recording") {
+      void emit("voice-input:released");
+    } else if (viPhase === "idle") {
+      void emit("voice-input:pressed");
+    }
+    // 识别中（transcribing）点击无效，按钮已禁用
+  }
+
   return (
     <div className="flex h-screen flex-col overflow-hidden rounded-2xl bg-[var(--paper)] text-[var(--ink-900)] shadow-[0_20px_60px_rgba(26,24,22,0.25)]">
       {/* 顶部条：拖拽区 + 麦克风开关 + 打开主界面 */}
@@ -148,6 +163,26 @@ export function QuickInput() {
           <span className="text-[var(--ink-300)]">⠿</span>
           <span className="font-display text-xs text-[var(--ink-500)]">电子声带</span>
         </div>
+        {/* 语音输入按钮（点击切换录音；快捷键见 title 提示） */}
+        <button
+          onClick={toggleVoiceInput}
+          disabled={viPhase === "transcribing"}
+          title={
+            viPhase === "recording"
+              ? "点击结束录音并识别"
+              : viHotkey
+                ? `语音输入（快捷键 ${viHotkey}，按住说话）`
+                : "语音输入（可在设置-语音输入中绑定快捷键）"
+          }
+          className={[
+            "rounded-lg p-1.5 transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+            viPhase === "recording"
+              ? "animate-pulse bg-red-500/15 text-red-500"
+              : "text-[var(--ink-300)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
+          ].join(" ")}
+        >
+          🎙️
+        </button>
         {/* 麦克风开关（与主界面相同功能） */}
         <MicToggle onOpenSettings={onOpenSettingsFromFloating} />
         {/* 打开主界面并关闭浮窗 */}

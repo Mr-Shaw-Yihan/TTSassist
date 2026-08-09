@@ -124,14 +124,6 @@ pub fn set_hotkey(
 pub fn register_voice_input_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
     app.global_shortcut()
         .on_shortcut(accel, |app, _shortcut, event| {
-            // 总开关关闭 → 不响应
-            let enabled = app
-                .try_state::<AppState>()
-                .and_then(|s| s.settings.read().ok().map(|g| g.voice_input_enabled))
-                .unwrap_or(false);
-            if !enabled {
-                return;
-            }
             match event.state() {
                 ShortcutState::Pressed => {
                     let _ = app.emit("voice-input:pressed", ());

@@ -40,6 +40,8 @@ pub struct PluginInfo {
     pub audio_format: String,
     /// 插件目录绝对路径（前端「打开所在位置」用）
     pub path: String,
+    /// 插件类型（manifest.type）：tts_engine / asr_engine
+    pub plugin_type: String,
     /// 引擎类别（manifest.category）："local" 本地离线 / "remote" 联网
     pub category: String,
     /// 插件是否支持环境安装（本地引擎需下载运行环境/模型）
@@ -205,6 +207,8 @@ impl PluginManager {
             let manifest = PluginManifest::load(&dir).ok();
 
             let loaded_plugin = self.get(&entry.id);
+            // ASR 插件存在单独的 loaded_asr 注册表，加载状态两边都要查
+            let loaded_asr = self.get_asr(&entry.id);
             let error = self
                 .failed
                 .read()
@@ -230,6 +234,11 @@ impl PluginManager {
                 .as_ref()
                 .map(|m| m.category.clone())
                 .unwrap_or_else(|| "remote".to_string());
+            // 插件类型（清单缺失时兼容老插件按 TTS 处理）
+            let plugin_type = manifest
+                .as_ref()
+                .map(|m| m.plugin_type.clone())
+                .unwrap_or_else(|| "tts_engine".to_string());
 
             // 环境安装能力与状态（本地引擎，实时查询；解析失败按"未就绪"兜底）
             let has_setup = loaded_plugin.as_ref().map(|p| p.has_setup()).unwrap_or(false);
@@ -250,11 +259,12 @@ impl PluginManager {
                 name,
                 version,
                 description,
-                loaded: loaded_plugin.is_some(),
+                loaded: loaded_plugin.is_some() || loaded_asr.is_some(),
                 error,
                 voices,
                 audio_format,
                 path: dir.to_string_lossy().into_owned(),
+                plugin_type,
                 category,
                 has_setup,
                 setup_status,

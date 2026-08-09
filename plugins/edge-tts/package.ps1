@@ -87,11 +87,14 @@ if ($Install) {
     }
 
     # 阶段 22：插件装在 exe 同级 plugins/ 目录（脱离 APPDATA 系统盘）
-    # 自动探测 exe 位置：优先 release，其次 debug
+    # 自动探测 exe 位置：优先 release；release 下两个名字都在（tauri build 会复制出
+    # productName 命名的 TTSassist.exe），debug 只有 crate 名 voiceassist.exe
     $RepoRoot   = (Resolve-Path (Join-Path $PluginDir "..\..")).Path
     $ExePaths   = @(
         (Join-Path $RepoRoot "src-tauri\target\release\TTSassist.exe"),
-        (Join-Path $RepoRoot "src-tauri\target\debug\TTSassist.exe")
+        (Join-Path $RepoRoot "src-tauri\target\release\voiceassist.exe"),
+        (Join-Path $RepoRoot "src-tauri\target\debug\TTSassist.exe"),
+        (Join-Path $RepoRoot "src-tauri\target\debug\voiceassist.exe")
     )
     $ExePath = $ExePaths | Where-Object { Test-Path $_ } | Select-Object -First 1
     if (-not $ExePath) {

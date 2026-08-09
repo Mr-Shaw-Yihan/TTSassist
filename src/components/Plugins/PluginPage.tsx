@@ -1,4 +1,5 @@
-// 插件管理页：已装插件 + 在线插件（官方索引）+ 拖入安装。
+// 插件管理页：按功能分类组织 —— 语音合成（TTS 引擎）与语音输入（ASR 引擎）。
+// 每个分类下：已安装引擎（完整卡片）+ 可安装/可更新条目（内置插件库与官方在线合并去重）。
 // 安全：在线安装 zip SHA-256 对照官方索引；拖入安装 dll 对照 manifest.checksum，
 // 来源可信度由用户确认弹窗把关。
 
@@ -31,6 +32,65 @@ function isNewer(a: string, b: string): boolean {
     if (x < y) return false;
   }
   return false;
+}
+
+/** 可安装条目：内置插件库与在线索引合并去重后的统一形态 */
+interface Candidate {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  requirements?: string | null;
+  /** 安装来源：bundled=随安装包内置（离线即装） / online=官方在线下载 */
+  source: "bundled" | "online";
+}
+
+/** 同 id 合并候选：优先内置（离线即装），同为内置/在线时保留更高版本 */
+function mergeCandidates(
+  bundled: BundledPluginInfo[],
+  online: PluginIndexEntry[],
+  type: string,
+  typeOfOnline: (id: string) => string
+): Candidate[] {
+  const map = new Map<string, Candidate>();
+  for (const b of bundled) {
+    if ((b.plugin_type ?? "tts_engine") !== type) continue;
+    map.set(b.id, {
+      id: b.id,
+      name: b.name,
+      version: b.version,
+      description: b.description,
+      requirements: b.requirements,
+      source: "bundled",
+    });
+  }
+  for (const o of online) {
+    if (typeOfOnline(o.id) !== type) continue;
+    const prev = map.get(o.id);
+    if (prev) {
+      if (prev.source === "online" && isNewer(o.version, prev.version)) {
+        map.set(o.id, {
+          id: o.id,
+          name: o.name,
+          version: o.version,
+          description: o.description,
+          requirements: o.requirements,
+          source: "online",
+        });
+      }
+      // 已有内置候选：保留内置（离线即装），跳过在线
+    } else {
+      map.set(o.id, {
+        id: o.id,
+        name: o.name,
+        version: o.version,
+        description: o.description,
+        requirements: o.requirements,
+        source: "online",
+      });
+    }
+  }
+  return [...map.values()];
 }
 
 export function PluginPage() {
@@ -183,23 +243,14 @@ export function PluginPage() {
     }
   }
 
-  async function handleOnlineInstall(entry: PluginIndexEntry) {
-    setBusy(`正在下载安装「${entry.name}」…`);
+  /** 按来源安装候选条目（内置/在线两条安装通道统一入口） */
+  async function handleInstallCandidate(c: Candidate) {
+    setBusy(`正在安装「${c.name}」…`);
     try {
-      const msg = await downloadInstallPlugin(entry.id);
-      await reload();
-      window.alert(msg);
-    } catch (e) {
-      window.alert(`安装失败：${e}`);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function handleBundledInstall(entry: BundledPluginInfo) {
-    setBusy(`正在安装「${entry.name}」…`);
-    try {
-      const msg = await installBundledPlugin(entry.id);
+      const msg =
+        c.source === "bundled"
+          ? await installBundledPlugin(c.id)
+          : await downloadInstallPlugin(c.id);
       await reload();
       await reloadBundled();
       window.alert(msg);
@@ -210,304 +261,346 @@ export function PluginPage() {
     }
   }
 
-  /** 在线条目相对已装插件的状态 */
-  function installedOf(entry: PluginIndexEntry): PluginInfo | undefined {
-    return plugins.find((p) => p.id === entry.id);
+  /** 在线条目相对已装插件（用于判断可更新版本） */
+  function onlineEntryOf(id: string): PluginIndexEntry | undefined {
+    return index?.find((o) => o.id === id);
+  }
+
+  // ── 分类数据：已装插件按类型分组；可装条目内置+在线合并去重 ──────────
+  // 老插件无 plugin_type 字段 → 默认归入语音合成（历史插件均为 TTS）
+  const typeOf = (p: PluginInfo) => p.plugin_type ?? "tts_engine";
+  const installedTts = plugins.filter((p) => typeOf(p) === "tts_engine");
+  const installedAsr = plugins.filter((p) => typeOf(p) === "asr_engine");
+
+  // 在线条目类型：新索引自带 plugin_type；旧索引无此字段时回退到同 id 的内置条目，再无则按 TTS
+  const typeOfOnline = (id: string): string => {
+    const entry = index?.find((o) => o.id === id);
+    if (entry?.plugin_type) return entry.plugin_type;
+    const b = bundled.find((x) => x.id === id);
+    return b?.plugin_type ?? "tts_engine";
+  };
+
+  const candidatesTts = mergeCandidates(bundled, index ?? [], "tts_engine", typeOfOnline).filter(
+    (c) => !plugins.some((p) => p.id === c.id)
+  );
+  const candidatesAsr = mergeCandidates(bundled, index ?? [], "asr_engine", typeOfOnline).filter(
+    (c) => !plugins.some((p) => p.id === c.id)
+  );
+
+  // ── 卡片与条目渲染 ─────────────────────────────────────────────
+
+  /** 已安装引擎卡片（TTS/ASR 共用，按钮按类型差异化） */
+  function PluginCard({ p }: { p: PluginInfo }) {
+    const isAsr = typeOf(p) === "asr_engine";
+    const isCurrentEngine = !isAsr && settings?.tts_engine === p.id;
+    const isCurrentAsr =
+      isAsr &&
+      ((settings?.asr_plugin ? settings.asr_plugin === p.id : p.loaded) && p.loaded);
+    const online = onlineEntryOf(p.id);
+    const hasUpdate = online ? isNewer(online.version, p.version) : false;
+    return (
+      <div className="animate-rise rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-4 py-3.5 shadow-[0_1px_2px_rgba(26,24,22,0.03)]">
+        {/* 标题行：名称 + 版本 + 状态徽标（允许换行，窄窗不溢出） */}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-sm font-medium text-[var(--ink-900)]">{p.name}</span>
+          <span className="rounded-md bg-[var(--ink-100)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--ink-500)]">
+            v{p.version}
+          </span>
+          {p.loaded ? (
+            <span className="rounded-md bg-emerald-600/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+              ✓ 已加载
+            </span>
+          ) : (
+            <span
+              className="rounded-md bg-[var(--seal)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--seal)]"
+              title={p.error ?? undefined}
+            >
+              ✕ 加载失败
+            </span>
+          )}
+          {p.category === "local" && (
+            <span
+              className="rounded-md bg-sky-600/10 px-1.5 py-0.5 text-[10px] font-medium text-sky-700"
+              title="本地引擎：处理在本机完成，不依赖云端 API"
+            >
+              本地·离线
+            </span>
+          )}
+        </div>
+
+        {/* 操作行：引擎状态/更新在左，打开位置/卸载在右（独立一行，窄窗可换行） */}
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {!isAsr &&
+            (isCurrentEngine ? (
+              <span className="rounded-lg bg-[var(--amber-200)]/50 px-2 py-1 text-[11px] font-medium text-[var(--amber-600)]">
+                当前引擎
+              </span>
+            ) : (
+              p.loaded && (
+                <button
+                  onClick={() => handleSetEngine(p)}
+                  className="rounded-lg border border-[var(--ink-200)] px-2 py-1 text-[11px] text-[var(--ink-500)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)]"
+                >
+                  设为当前引擎
+                </button>
+              )
+            ))}
+          {isAsr &&
+            (isCurrentAsr ? (
+              <span
+                className="rounded-lg bg-violet-600/10 px-2 py-1 text-[11px] font-medium text-violet-700"
+                title="语音输入当前使用的识别引擎，可在设置-语音输入中调整"
+              >
+                当前引擎
+              </span>
+            ) : (
+              p.loaded && (
+                <span className="px-2 py-1 text-[11px] text-[var(--ink-300)]">
+                  在设置-语音输入中切换
+                </span>
+              )
+            ))}
+          {hasUpdate && online && (
+            <button
+              onClick={() =>
+                handleInstallCandidate({
+                  id: online.id,
+                  name: online.name,
+                  version: online.version,
+                  description: online.description,
+                  requirements: online.requirements,
+                  source: "online",
+                })
+              }
+              disabled={busy !== null}
+              className="rounded-lg border border-[var(--amber-500)] px-2 py-1 text-[11px] font-medium text-[var(--amber-600)] transition-colors hover:bg-[var(--amber-200)]/30 disabled:opacity-40"
+              title={`在线有新版本 v${online.version}，点击更新`}
+            >
+              更新至 v{online.version}
+            </button>
+          )}
+          <div className="flex-1" />
+          <button
+            onClick={() => handleOpenLocation(p)}
+            className="rounded-lg px-2 py-1 text-[11px] text-[var(--ink-300)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-600)]"
+          >
+            打开位置
+          </button>
+          <button
+            onClick={() => handleUninstall(p)}
+            disabled={busy !== null}
+            className="rounded-lg px-2 py-1 text-[11px] text-[var(--ink-300)] transition-colors hover:bg-[var(--seal)]/10 hover:text-[var(--seal)] disabled:opacity-40"
+          >
+            卸载
+          </button>
+        </div>
+
+        {/* 失败原因 */}
+        {!p.loaded && p.error && (
+          <div className="mt-2 rounded-lg border border-[var(--seal)]/20 bg-[var(--seal)]/5 px-3 py-2 text-[11px] leading-relaxed text-[var(--seal)]">
+            {p.error}
+          </div>
+        )}
+
+        {/* 描述 */}
+        {p.description && (
+          <p className="mt-2 text-xs leading-relaxed text-[var(--ink-500)]">{p.description}</p>
+        )}
+
+        {/* 资源需求（供用户下载运行环境前判断配置） */}
+        {p.requirements && (
+          <div className="mt-2 rounded-lg border border-[var(--ink-200)]/70 bg-[var(--ink-100)]/40 px-2.5 py-1.5 text-[11px] leading-relaxed text-[var(--ink-500)]">
+            <span className="font-medium text-[var(--ink-700)]">资源需求：</span>
+            {p.requirements}
+          </div>
+        )}
+
+        {/* 本地引擎环境安装区：状态 / 下载按钮 / 进度面板 */}
+        {p.loaded && p.has_setup && (
+          <div className="mt-2">
+            {task?.pluginId === p.id ? (
+              <PluginSetupPanel pluginId={p.id} onClosed={() => void reload()} />
+            ) : p.setup_status?.ready ? (
+              <div className="flex items-center gap-1.5 rounded-lg border border-emerald-600/25 bg-emerald-600/5 px-3 py-2 text-[11px] text-emerald-700">
+                <span>✓ 环境就绪 · 可离线使用</span>
+                <span className="text-[var(--ink-300)]">
+                  （已装音色 {p.setup_status.voices.length} 个）
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 rounded-lg border border-sky-600/25 bg-sky-600/5 px-3 py-2">
+                <span
+                  className="min-w-0 flex-1 truncate text-[11px] text-sky-800"
+                  title={p.setup_status?.summary ?? ""}
+                >
+                  {p.setup_status?.summary ?? "运行环境未安装"}
+                </span>
+                <button
+                  onClick={() => {
+                    startEnv(p.id, p.name).catch(() => {
+                      /* 错误已在 store */
+                    });
+                  }}
+                  disabled={taskRunning || busy !== null}
+                  className="shrink-0 rounded-lg bg-sky-600 px-3 py-1 text-[11px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
+                >
+                  下载运行环境
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 音色清单（仅 TTS 引擎有意义） */}
+        {!isAsr && p.loaded && p.voices.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {p.voices.map((v) => (
+              <span
+                key={v.id}
+                className="rounded-md border border-[var(--ink-200)] bg-[var(--paper)] px-2 py-0.5 text-[10px] text-[var(--ink-500)]"
+                title={v.id}
+              >
+                {v.label}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /** 可安装条目（内置/在线合并后的统一行） */
+  function CandidateRow({ c }: { c: Candidate }) {
+    return (
+      <div className="flex items-center gap-3 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-[var(--ink-900)]">{c.name}</span>
+            <span className="rounded-md bg-[var(--ink-100)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--ink-500)]">
+              v{c.version}
+            </span>
+            <span
+              className="rounded-md bg-[var(--ink-100)]/60 px-1.5 py-0.5 text-[10px] text-[var(--ink-300)]"
+              title={c.source === "bundled" ? "随安装包携带，无需联网即可安装" : "从官方渠道在线下载安装"}
+            >
+              {c.source === "bundled" ? "内置安装包" : "在线"}
+            </span>
+          </div>
+          {c.description && (
+            <p className="mt-1 truncate text-[11px] text-[var(--ink-500)]">{c.description}</p>
+          )}
+          {c.requirements && (
+            <p className="mt-1 text-[10px] leading-relaxed text-[var(--ink-300)]">
+              资源需求：{c.requirements}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={() => handleInstallCandidate(c)}
+          disabled={busy !== null}
+          className="shrink-0 rounded-lg bg-[var(--amber-500)] px-3 py-1.5 text-[11px] font-medium text-[var(--paper)] transition-opacity hover:opacity-90 disabled:opacity-40"
+        >
+          安装
+        </button>
+      </div>
+    );
+  }
+
+  /** 分类区块：标题 + 说明 + 已装卡片 + 可装条目 */
+  function CategorySection({
+    title,
+    subtitle,
+    installed,
+    candidates,
+    emptyHint,
+  }: {
+    title: string;
+    subtitle: string;
+    installed: PluginInfo[];
+    candidates: Candidate[];
+    emptyHint: string;
+  }) {
+    return (
+      <section>
+        <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <h2 className="text-[11px] font-medium uppercase tracking-[0.25em] text-[var(--ink-300)]">
+            {title}
+          </h2>
+          <span className="text-[10px] text-[var(--ink-300)]">{subtitle}</span>
+        </div>
+
+        {installed.length === 0 && candidates.length === 0 && !loading && !error && (
+          <div className="rounded-xl border border-dashed border-[var(--ink-200)] px-4 py-6 text-center text-xs text-[var(--ink-300)]">
+            {emptyHint}
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {installed.map((p) => (
+            <PluginCard key={p.id} p={p} />
+          ))}
+          {candidates.map((c) => (
+            <CandidateRow key={`${c.source}-${c.id}`} c={c} />
+          ))}
+        </div>
+      </section>
+    );
   }
 
   return (
     <div className="relative flex h-full flex-col">
-      <div className="scrollbar-thin flex-1 space-y-5 overflow-y-auto px-4 py-5">
+      <div className="scrollbar-thin flex-1 space-y-6 overflow-y-auto px-4 py-5">
         {/* 页头说明 */}
         <div className="text-xs leading-relaxed text-[var(--ink-300)]">
-          插件为语音合成提供扩展引擎（如免费的 Edge TTS）。支持在线安装与拖入 zip 安装，
+          插件按用途分为「语音合成」与「语音输入」两类引擎。支持在线安装与拖入 zip 安装，
           安装前均做 SHA-256 完整性校验。
         </div>
 
-        {/* ── 已安装 ── */}
-        <section>
-          <h2 className="mb-2 text-[11px] font-medium uppercase tracking-[0.25em] text-[var(--ink-300)]">
-            已安装插件
-          </h2>
+        {loading && <div className="py-4 text-center text-sm text-[var(--ink-300)]">加载中…</div>}
 
-          {loading && <div className="py-4 text-center text-sm text-[var(--ink-300)]">加载中…</div>}
-
-          {error && (
-            <div className="rounded-lg border border-[var(--seal)]/30 bg-[var(--seal)]/5 px-3 py-2 text-xs text-[var(--seal)]">
-              读取插件列表失败：{error}
-            </div>
-          )}
-
-          {!loading && !error && plugins.length === 0 && (
-            <div className="rounded-xl border border-dashed border-[var(--ink-200)] px-4 py-8 text-center text-xs text-[var(--ink-300)] animate-fade">
-              尚未安装插件，可从下方在线列表安装，或将插件 zip 拖入本窗口
-            </div>
-          )}
-
-          <div className="space-y-3">
-            {plugins.map((p) => {
-              const isCurrentEngine = settings?.tts_engine === p.id;
-              return (
-                <div
-                  key={p.id}
-                  className="animate-rise rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-4 py-3.5 shadow-[0_1px_2px_rgba(26,24,22,0.03)]"
-                >
-                  {/* 标题行：名称 + 版本 + 状态 */}
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-[var(--ink-900)]">{p.name}</span>
-                    <span className="rounded-md bg-[var(--ink-100)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--ink-500)]">
-                      v{p.version}
-                    </span>
-                    {p.loaded ? (
-                      <span className="rounded-md bg-emerald-600/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
-                        ✓ 已加载
-                      </span>
-                    ) : (
-                      <span
-                        className="rounded-md bg-[var(--seal)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--seal)]"
-                        title={p.error ?? undefined}
-                      >
-                        ✕ 加载失败
-                      </span>
-                    )}
-                    {p.category === "local" && (
-                      <span
-                        className="rounded-md bg-sky-600/10 px-1.5 py-0.5 text-[10px] font-medium text-sky-700"
-                        title="本地引擎：合成在本机完成，不依赖云端 API"
-                      >
-                        本地·离线
-                      </span>
-                    )}
-                    <div className="flex-1" />
-                    {isCurrentEngine ? (
-                      <span className="rounded-lg bg-[var(--amber-200)]/50 px-2 py-1 text-[11px] font-medium text-[var(--amber-600)]">
-                        当前引擎
-                      </span>
-                    ) : (
-                      p.loaded && (
-                        <button
-                          onClick={() => handleSetEngine(p)}
-                          className="rounded-lg border border-[var(--ink-200)] px-2 py-1 text-[11px] text-[var(--ink-500)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)]"
-                        >
-                          设为当前引擎
-                        </button>
-                      )
-                    )}
-                    <button
-                      onClick={() => handleOpenLocation(p)}
-                      className="rounded-lg px-2 py-1 text-[11px] text-[var(--ink-300)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-600)]"
-                    >
-                      打开位置
-                    </button>
-                    <button
-                      onClick={() => handleUninstall(p)}
-                      disabled={busy !== null}
-                      className="rounded-lg px-2 py-1 text-[11px] text-[var(--ink-300)] transition-colors hover:bg-[var(--seal)]/10 hover:text-[var(--seal)] disabled:opacity-40"
-                    >
-                      卸载
-                    </button>
-                  </div>
-
-                  {/* 失败原因 */}
-                  {!p.loaded && p.error && (
-                    <div className="mt-2 rounded-lg border border-[var(--seal)]/20 bg-[var(--seal)]/5 px-3 py-2 text-[11px] leading-relaxed text-[var(--seal)]">
-                      {p.error}
-                    </div>
-                  )}
-
-                  {/* 描述 */}
-                  {p.description && (
-                    <p className="mt-2 text-xs leading-relaxed text-[var(--ink-500)]">{p.description}</p>
-                  )}
-
-                  {/* 资源需求（供用户下载运行环境前判断配置） */}
-                  {p.requirements && (
-                    <div className="mt-2 rounded-lg border border-[var(--ink-200)]/70 bg-[var(--ink-100)]/40 px-2.5 py-1.5 text-[11px] leading-relaxed text-[var(--ink-500)]">
-                      <span className="font-medium text-[var(--ink-700)]">资源需求：</span>
-                      {p.requirements}
-                    </div>
-                  )}
-
-                  {/* 本地引擎环境安装区：状态 / 下载按钮 / 进度面板 */}
-                  {p.loaded && p.has_setup && (
-                    <div className="mt-2">
-                      {task?.pluginId === p.id ? (
-                        <PluginSetupPanel
-                          pluginId={p.id}
-                          onClosed={() => void reload()}
-                        />
-                      ) : p.setup_status?.ready ? (
-                        <div className="flex items-center gap-1.5 rounded-lg border border-emerald-600/25 bg-emerald-600/5 px-3 py-2 text-[11px] text-emerald-700">
-                          <span>✓ 环境就绪 · 可离线使用</span>
-                          <span className="text-[var(--ink-300)]">
-                            （已装音色 {p.setup_status.voices.length} 个）
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2 rounded-lg border border-sky-600/25 bg-sky-600/5 px-3 py-2">
-                          <span className="min-w-0 flex-1 truncate text-[11px] text-sky-800" title={p.setup_status?.summary ?? ""}>
-                            {p.setup_status?.summary ?? "运行环境未安装"}
-                          </span>
-                          <button
-                            onClick={() => {
-                              startEnv(p.id, p.name).catch(() => { /* 错误已在 store */ });
-                            }}
-                            disabled={taskRunning || busy !== null}
-                            className="shrink-0 rounded-lg bg-sky-600 px-3 py-1 text-[11px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-                          >
-                            下载运行环境
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* 音色清单 */}
-                  {p.loaded && p.voices.length > 0 && (
-                    <div className="mt-2.5 flex flex-wrap gap-1.5">
-                      {p.voices.map((v) => (
-                        <span
-                          key={v.id}
-                          className="rounded-md border border-[var(--ink-200)] bg-[var(--paper)] px-2 py-0.5 text-[10px] text-[var(--ink-500)]"
-                          title={v.id}
-                        >
-                          {v.label}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* ── 插件库（随安装包内置，离线可用） ── */}
-        {bundled.length > 0 && (
-          <section>
-            <h2 className="mb-2 text-[11px] font-medium uppercase tracking-[0.25em] text-[var(--ink-300)]">
-              插件库（随安装包提供）
-            </h2>
-            <div className="space-y-2.5">
-              {bundled.map((entry) => (
-                <div
-                  key={entry.id}
-                  className="flex items-center gap-3 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-4 py-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-[var(--ink-900)]">{entry.name}</span>
-                      <span className="rounded-md bg-[var(--ink-100)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--ink-500)]">
-                        v{entry.version}
-                      </span>
-                    </div>
-                    {entry.description && (
-                      <p className="mt-1 truncate text-[11px] text-[var(--ink-500)]">{entry.description}</p>
-                    )}
-                    {entry.requirements && (
-                      <p className="mt-1 text-[10px] leading-relaxed text-[var(--ink-300)]">
-                        资源需求：{entry.requirements}
-                      </p>
-                    )}
-                  </div>
-                  {entry.installed ? (
-                    <span className="shrink-0 text-[11px] text-[var(--ink-300)]">已安装</span>
-                  ) : (
-                    <button
-                      onClick={() => handleBundledInstall(entry)}
-                      disabled={busy !== null}
-                      className="shrink-0 rounded-lg bg-[var(--amber-500)] px-3 py-1.5 text-[11px] font-medium text-[var(--paper)] transition-opacity hover:opacity-90 disabled:opacity-40"
-                    >
-                      安装
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </section>
+        {indexLoading && (
+          <div className="text-center text-[10px] text-[var(--ink-300)]">正在获取在线插件索引…</div>
         )}
 
-        {/* ── 在线插件（官方索引） ── */}
-        <section>
-          <h2 className="mb-2 text-[11px] font-medium uppercase tracking-[0.25em] text-[var(--ink-300)]">
-            在线插件（官方渠道）
-          </h2>
+        {error && (
+          <div className="rounded-lg border border-[var(--seal)]/30 bg-[var(--seal)]/5 px-3 py-2 text-xs text-[var(--seal)]">
+            读取插件列表失败：{error}
+          </div>
+        )}
 
-          {indexLoading && (
-            <div className="py-4 text-center text-xs text-[var(--ink-300)]">正在获取插件索引…</div>
-          )}
+        {indexError && (
+          <div className="rounded-lg border border-[var(--ink-200)] bg-[var(--ink-100)]/40 px-3 py-2.5 text-xs leading-relaxed text-[var(--ink-500)]">
+            无法获取在线插件列表：{indexError}
+            <button
+              onClick={() => void reloadIndex()}
+              className="ml-2 text-[var(--amber-600)] underline underline-offset-2"
+            >
+              重试
+            </button>
+          </div>
+        )}
 
-          {indexError && (
-            <div className="rounded-lg border border-[var(--ink-200)] bg-[var(--ink-100)]/40 px-3 py-2.5 text-xs leading-relaxed text-[var(--ink-500)]">
-              无法获取在线插件列表：{indexError}
-              <button
-                onClick={() => void reloadIndex()}
-                className="ml-2 text-[var(--amber-600)] underline underline-offset-2"
-              >
-                重试
-              </button>
-            </div>
-          )}
+        {!loading && (
+          <>
+            {/* ── 语音合成（TTS 引擎） ── */}
+            <CategorySection
+              title="语音合成"
+              subtitle="文字转语音的朗读引擎，可在设置-语音合成中切换"
+              installed={installedTts}
+              candidates={candidatesTts}
+              emptyHint="尚未安装语音合成引擎插件，可从下方条目安装，或将插件 zip 拖入本窗口"
+            />
 
-          {index && index.length === 0 && (
-            <div className="rounded-xl border border-dashed border-[var(--ink-200)] px-4 py-6 text-center text-xs text-[var(--ink-300)]">
-              官方索引暂无可安装插件
-            </div>
-          )}
-
-          {index && index.length > 0 && (
-            <div className="space-y-2.5">
-              {index.map((entry) => {
-                const installed = installedOf(entry);
-                const hasUpdate = installed ? isNewer(entry.version, installed.version) : false;
-                return (
-                  <div
-                    key={entry.id}
-                    className="flex items-center gap-3 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-4 py-3"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-[var(--ink-900)]">{entry.name}</span>
-                        <span className="rounded-md bg-[var(--ink-100)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--ink-500)]">
-                          v{entry.version}
-                        </span>
-                      </div>
-                      {entry.description && (
-                        <p className="mt-1 truncate text-[11px] text-[var(--ink-500)]">{entry.description}</p>
-                      )}
-                      {entry.requirements && (
-                        <p className="mt-1 text-[10px] leading-relaxed text-[var(--ink-300)]">
-                          资源需求：{entry.requirements}
-                        </p>
-                      )}
-                    </div>
-                    {!installed && (
-                      <button
-                        onClick={() => handleOnlineInstall(entry)}
-                        disabled={busy !== null}
-                        className="shrink-0 rounded-lg bg-[var(--amber-500)] px-3 py-1.5 text-[11px] font-medium text-[var(--paper)] transition-opacity hover:opacity-90 disabled:opacity-40"
-                      >
-                        安装
-                      </button>
-                    )}
-                    {installed && hasUpdate && (
-                      <button
-                        onClick={() => handleOnlineInstall(entry)}
-                        disabled={busy !== null}
-                        className="shrink-0 rounded-lg border border-[var(--amber-500)] px-3 py-1.5 text-[11px] font-medium text-[var(--amber-600)] transition-colors hover:bg-[var(--amber-200)]/30 disabled:opacity-40"
-                      >
-                        更新
-                      </button>
-                    )}
-                    {installed && !hasUpdate && (
-                      <span className="shrink-0 text-[11px] text-[var(--ink-300)]">已安装</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </section>
+            {/* ── 语音输入（ASR 引擎） ── */}
+            <CategorySection
+              title="语音输入"
+              subtitle="说话转文字的识别引擎，快捷键与设备在设置-语音输入中配置"
+              installed={installedAsr}
+              candidates={candidatesAsr}
+              emptyHint="尚未安装语音输入引擎插件，安装后即可用快捷键说话转文字"
+            />
+          </>
+        )}
       </div>
 
       {/* 拖入提示浮层 */}

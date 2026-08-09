@@ -1,5 +1,5 @@
 // 输入设备设置（ASR 插件的语音输入配置）：
-// 总开关 + 触发快捷键（按住说话） + ASR 插件选择 + 识别语言 + 录音设备 + 端到端测试。
+// 触发快捷键（按住说话） + ASR 插件选择 + 识别语言 + 录音设备 + 端到端测试。
 // 设备枚举说明：浏览器只在授予麦克风权限后才返回设备名（label），
 // 未授权时显示「授权麦克风」按钮引导用户开启。
 
@@ -153,29 +153,6 @@ export function VoiceInputSettings() {
 
   return (
     <div className="space-y-3">
-      {/* 总开关 */}
-      <div className="flex items-center justify-between">
-        <div>
-          <label className="block text-[11px] font-medium text-[var(--ink-700)]">语音输入（ASR）</label>
-          <p className="mt-0.5 text-[10px] text-[var(--ink-300)]">关闭后快捷键与录音按钮均不可用</p>
-        </div>
-        <button
-          role="switch"
-          aria-checked={settings?.voice_input_enabled ?? true}
-          onClick={() => patch("voice_input_enabled", !(settings?.voice_input_enabled ?? true))}
-          className={[
-            "relative w-10 shrink-0 rounded-full transition-colors",
-            settings?.voice_input_enabled ?? true ? "bg-[var(--amber-500)]" : "bg-[var(--ink-200)]",
-          ].join(" ")}
-          style={{ height: 22 }}
-        >
-          <span
-            className="absolute top-0.5 h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-all"
-            style={{ left: settings?.voice_input_enabled ?? true ? 20 : 2 }}
-          />
-        </button>
-      </div>
-
       {/* 触发快捷键（按住说话） */}
       <div>
         <label className="mb-1 block text-[11px] text-[var(--ink-300)]">触发快捷键（按住说话）</label>

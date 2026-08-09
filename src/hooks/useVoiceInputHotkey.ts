@@ -42,7 +42,6 @@ export function useVoiceInputHotkey() {
       if (!visible) return;
       if (store.getState().phase !== "idle") return;
       const settings = useSettingsStore.getState().settings;
-      if (!settings?.voice_input_enabled) return;
 
       const pluginId = await pickPluginId();
       if (!pluginId) {
@@ -52,7 +51,7 @@ export function useVoiceInputHotkey() {
 
       try {
         const recorder = new AudioRecorder();
-        await recorder.start(settings.voice_input_device || undefined);
+        await recorder.start(settings?.voice_input_device || undefined);
         recorderRef.current = recorder;
         playStartChime();
         store.getState().set({ phase: "recording", recorder, seconds: 0, error: null });

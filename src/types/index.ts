@@ -122,6 +122,8 @@ export interface PluginInfo {
   audio_format: string;
   /** 插件目录绝对路径（「打开所在位置」用） */
   path: string;
+  /** 插件类型：tts_engine 语音合成 / asr_engine 语音识别 */
+  plugin_type?: string;
   /** 引擎类别："local" 本地离线 / "remote" 联网（老插件缺省 remote） */
   category?: string;
   /** 是否支持环境安装（本地引擎需下载运行环境/模型） */
@@ -145,6 +147,8 @@ export interface PluginIndexEntry {
   description: string;
   /** 资源需求说明（可为空） */
   requirements?: string | null;
+  /** 插件类型（tts_engine / asr_engine）；旧索引无此字段时为 undefined */
+  plugin_type?: string;
 }
 
 /** 内置插件条目（随安装包携带，list_bundled_plugins 返回） */
@@ -155,6 +159,8 @@ export interface BundledPluginInfo {
   description: string;
   /** 资源需求说明（可为空） */
   requirements?: string | null;
+  /** 插件类型（manifest.type）：tts_engine / asr_engine */
+  plugin_type?: string;
   /** 本机是否已安装 */
   installed: boolean;
 }

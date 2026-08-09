@@ -14,17 +14,17 @@
       {
         "label": "main",
         "title": "TTSassist",
-        "width": 380,
-        "height": 600,
-        "minWidth": 320,
-        "minHeight": 480,
+        "width": 420,
+        "height": 660,
+        "minWidth": 360,
+        "minHeight": 540,
         "resizable": true
       },
       {
         "label": "quick_input",
         "title": "",
         "width": 360,
-        "height": 140,
+        "height": 150,
         "decorations": false,
         "alwaysOnTop": true,
         "visible": false,

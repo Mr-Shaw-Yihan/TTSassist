@@ -70,6 +70,13 @@ pub struct PluginIndexEntry {
     /// 资源需求说明（可选，供用户在线安装前判断配置）
     #[serde(default)]
     pub requirements: Option<String>,
+    /// 插件类型（tts_engine / asr_engine）；旧索引无此字段时默认 tts_engine
+    #[serde(default = "default_plugin_type")]
+    pub plugin_type: String,
+}
+
+fn default_plugin_type() -> String {
+    "tts_engine".to_string()
 }
 
 fn http_client() -> Result<reqwest::Client, String> {
@@ -161,6 +168,8 @@ pub struct BundledPluginInfo {
     pub description: String,
     /// 资源需求说明（供用户安装前判断配置；可为空）
     pub requirements: Option<String>,
+    /// 插件类型（manifest.type）：tts_engine / asr_engine，前端按此分类展示
+    pub plugin_type: String,
     /// 本机是否已安装（含加载失败的）
     pub installed: bool,
 }
@@ -196,29 +205,60 @@ fn read_zip_manifest(zip_path: &Path) -> Option<crate::plugins::PluginManifest> 
     serde_json::from_str(raw.trim_start_matches('\u{FEFF}')).ok()
 }
 
-/// 列出随安装包内置的插件（插件库）
+/// 版本号比较：按 "." 分段逐段比较，数字段按数值比，其余按字典序；
+/// 缺失段视为 "0"（如 1.2 == 1.2.0）
+fn cmp_version(a: &str, b: &str) -> std::cmp::Ordering {
+    let pa: Vec<&str> = a.split('.').collect();
+    let pb: Vec<&str> = b.split('.').collect();
+    for i in 0..pa.len().max(pb.len()) {
+        let sa = pa.get(i).copied().unwrap_or("0");
+        let sb = pb.get(i).copied().unwrap_or("0");
+        let ord = match (sa.parse::<u64>(), sb.parse::<u64>()) {
+            (Ok(na), Ok(nb)) => na.cmp(&nb),
+            _ => sa.cmp(sb),
+        };
+        if ord != std::cmp::Ordering::Equal {
+            return ord;
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
+/// 列出随安装包内置的插件（插件库）。
+/// 同一 id 只保留最高版本：构建残留可能把新旧多份 zip 都复制进资源目录，
+/// 列表只展示最新一份，避免用户看到同插件多版本。
 #[tauri::command]
 pub fn list_bundled_plugins(
     app: tauri::AppHandle,
     plugins: State<'_, PluginManager>,
 ) -> Vec<BundledPluginInfo> {
-    bundled_zip_paths(&app)
-        .iter()
-        .filter_map(|path| {
-            let m = read_zip_manifest(path)?;
-            Some(BundledPluginInfo {
-                installed: plugins.is_installed(&m.id),
-                id: m.id,
-                name: m.name,
-                version: m.version,
-                description: m.description,
-                requirements: m.requirements,
-            })
-        })
-        .collect()
+    let mut by_id: std::collections::BTreeMap<String, BundledPluginInfo> =
+        std::collections::BTreeMap::new();
+    for path in bundled_zip_paths(&app) {
+        let Some(m) = read_zip_manifest(&path) else {
+            continue;
+        };
+        let info = BundledPluginInfo {
+            installed: plugins.is_installed(&m.id),
+            id: m.id,
+            name: m.name,
+            version: m.version,
+            description: m.description,
+            requirements: m.requirements,
+            plugin_type: m.plugin_type,
+        };
+        match by_id.get(&info.id) {
+            Some(prev) if cmp_version(&info.version, &prev.version) != std::cmp::Ordering::Greater => {}
+            _ => {
+                by_id.insert(info.id.clone(), info);
+            }
+        }
+    }
+    by_id.into_values().collect()
 }
 
-/// 安装内置插件（dll SHA-256 对照其 manifest.checksum）
+/// 安装内置插件（dll SHA-256 对照其 manifest.checksum）。
+/// 同 id 存在多份 zip 时安装最高版本。
 #[tauri::command]
 pub fn install_bundled_plugin(
     app: tauri::AppHandle,
@@ -227,7 +267,12 @@ pub fn install_bundled_plugin(
 ) -> Result<String, String> {
     let zip = bundled_zip_paths(&app)
         .into_iter()
-        .find(|p| read_zip_manifest(p).map(|m| m.id == id).unwrap_or(false))
+        .filter_map(|p| {
+            let m = read_zip_manifest(&p)?;
+            (m.id == id).then_some((p, m.version))
+        })
+        .max_by(|a, b| cmp_version(&a.1, &b.1))
+        .map(|(p, _)| p)
         .ok_or_else(|| format!("安装包内不存在插件「{id}」"))?;
 
     let (outcome, manifest) = plugins.install_zip(&zip, None).map_err(|e| e.to_string())?;
@@ -449,4 +494,21 @@ pub async fn import_voice_pack(
         .await
         .map_err(|e| format!("导入任务中断: {e}"))?
         .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cmp_version;
+    use std::cmp::Ordering::*;
+
+    #[test]
+    fn 版本号比较() {
+        assert_eq!(cmp_version("0.1.0", "1.0.0"), Less);
+        assert_eq!(cmp_version("1.0.0", "0.1.0"), Greater);
+        assert_eq!(cmp_version("0.1.0", "0.1.0"), Equal);
+        // 缺失段视为 0
+        assert_eq!(cmp_version("1.2", "1.2.0"), Equal);
+        // 数值比而非字典序（10 > 9）
+        assert_eq!(cmp_version("0.10.0", "0.9.0"), Greater);
+    }
 }
