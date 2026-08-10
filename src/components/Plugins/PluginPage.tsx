@@ -559,9 +559,9 @@ export function PluginPage() {
   return (
     <div className="relative flex h-full flex-col">
       <div className="scrollbar-thin flex-1 space-y-6 overflow-y-auto px-4 py-5">
-        {/* 页头：说明居左，「获取在线列表」手动触发按钮居右 */}
-        <div className="flex items-start justify-between gap-3">
-          <p className="min-w-0 text-xs leading-relaxed text-[var(--ink-300)]">
+        {/* 页头：说明在上，「获取在线列表」手动触发按钮在下 */}
+        <div className="space-y-2">
+          <p className="text-xs leading-relaxed text-[var(--ink-300)]">
             插件按用途分为「语音合成」与「语音输入」两类引擎。支持在线安装与拖入 zip 安装，
             安装前均做 SHA-256 完整性校验。
           </p>
@@ -569,7 +569,7 @@ export function PluginPage() {
             onClick={() => void reloadIndex()}
             disabled={indexLoading}
             title="联网获取官方在线插件列表（含可更新版本）"
-            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--ink-200)] px-2.5 py-1.5 text-[11px] text-[var(--ink-500)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)] disabled:cursor-wait disabled:opacity-60"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--ink-200)] px-2.5 py-1.5 text-[11px] text-[var(--ink-500)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)] disabled:cursor-wait disabled:opacity-60"
           >
             <svg
               width="12"
