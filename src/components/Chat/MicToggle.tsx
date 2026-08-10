@@ -11,9 +11,11 @@ import { MicIcon } from "../icons/MicIcon";
 interface Props {
   /** 点击"未配置"状态时跳转到设置页 */
   onOpenSettings: () => void;
+  /** 展示形态：icon=图标按钮（默认，浮窗用）；row=图标+文字+滑块开关（「其他」面板用） */
+  variant?: "icon" | "row";
 }
 
-export function MicToggle({ onOpenSettings }: Props) {
+export function MicToggle({ onOpenSettings, variant = "icon" }: Props) {
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
   const [showInstallDialog, setShowInstallDialog] = useState(false);
@@ -48,6 +50,48 @@ export function MicToggle({ onOpenSettings }: Props) {
     : enabled
       ? "已开启：语音会发到虚拟麦克风（点击关闭）"
       : "发送到麦克风（点击开启）";
+
+  const on = enabled && hasDevice;
+
+  // 行形态：图标 + 文字居左，滑块开关居右（「其他」面板内）
+  if (variant === "row") {
+    return (
+      <>
+        <button
+          onClick={onClick}
+          title={title}
+          className={[
+            "flex w-full items-center gap-2 rounded-lg px-1.5 py-1 transition-colors hover:bg-[var(--ink-100)]",
+            !hasDevice && "opacity-60",
+          ].join(" ")}
+        >
+          <MicIcon size={14} className={on ? "text-[var(--amber-600)]" : "text-[var(--ink-300)]"} />
+          <span className="flex-1 text-left text-xs text-[var(--ink-700)]">发到麦克风</span>
+          {/* 滑块开关 */}
+          <span
+            aria-hidden
+            className={[
+              "relative h-4 w-7 shrink-0 rounded-full transition-colors",
+              on ? "bg-[var(--amber-500)]" : "bg-[var(--ink-200)]",
+            ].join(" ")}
+          >
+            <span
+              className={[
+                "absolute top-0.5 h-3 w-3 rounded-full bg-white shadow-sm transition-all",
+                on ? "left-3.5" : "left-0.5",
+              ].join(" ")}
+            />
+          </span>
+        </button>
+        {showInstallDialog && (
+          <VbCableInstallDialog
+            onClose={() => setShowInstallDialog(false)}
+            onInstalled={() => setShowInstallDialog(false)}
+          />
+        )}
+      </>
+    );
+  }
 
   return (
     <>

@@ -394,15 +394,13 @@ function App() {
             />
             {moreOpen && (
               <div className="absolute bottom-0 left-full z-50 ml-2 flex w-48 flex-col gap-2.5 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] p-3 shadow-[0_8px_24px_rgba(26,24,22,0.12)] animate-fade">
-                <div className="flex items-center justify-between px-1">
-                  <span className="text-[10px] uppercase tracking-wider text-[var(--ink-300)]">发到麦克风</span>
-                  <MicToggle
-                    onOpenSettings={() => {
-                      setMoreOpen(false);
-                      setTab("settings");
-                    }}
-                  />
-                </div>
+                <MicToggle
+                  variant="row"
+                  onOpenSettings={() => {
+                    setMoreOpen(false);
+                    setTab("settings");
+                  }}
+                />
                 <VolumeControl inline />
               </div>
             )}

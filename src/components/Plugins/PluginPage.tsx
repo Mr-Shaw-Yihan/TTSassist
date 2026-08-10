@@ -101,10 +101,10 @@ export function PluginPage() {
   // 内置插件库（随安装包携带）
   const [bundled, setBundled] = useState<BundledPluginInfo[]>([]);
 
-  // 在线插件索引
+  // 在线插件索引（用户手动触发拉取，不自动联网）
   const [index, setIndex] = useState<PluginIndexEntry[] | null>(null);
   const [indexError, setIndexError] = useState<string | null>(null);
-  const [indexLoading, setIndexLoading] = useState(true);
+  const [indexLoading, setIndexLoading] = useState(false);
 
   // 安装/卸载等耗时操作（禁用按钮 + 提示）
   const [busy, setBusy] = useState<string | null>(null);
@@ -153,9 +153,9 @@ export function PluginPage() {
 
   useEffect(() => {
     void reload();
-    void reloadIndex();
     void reloadBundled();
-  }, [reload, reloadIndex, reloadBundled]);
+    // 在线索引不自动拉取：由页头「获取在线列表」按钮手动触发
+  }, [reload, reloadBundled]);
 
   // 拖入安装：监听窗口拖放事件
   useEffect(() => {
@@ -559,17 +559,39 @@ export function PluginPage() {
   return (
     <div className="relative flex h-full flex-col">
       <div className="scrollbar-thin flex-1 space-y-6 overflow-y-auto px-4 py-5">
-        {/* 页头说明 */}
-        <div className="text-xs leading-relaxed text-[var(--ink-300)]">
-          插件按用途分为「语音合成」与「语音输入」两类引擎。支持在线安装与拖入 zip 安装，
-          安装前均做 SHA-256 完整性校验。
+        {/* 页头：说明居左，「获取在线列表」手动触发按钮居右 */}
+        <div className="flex items-start justify-between gap-3">
+          <p className="min-w-0 text-xs leading-relaxed text-[var(--ink-300)]">
+            插件按用途分为「语音合成」与「语音输入」两类引擎。支持在线安装与拖入 zip 安装，
+            安装前均做 SHA-256 完整性校验。
+          </p>
+          <button
+            onClick={() => void reloadIndex()}
+            disabled={indexLoading}
+            title="联网获取官方在线插件列表（含可更新版本）"
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-[var(--ink-200)] px-2.5 py-1.5 text-[11px] text-[var(--ink-500)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)] disabled:cursor-wait disabled:opacity-60"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={indexLoading ? "animate-spin" : undefined}
+              aria-hidden
+            >
+              <path d="M23 4v6h-6" />
+              <path d="M1 20v-6h6" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+            {indexLoading ? "正在获取…" : index ? "刷新在线列表" : "获取在线列表"}
+          </button>
         </div>
 
         {loading && <div className="py-4 text-center text-sm text-[var(--ink-300)]">加载中…</div>}
-
-        {indexLoading && (
-          <div className="text-center text-[10px] text-[var(--ink-300)]">正在获取在线插件索引…</div>
-        )}
 
         {error && (
           <div className="rounded-lg border border-[var(--seal)]/30 bg-[var(--seal)]/5 px-3 py-2 text-xs text-[var(--seal)]">
