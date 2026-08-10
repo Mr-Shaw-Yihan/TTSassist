@@ -1,8 +1,10 @@
 ﻿# 插件库一键发布脚本（PowerShell）
 #
 # 把全部可发布插件（edge-tts / mimo-asr / genie-tts）打包、生成官方索引 plugins-index.json，
-# 并上传到 GitHub Release。VoiceAssist 宿主从以下地址拉取索引：
-#   https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/plugins-index.json
+# 上传到 GitHub Release，并把索引 + 全部 zip 同步到 Gitee dist 镜像分支（国内通道）。
+# VoiceAssist 宿主拉索引双通道：
+#   主：https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/plugins-index.json
+#   备：https://gitee.com/yihwan/TTSassist/raw/dist/plugins-index.json
 #
 # 用法（在 plugins 目录下）：
 #   powershell -ExecutionPolicy Bypass -File .\publish.ps1                # 打包 + 生成索引 + 创建/更新 Release
@@ -23,7 +25,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RepoBase = "https://github.com/Mr-Shaw-Yihan/TTSassist"
+$GiteeBase = "https://gitee.com/yihwan/TTSassist"
+$GiteeRemote = "gitee"
 $PluginsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoRoot = Split-Path -Parent $PluginsDir
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
 # 可发布插件清单（id / 显示名 / 类型 / 描述），版本与 checksum 由打包产物自动得出
@@ -56,6 +61,7 @@ foreach ($p in $Plugins) {
         name         = $p.Name
         version      = $Version
         download_url = "$RepoBase/releases/latest/download/$($Zip.Name)"
+        mirror_url   = "$GiteeBase/raw/dist/$($Zip.Name)"
         checksum     = $Sha
         description  = $p.Desc
         plugin_type  = $p.Type
@@ -104,3 +110,35 @@ Write-Host "发布完成 ✅" -ForegroundColor Green
 Write-Host "索引地址: $RepoBase/releases/latest/download/plugins-index.json"
 Write-Host "提醒：若该 Release 不是最新 Release（后面又发了应用本体），"
 Write-Host "      记得把 plugins-index.json 和全部插件 zip 也附到最新的本体 Release 上。"
+
+# ── 4. 同步 Gitee dist 镜像分支（国内通道，GitHub 不可达时宿主自动回退）──
+# dist 是无历史的 orphan 分支，只放索引 + zip，每次发布重建（force push），体积恒定。
+Write-Host ""
+Write-Host "══ 同步 Gitee dist 镜像分支 ══" -ForegroundColor Cyan
+$DistWork = Join-Path $env:TEMP "va-dist-push"
+if (Test-Path $DistWork) { Remove-Item $DistWork -Recurse -Force }
+New-Item -ItemType Directory -Path $DistWork | Out-Null
+foreach ($a in $Assets) { Copy-Item $a -Destination $DistWork -Force }
+
+Push-Location $RepoRoot
+$OriginBranch = (git rev-parse --abbrev-ref HEAD 2>&1 | Out-String).Trim()
+try {
+    git checkout --orphan dist-tmp 2>&1 | Out-Null
+    # 物理清掉 tracked 文件（node_modules/target 等 ignored 目录不受影响）
+    git rm -rf --quiet . 2>&1 | Out-Null
+    Get-ChildItem $DistWork -File | Copy-Item -Destination . -Force
+    git add (Get-ChildItem $DistWork -File).Name
+    git commit -m "dist: 插件分发镜像（索引 + zip，供国内 Gitee 通道下载）" --quiet
+    # git push 的 stderr（remote 信息）在 ErrorAction Stop 下会中断脚本，降级只看退出码
+    $ErrorActionPreference = "Continue"
+    git push $GiteeRemote dist-tmp:dist --force 2>&1 | ForEach-Object { "$_" }
+    $PushOk = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = "Stop"
+    if (-not $PushOk) { throw "推送 dist 分支到 Gitee 失败" }
+} finally {
+    git checkout $OriginBranch --quiet 2>&1 | Out-Null
+    git branch -D dist-tmp --quiet 2>&1 | Out-Null
+    Pop-Location
+    Remove-Item $DistWork -Recurse -Force -ErrorAction SilentlyContinue
+}
+Write-Host "Gitee dist 镜像已同步 ✅  索引镜像: $GiteeBase/raw/dist/plugins-index.json" -ForegroundColor Green

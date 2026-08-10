@@ -149,6 +149,8 @@ export interface PluginIndexEntry {
   requirements?: string | null;
   /** 插件类型（tts_engine / asr_engine）；旧索引无此字段时为 undefined */
   plugin_type?: string;
+  /** 国内镜像下载地址（Gitee，可选）；主地址不可达时后端自动回退 */
+  mirror_url?: string;
 }
 
 /** 内置插件条目（随安装包携带，list_bundled_plugins 返回） */

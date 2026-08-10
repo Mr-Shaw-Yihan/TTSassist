@@ -12,6 +12,10 @@ use crate::plugins::{InstallOutcome, PluginInfo, PluginManager};
 const PLUGIN_INDEX_URL: &str =
     "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/plugins-index.json";
 
+/// 国内镜像索引地址（Gitee dist 分支 raw，GitHub 不可达时回退）
+const PLUGIN_INDEX_MIRROR_URL: &str =
+    "https://gitee.com/yihwan/TTSassist/raw/dist/plugins-index.json";
+
 // ── 已装插件 ─────────────────────────────────────
 
 /// 列出已安装插件（含加载状态、失败原因、音色表）
@@ -73,6 +77,9 @@ pub struct PluginIndexEntry {
     /// 插件类型（tts_engine / asr_engine）；旧索引无此字段时默认 tts_engine
     #[serde(default = "default_plugin_type")]
     pub plugin_type: String,
+    /// 国内镜像下载地址（Gitee dist 分支 raw，可选）；主地址不可达时回退
+    #[serde(default)]
+    pub mirror_url: Option<String>,
 }
 
 fn default_plugin_type() -> String {
@@ -87,11 +94,25 @@ fn http_client() -> Result<reqwest::Client, String> {
         .map_err(|e| format!("初始化网络客户端失败: {e}"))
 }
 
-/// 拉取官方插件索引
+/// 拉取官方插件索引：GitHub 主通道（短超时）失败后回退 Gitee 镜像。
+/// 索引本身很小，10 秒超时足够；失败信息只保留最后一个通道的。
 async fn fetch_index_entries() -> Result<Vec<PluginIndexEntry>, String> {
+    let mut last_err = String::from("未配置索引地址");
+    for url in [PLUGIN_INDEX_URL, PLUGIN_INDEX_MIRROR_URL] {
+        match fetch_index_from(url).await {
+            Ok(entries) => return Ok(entries),
+            Err(e) => last_err = e,
+        }
+    }
+    Err(last_err)
+}
+
+/// 从单个地址拉索引（10 秒短超时，保证双通道回退不拖沓）
+async fn fetch_index_from(url: &str) -> Result<Vec<PluginIndexEntry>, String> {
     let client = http_client()?;
     let resp = client
-        .get(PLUGIN_INDEX_URL)
+        .get(url)
+        .timeout(Duration::from_secs(10))
         .send()
         .await
         .map_err(|e| format!("拉取插件索引失败: {e}"))?;
@@ -127,20 +148,13 @@ pub async fn download_install_plugin(
         .find(|e| e.id == id)
         .ok_or_else(|| format!("索引中不存在插件「{id}」"))?;
 
-    // 2. 下载 zip
-    let client = http_client()?;
-    let resp = client
-        .get(&entry.download_url)
-        .send()
-        .await
-        .map_err(|e| format!("下载插件失败: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!("下载插件失败（HTTP {}）", resp.status()));
+    // 2. 下载 zip（主地址 → mirror_url 镜像依次尝试，SHA-256 双通道一致）
+    let mut urls: Vec<String> = vec![entry.download_url.clone()];
+    if let Some(m) = &entry.mirror_url {
+        urls.push(m.clone());
     }
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| format!("读取下载内容失败: {e}"))?;
+    let client = http_client()?;
+    let bytes = download_zip_bytes(&client, &urls).await?;
 
     // 3. 写临时文件 → 安装（zip SHA-256 对照索引）
     let tmp = std::env::temp_dir().join(format!("va-plugin-{id}.zip"));
@@ -155,6 +169,35 @@ pub async fn download_install_plugin(
             format!("插件「{}」正在运行中，将在重启应用后完成更新。", manifest.name)
         }
     })
+}
+
+/// 下载 zip 字节：按顺序尝试 urls（主地址 → 镜像），全部失败报最后一个错误。
+/// 单地址 120 秒超时：zip 只有几 MB，超时即视为通道不可用，尽快切镜像。
+async fn download_zip_bytes(client: &reqwest::Client, urls: &[String]) -> Result<Vec<u8>, String> {
+    let mut last_err = String::from("没有可用的下载地址");
+    for url in urls {
+        let result = async {
+            let resp = client
+                .get(url)
+                .timeout(Duration::from_secs(120))
+                .send()
+                .await
+                .map_err(|e| format!("下载插件失败: {e}"))?;
+            if !resp.status().is_success() {
+                return Err(format!("下载插件失败（HTTP {}）", resp.status()));
+            }
+            resp.bytes()
+                .await
+                .map(|b| b.to_vec())
+                .map_err(|e| format!("读取下载内容失败: {e}"))
+        }
+        .await;
+        match result {
+            Ok(bytes) => return Ok(bytes),
+            Err(e) => last_err = e,
+        }
+    }
+    Err(last_err)
 }
 
 // ── 内置插件库（随安装包分发的 zip）─────────────────
