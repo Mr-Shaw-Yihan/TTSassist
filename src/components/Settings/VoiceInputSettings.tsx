@@ -249,7 +249,7 @@ export function VoiceInputSettings() {
               disabled={requesting}
               className="mt-1.5 rounded-md bg-[var(--amber-500)] px-2.5 py-1 font-medium text-[var(--paper)] transition-colors hover:bg-[var(--amber-600)] disabled:opacity-50"
             >
-              {requesting ? "授权中…" : "🎙️ 授权麦克风"}
+              {requesting ? "授权中…" : "授权麦克风"}
             </button>
           </div>
         )}
@@ -277,7 +277,7 @@ export function VoiceInputSettings() {
               ? `${testSeconds}s 点击停止`
               : testPhase === "transcribing"
                 ? "识别中…"
-                : "🎙️ 开始测试"}
+                : "开始测试"}
           </button>
           <span className="text-[10px] text-[var(--ink-300)]">
             {testPhase === "recording" ? "对着麦克风说句话" : "用当前配置录一句并识别"}

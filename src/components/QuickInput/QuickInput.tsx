@@ -12,6 +12,7 @@ import { useVoiceInputHotkey } from "../../hooks/useVoiceInputHotkey";
 import { useVoiceInputStore } from "../../stores/voiceInputStore";
 import { VolumeMeter } from "../Chat/VolumeMeter";
 import { MicToggle } from "../Chat/MicToggle";
+import { MicIcon } from "../icons/MicIcon";
 
 /** 发送/合成的三态反馈 */
 type Status =
@@ -181,7 +182,7 @@ export function QuickInput() {
               : "text-[var(--ink-300)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
           ].join(" ")}
         >
-          🎙️
+          <MicIcon size={15} />
         </button>
         {/* 麦克风开关（与主界面相同功能） */}
         <MicToggle onOpenSettings={onOpenSettingsFromFloating} />
@@ -189,9 +190,12 @@ export function QuickInput() {
         <button
           onClick={openMainAndClose}
           title="打开主界面"
-          className="ml-0.5 rounded-lg p-1.5 text-[var(--ink-300)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]"
+          className="ml-0.5 flex rounded-lg p-1.5 text-[var(--ink-300)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]"
         >
-          🗗
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <rect x="4" y="4" width="16" height="16" rx="2" />
+            <path d="M4 9h16" />
+          </svg>
         </button>
       </div>
 

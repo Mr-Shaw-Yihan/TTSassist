@@ -140,7 +140,7 @@ export function MicSettings() {
         </div>
       )}
       <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-300)]">
-        开启工具栏🎙️开关后，发送的语音会发到所选设备。请在游戏/通话软件里把麦克风设为「CABLE Output」。
+        开启左下角「其他」面板里的麦克风开关后，发送的语音会发到所选设备。请在游戏/通话软件里把麦克风设为「CABLE Output」。
       </p>
       {showInstallDialog && (
         <VbCableInstallDialog

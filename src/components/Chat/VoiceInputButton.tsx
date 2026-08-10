@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AudioRecorder } from "../../utils/audioRecorder";
 import { VolumeMeter } from "./VolumeMeter";
+import { MicIcon } from "../icons/MicIcon";
 import { asrTranscribe, listAsrPlugins } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
 
@@ -131,7 +132,7 @@ export function VoiceInputButton({ onResult }: Props) {
       {phase === "recording" && recorder && (
         <VolumeMeter recorder={recorder} className="h-1.5 w-9" barClassName="bg-red-500" />
       )}
-      <span>{phase === "transcribing" ? "…" : "🎙️"}</span>
+      <span className="flex items-center">{phase === "transcribing" ? "…" : <MicIcon size={14} />}</span>
       <span className="text-xs">
         {phase === "recording" ? `${seconds}s` : phase === "transcribing" ? "识别中" : "说话"}
       </span>

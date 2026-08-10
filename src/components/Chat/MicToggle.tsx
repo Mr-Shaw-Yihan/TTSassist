@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { checkVbCable } from "../../services/invoke";
 import { VbCableInstallDialog } from "../Settings/VbCableInstallDialog";
+import { MicIcon } from "../icons/MicIcon";
 
 interface Props {
   /** 点击"未配置"状态时跳转到设置页 */
@@ -62,7 +63,7 @@ export function MicToggle({ onOpenSettings }: Props) {
               : "text-[var(--ink-200)] hover:bg-[var(--ink-100)]",
         ].join(" ")}
       >
-        <span>{enabled && hasDevice ? "🎙️" : "🎤"}</span>
+        <MicIcon size={16} />
         {enabled && hasDevice && (
           <span className="text-[10px] font-medium tracking-wide">麦</span>
         )}
