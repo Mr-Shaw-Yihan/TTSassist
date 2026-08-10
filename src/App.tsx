@@ -49,6 +49,9 @@ function App() {
   const [atBottom, setAtBottom] = useState(true);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [tab, setTab] = useState<Tab>("messages");
+  // 「其他」弹层（收纳麦克风开关、音量与播放速度）
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement | null>(null);
   const [playingPath, setPlayingPath] = useState<string | null>(null);
   const settings = useSettingsStore((s) => s.settings);
   const setSettings = useSettingsStore((s) => s.setSettings);
@@ -210,6 +213,18 @@ function App() {
     setTimeout(run, 50);
   }, []);
 
+  // 点弹层外收起「其他」面板
+  useEffect(() => {
+    if (!moreOpen) return;
+    function onClick(e: MouseEvent) {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
+        setMoreOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [moreOpen]);
+
   // 播放音量与播放速度
   const volume = settings?.playback_volume ?? 0.8;
   const playbackRate = settings?.playback_rate ?? 1.0;
@@ -219,9 +234,6 @@ function App() {
       playingRef.current.playbackRate = playbackRate;
     }
   }, [volume, playbackRate]);
-
-  // 没配 key 头部也提示
-  const needKey = !settings?.mimo_api_key;
 
   // 互斥播放：停旧 → 设新 → 播放
   const playAudio = useCallback(async (relPath: string) => {
@@ -319,35 +331,82 @@ function App() {
 
   return (
     <div className="relative flex h-screen flex-col bg-[var(--paper)] text-[var(--ink-900)]">
-      {/* 标题栏 ── 品牌字 + 极细底分隔线 */}
-      <header className="flex items-center justify-between border-b border-[var(--ink-200)] bg-[var(--paper)] px-4 py-3">
-        <div className="flex items-baseline gap-2">
-          <span className="font-display text-base text-[var(--ink-900)] tracking-tight">电子声带</span>
-          <span className="text-[10px] text-[var(--ink-300)] tracking-[0.3em] uppercase">TTSassist</span>
+      {/* 自定义标题栏（系统标题栏已关）：品牌字 + 窗口控制，品牌区可拖拽移动窗口 */}
+      <header
+        data-tauri-drag-region
+        className="flex h-10 shrink-0 items-center justify-between border-b border-[var(--ink-200)] bg-[var(--paper)] pl-4"
+      >
+        <div data-tauri-drag-region className="flex min-w-0 flex-1 items-baseline gap-2">
+          <span className="font-display text-sm text-[var(--ink-900)] tracking-tight">电子声带</span>
+          <span className="text-[9px] text-[var(--ink-300)] tracking-[0.3em] uppercase">TTSassist</span>
         </div>
-        <div className="flex items-center gap-0.5">
-          <MicToggle onOpenSettings={() => setTab("settings")} />
-          <VolumeControl />
+        {/* 窗口控制：最小化 / 最大化 / 关闭 */}
+        <div className="flex h-full shrink-0 items-stretch">
+          <button
+            onClick={() => win.minimize()}
+            title="最小化"
+            aria-label="最小化"
+            className="flex w-11 items-center justify-center text-[var(--ink-300)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]"
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+              <path d="M1 5h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+            </svg>
+          </button>
+          <button
+            onClick={() => win.toggleMaximize()}
+            title="最大化/还原"
+            aria-label="最大化或还原"
+            className="flex w-11 items-center justify-center text-[var(--ink-300)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]"
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden>
+              <rect x="1" y="1" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.2" />
+            </svg>
+          </button>
+          <button
+            onClick={() => win.close()}
+            title="关闭"
+            aria-label="关闭"
+            className="flex w-11 items-center justify-center text-[var(--ink-300)] transition-colors hover:bg-[var(--seal)] hover:text-white"
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+              <path d="M1.5 1.5l7 7M8.5 1.5l-7 7" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+            </svg>
+          </button>
         </div>
       </header>
 
-      {needKey && (
-        <div className="border-b border-[var(--amber-200)]/60 bg-[var(--amber-200)]/20 px-4 py-2 text-xs text-[var(--amber-600)] animate-fade">
-          尚未配置 MiMo API Key，
-          <button className="underline underline-offset-2 font-medium" onClick={() => setTab("settings")}>
-            点击配置
-          </button>
-        </div>
-      )}
-
       <div className="flex min-h-0 flex-1">
-        {/* 左侧边栏（永久）：消息 / 收藏 / 插件 / 设置 */}
+        {/* 左侧边栏（永久）：消息 / 收藏 / 插件 / 设置（恒为按钮组最后一个），「其他」置底 */}
         <nav className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-[var(--ink-200)] bg-[var(--paper)] py-3">
           <SideButton icon="💬" label="消息" active={tab === "messages"} onClick={() => setTab("messages")} />
           <SideButton icon={<StarIcon />} label="收藏" active={tab === "favorites"} onClick={() => setTab("favorites")} />
           <SideButton icon="⧉" label="插件" active={tab === "plugins"} onClick={() => setTab("plugins")} />
+          <SideButton icon={<GearIcon />} label="设置" active={tab === "settings"} dot={updateDot} onClick={() => setTab("settings")} />
           <div className="flex-1" />
-          <SideButton icon="⋯" label="设置" active={tab === "settings"} dot={updateDot} onClick={() => setTab("settings")} />
+
+          {/* 「其他」：收纳麦克风开关、音量与播放速度 */}
+          <div ref={moreRef} className="relative flex justify-center">
+            <SideButton
+              icon="⋯"
+              label="其他"
+              active={moreOpen}
+              onClick={() => setMoreOpen((v) => !v)}
+            />
+            {moreOpen && (
+              <div className="absolute bottom-0 left-full z-50 ml-2 flex w-48 flex-col gap-2.5 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] p-3 shadow-[0_8px_24px_rgba(26,24,22,0.12)] animate-fade">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-[10px] uppercase tracking-wider text-[var(--ink-300)]">发到麦克风</span>
+                  <MicToggle
+                    onOpenSettings={() => {
+                      setMoreOpen(false);
+                      setTab("settings");
+                    }}
+                  />
+                </div>
+                <VolumeControl inline />
+              </div>
+            )}
+          </div>
         </nav>
 
         {/* 右侧内容区（随侧边栏切换） */}
@@ -501,6 +560,16 @@ function StarIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  );
+}
+
+/** 齿轮图标（设置用） */
+function GearIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   );
 }

@@ -18,7 +18,8 @@
         "height": 660,
         "minWidth": 360,
         "minHeight": 540,
-        "resizable": true
+        "resizable": true,
+        "decorations": false
       },
       {
         "label": "quick_input",
