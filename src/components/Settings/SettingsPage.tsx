@@ -8,7 +8,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "../../stores/updateStore";
 import { usePluginTaskStore } from "../../stores/pluginTaskStore";
-import { importCloneVoice, removeCloneVoice, pickAudioFile, listPlugins, listAsrPlugins, setHotkey, preloadVoice, importResourcePackFlow, promptEngineWarmup } from "../../services/invoke";
+import { importCloneVoice, removeCloneVoice, pickAudioFile, listPlugins, listAsrPlugins, setHotkey, preloadVoice, importResourcePackFlow, promptEngineWarmup, getRemoteConfig } from "../../services/invoke";
 import type { MossVoice, PluginInfo } from "../../types";
 import { HotkeyRecorder } from "./HotkeyRecorder";
 import { MicSettings } from "./MicSettings";
@@ -70,6 +70,14 @@ export function SettingsPage() {
   const [importing, setImporting] = useState(false);
   const [cloneName, setCloneName] = useState(settings?.clone_voice_name ?? "");
   const [copied, setCopied] = useState(false);
+
+  // MiMo 邀请码：远程配置动态下发（后端 24h 缓存，断网退回缓存/内置默认值）
+  const [inviteCode, setInviteCode] = useState("U277DH");
+  useEffect(() => {
+    getRemoteConfig()
+      .then((c) => setInviteCode(c.mimo_invite_code))
+      .catch(() => {});
+  }, []);
 
   // 音色库管理状态
   const [addName, setAddName] = useState("");
@@ -192,12 +200,12 @@ export function SettingsPage() {
 
   async function copyInvite() {
     try {
-      await navigator.clipboard.writeText("U277DH");
+      await navigator.clipboard.writeText(inviteCode);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
     } catch {
       const ta = document.createElement("textarea");
-      ta.value = "U277DH";
+      ta.value = inviteCode;
       document.body.appendChild(ta);
       ta.select();
       try { document.execCommand("copy"); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch {}
@@ -327,7 +335,7 @@ export function SettingsPage() {
                     className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none transition-colors placeholder:text-[var(--ink-300)] focus:border-[var(--amber-500)]"
                   />
                   <a
-                    href="https://platform.xiaomimimo.com?ref=U277DH"
+                    href={`https://platform.xiaomimimo.com?ref=${inviteCode}`}
                     target="_blank"
                     rel="noreferrer"
                     className="mt-1.5 inline-block text-xs text-[var(--ink-500)] underline underline-offset-2 hover:text-[var(--amber-600)] transition-colors"
@@ -346,7 +354,7 @@ export function SettingsPage() {
                           : "border-[var(--ink-200)] bg-[var(--paper-card)] text-[var(--ink-700)] hover:border-[var(--amber-500)] hover:text-[var(--amber-600)]",
                       ].join(" ")}
                     >
-                      U277DH
+                      {inviteCode}
                       <span className={["text-[10px]", copied ? "text-[var(--amber-600)]" : "text-[var(--ink-300)]"].join(" ")}>
                         {copied ? "✓ 已复制" : "⧉"}
                       </span>

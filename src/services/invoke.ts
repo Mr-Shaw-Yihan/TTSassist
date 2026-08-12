@@ -133,6 +133,19 @@ export async function checkAppUpdate(): Promise<UpdateInfo | null> {
   return invoke<UpdateInfo | null>("check_app_update");
 }
 
+// ── 远程配置 ─────────────────────────────────────
+
+/** 远程配置（邀请码等运营数据）：后端双通道拉取 + 24h 缓存，
+ *  断网时退回缓存或内置默认值，永远返回可用值 */
+export interface RemoteConfig {
+  mimo_invite_code: string;
+}
+
+/** 取远程配置；force=true 跳过缓存强制刷新 */
+export async function getRemoteConfig(force = false): Promise<RemoteConfig> {
+  return invoke<RemoteConfig>("get_remote_config", { force });
+}
+
 // ── Messages ──────────────────────────────────────
 
 /** 消息分页结果：窗口消息（旧→新）+ 是否还有更早的 */

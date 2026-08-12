@@ -119,6 +119,8 @@ $DistWork = Join-Path $env:TEMP "va-dist-push"
 if (Test-Path $DistWork) { Remove-Item $DistWork -Recurse -Force }
 New-Item -ItemType Directory -Path $DistWork | Out-Null
 foreach ($a in $Assets) { Copy-Item $a -Destination $DistWork -Force }
+# 远程配置（邀请码等）随 dist 分发，宿主经 Gitee raw 读取；单独更新可用 sync-remote-config.ps1
+Copy-Item (Join-Path $PluginsDir "remote-config.json") -Destination $DistWork -Force
 
 Push-Location $RepoRoot
 $OriginBranch = (git rev-parse --abbrev-ref HEAD 2>&1 | Out-String).Trim()
