@@ -116,12 +116,19 @@ impl PluginManager {
         &self.plugins_root
     }
 
-    /// 插件是否已加载可用
+    /// 插件是否已加载可用（TTS / ASR 两个注册表都要查）
     pub fn is_loaded(&self, id: &str) -> bool {
-        self.loaded
+        let tts = self
+            .loaded
             .read()
             .map(|map| map.contains_key(id))
-            .unwrap_or(false)
+            .unwrap_or(false);
+        let asr = self
+            .loaded_asr
+            .read()
+            .map(|map| map.contains_key(id))
+            .unwrap_or(false);
+        tts || asr
     }
 
     /// 插件是否已安装（注册表中有记录，含加载失败的）
@@ -364,7 +371,8 @@ impl PluginManager {
         registry::save_registry(&self.plugins_root, &reg)?;
 
         self.load_one(&id);
-        if self.get(&id).is_none() {
+        // ASR 插件加载后进 loaded_asr，两个注册表都要查（只查 loaded 会误报失败）
+        if self.get(&id).is_none() && self.get_asr(&id).is_none() {
             let reason = self
                 .failed
                 .read()

@@ -24,6 +24,8 @@ import {
   getSettings,
   getAudioUrl,
   playToMic,
+  listPlugins,
+  promptEngineWarmup,
 } from "./services/invoke";
 import type { Message, Favorite, PluginSetupProgress } from "./types";
 
@@ -103,6 +105,29 @@ function App() {
   useEffect(() => {
     void checkUpdate();
   }, [checkUpdate]);
+
+  // 启动时：当前引擎若为已就绪的本地引擎，询问是否后台预热
+  //（避免第一次对话时现场加载模型久等；通用机制，适用所有 category=local 引擎）
+  const warmupAskedRef = useRef(false);
+  useEffect(() => {
+    if (!settings || warmupAskedRef.current) return;
+    const engineId = settings.tts_engine ?? "mimo";
+    void (async () => {
+      try {
+        const plugins = await listPlugins();
+        const p = plugins.find((x) => x.id === engineId);
+        if (p?.category === "local" && p.setup_status?.ready) {
+          const voiceId = settings.plugin_voices?.[p.id] ?? p.voices[0]?.id ?? "";
+          if (!voiceId) return;
+          warmupAskedRef.current = true; // 无论用户是否确认，本次启动只问一次
+          // 稍延再弹，避开首屏渲染与更新弹窗的峰值
+          setTimeout(() => void promptEngineWarmup(p.name, p.id, voiceId), 800);
+        }
+      } catch {
+        /* 插件列表拉取失败静默，不影响主流程 */
+      }
+    })();
+  }, [settings]);
 
   // 皮肤同步到 <html data-theme>，整界面立刻换肤
   useEffect(() => {
@@ -334,7 +359,7 @@ function App() {
       {/* 自定义标题栏（系统标题栏已关）：品牌字 + 窗口控制，品牌区可拖拽移动窗口 */}
       <header
         data-tauri-drag-region
-        className="flex h-10 shrink-0 items-center justify-between border-b border-[var(--ink-200)] bg-[var(--paper)] pl-4"
+        className="flex h-11 shrink-0 items-center justify-between border-b border-[var(--ink-200)] bg-[var(--paper)] pl-4"
       >
         <div data-tauri-drag-region className="flex min-w-0 flex-1 items-baseline gap-2">
           <span className="font-display text-sm text-[var(--ink-900)] tracking-tight">电子声带</span>

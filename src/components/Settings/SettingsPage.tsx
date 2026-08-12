@@ -8,12 +8,13 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "../../stores/updateStore";
 import { usePluginTaskStore } from "../../stores/pluginTaskStore";
-import { importCloneVoice, removeCloneVoice, pickAudioFile, listPlugins, listAsrPlugins, setHotkey, preloadVoice } from "../../services/invoke";
+import { importCloneVoice, removeCloneVoice, pickAudioFile, listPlugins, listAsrPlugins, setHotkey, preloadVoice, importResourcePackFlow, promptEngineWarmup } from "../../services/invoke";
 import type { MossVoice, PluginInfo } from "../../types";
 import { HotkeyRecorder } from "./HotkeyRecorder";
 import { MicSettings } from "./MicSettings";
 import { VoiceInputSettings } from "./VoiceInputSettings";
 import { PluginSetupPanel } from "../Plugins/PluginSetupPanel";
+import { ResourcePackLinks } from "../Plugins/ResourcePackLinks";
 import { VoiceManager } from "./VoiceManager";
 
 const PRESET_VOICES = [
@@ -103,13 +104,19 @@ export function SettingsPage() {
     return (v?.label ?? voiceId).replace(/\s*·\s*待下载$/, "");
   }
 
-  /** 切换引擎：选中未就绪的本地插件时，用页内卡片询问是否现在下载运行环境 */
+  /** 切换引擎：选中未就绪的本地插件时，用页内卡片询问是否现在下载运行环境；
+   *  环境已就绪的本地引擎则询问是否后台预热（避免首次对话长等待） */
   function handleEngineChange(engineId: string) {
     void patch("tts_engine", engineId);
     setPendingEnv(null);
     const p = plugins.find((x) => x.id === engineId);
     if (p?.has_setup && !p.setup_status?.ready) {
       setPendingEnv({ pluginId: engineId, name: p.name });
+      return;
+    }
+    if (p?.category === "local" && p.setup_status?.ready) {
+      const voiceId = settings?.plugin_voices?.[p.id] ?? p.voices[0]?.id ?? "";
+      if (voiceId) void promptEngineWarmup(p.name, p.id, voiceId);
     }
   }
 
@@ -168,6 +175,19 @@ export function SettingsPage() {
         /* 错误已记录在 store */
       },
     );
+  }
+
+  /** 确认卡片：导入离线资源包（网盘/QQ 群下载的 zip） */
+  async function confirmEnvImport() {
+    if (!pendingEnv) return;
+    const { pluginId } = pendingEnv;
+    setPendingEnv(null);
+    try {
+      const done = await importResourcePackFlow(pluginId);
+      if (done) listPlugins().then(setPlugins).catch(() => {});
+    } catch (e) {
+      window.alert(`导入资源包失败：${e}`);
+    }
   }
 
   async function copyInvite() {
@@ -578,7 +598,9 @@ export function SettingsPage() {
                   {pendingEnv && pendingEnv.pluginId === cur.id && (
                     <div className="rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/15 px-3 py-2.5">
                       <p className="text-[11px] leading-relaxed text-[var(--ink-700)]">
-                        「{pendingEnv.name}」是本地引擎，首次使用需下载运行环境与语音模型（共约 800MB，需联网）。现在下载吗？
+                        「{pendingEnv.name}」是本地引擎，首次使用需安装运行环境与语音模型（共约 1.1GB）。
+                        在线下载源在 HuggingFace，国内网络需开启代理（魔法上网）；
+                        也可从<ResourcePackLinks />下载离线资源包（genie-resources-v1.zip，约 800MB）直接导入。
                       </p>
                       {cur.requirements && (
                         <p className="mt-1.5 text-[10px] leading-relaxed text-[var(--ink-500)]">
@@ -590,7 +612,13 @@ export function SettingsPage() {
                           onClick={confirmEnvDownload}
                           className="rounded-lg bg-[var(--amber-500)] px-3 py-1 text-[11px] font-medium text-white transition-opacity hover:opacity-90"
                         >
-                          现在下载
+                          在线下载（需魔法上网）
+                        </button>
+                        <button
+                          onClick={() => void confirmEnvImport()}
+                          className="rounded-lg border border-[var(--amber-500)] px-3 py-1 text-[11px] font-medium text-[var(--amber-600)] transition-colors hover:bg-[var(--amber-500)]/10"
+                        >
+                          导入离线资源包
                         </button>
                         <button
                           onClick={() => setPendingEnv(null)}

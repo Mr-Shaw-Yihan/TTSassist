@@ -11,7 +11,6 @@ import { useTauriListen } from "../../hooks/useTauriListen";
 import { useVoiceInputHotkey } from "../../hooks/useVoiceInputHotkey";
 import { useVoiceInputStore } from "../../stores/voiceInputStore";
 import { VolumeMeter } from "../Chat/VolumeMeter";
-import { MicToggle } from "../Chat/MicToggle";
 import { MicIcon } from "../icons/MicIcon";
 
 /** 发送/合成的三态反馈 */
@@ -133,11 +132,6 @@ export function QuickInput() {
     void (await invoke("show_main_window"));
   }
 
-  // 麦克风开关未配置设备时 → 打开主界面去设置
-  function onOpenSettingsFromFloating() {
-    void invoke("show_main_window");
-  }
-
   // 语音输入按钮（点击切换）：emit 与全局快捷键相同的事件，复用快捷键会话链路
   const viHotkey = useSettingsStore((s) => s.settings?.voice_input_hotkey);
   function toggleVoiceInput() {
@@ -151,7 +145,7 @@ export function QuickInput() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden rounded-2xl bg-[var(--paper)] text-[var(--ink-900)] shadow-[0_20px_60px_rgba(26,24,22,0.25)]">
-      {/* 顶部条：拖拽区 + 麦克风开关 + 打开主界面 */}
+      {/* 顶部条：拖拽区 + 语音输入 + 打开主界面（发送到麦克风开关在主界面「其他」面板） */}
       <div className="flex select-none items-center px-3 pt-2 pb-1">
         {/* 拖拽区（⠿ + 标题 + 空白）：按住左键拖动移动浮窗 */}
         <div
@@ -184,8 +178,6 @@ export function QuickInput() {
         >
           <MicIcon size={15} />
         </button>
-        {/* 麦克风开关（与主界面相同功能） */}
-        <MicToggle onOpenSettings={onOpenSettingsFromFloating} />
         {/* 打开主界面并关闭浮窗 */}
         <button
           onClick={openMainAndClose}

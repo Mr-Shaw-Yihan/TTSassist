@@ -39,6 +39,16 @@ pub fn update_setting(
         .map_err(|e| format!("更新内存设置失败: {e}"))?;
     *guard = settings.clone();
 
+    // ASR 插件每次转写都从环境变量读 key（见 lib.rs 启动注入）：
+    // 运行期更新 key 时同步环境变量，否则要重启才生效
+    if key == "mimo_api_key" {
+        if settings.mimo_api_key.is_empty() {
+            std::env::remove_var("MIMO_API_KEY");
+        } else {
+            std::env::set_var("MIMO_API_KEY", &settings.mimo_api_key);
+        }
+    }
+
     notify_changed(&app, EVENT_SETTINGS_CHANGED);
 
     Ok(settings)

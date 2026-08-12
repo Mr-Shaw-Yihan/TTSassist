@@ -14,7 +14,9 @@ import {
   downloadInstallPlugin,
   listBundledPlugins,
   installBundledPlugin,
+  importResourcePackFlow,
 } from "../../services/invoke";
+import { ResourcePackLinks } from "./ResourcePackLinks";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { usePluginTaskStore } from "../../stores/pluginTaskStore";
 import { PluginSetupPanel } from "./PluginSetupPanel";
@@ -109,6 +111,8 @@ export function PluginPage() {
   // 安装/卸载等耗时操作（禁用按钮 + 提示）
   const [busy, setBusy] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  // 正在展示「安装方式二选一」面板的插件 id（在线下载 / 离线导入）
+  const [envPick, setEnvPick] = useState<string | null>(null);
 
   // 环境安装任务走全局任务 store（启动在按钮点击处，面板只订阅）
   const task = usePluginTaskStore((s) => s.task);
@@ -287,6 +291,13 @@ export function PluginPage() {
     (c) => !plugins.some((p) => p.id === c.id)
   );
 
+  // 索引获取结果提示用：可更新插件数 + 可新装条目数（避免「获取成功但无变化」的困惑）
+  const updateCount = plugins.filter((p) => {
+    const o = onlineEntryOf(p.id);
+    return o && isNewer(o.version, p.version);
+  }).length;
+  const freshCount = candidatesTts.length + candidatesAsr.length;
+
   // ── 卡片与条目渲染 ─────────────────────────────────────────────
 
   /** 已安装引擎卡片（TTS/ASR 共用，按钮按类型差异化） */
@@ -402,9 +413,14 @@ export function PluginPage() {
           </div>
         )}
 
-        {/* 描述 */}
+        {/* 描述（窄窗口下可能显示不全，悬停查看完整内容） */}
         {p.description && (
-          <p className="mt-2 text-xs leading-relaxed text-[var(--ink-500)]">{p.description}</p>
+          <p
+            className="mt-2 text-xs leading-relaxed text-[var(--ink-500)]"
+            title={p.description}
+          >
+            {p.description}
+          </p>
         )}
 
         {/* 资源需求（供用户下载运行环境前判断配置） */}
@@ -427,6 +443,63 @@ export function PluginPage() {
                   （已装音色 {p.setup_status.voices.length} 个）
                 </span>
               </div>
+            ) : envPick === p.id ? (
+              // 安装方式二选一：在线下载（需代理） / 导入离线资源包
+              <div className="rounded-lg border border-sky-600/25 bg-sky-600/5 px-3 py-2.5">
+                <div className="mb-2 text-[11px] font-medium text-sky-800">
+                  选择运行环境安装方式
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => {
+                      setEnvPick(null);
+                      startEnv(p.id, p.name).catch(() => {
+                        /* 错误已在 store */
+                      });
+                    }}
+                    disabled={taskRunning || busy !== null}
+                    className="rounded-md border border-sky-600/40 px-2.5 py-2 text-left transition-colors hover:bg-sky-600/10 disabled:opacity-40"
+                  >
+                    <span className="block text-[11px] font-medium text-sky-700">
+                      在线下载（需魔法上网）
+                    </span>
+                    <span className="mt-0.5 block text-[10px] leading-relaxed text-[var(--ink-300)]">
+                      从 HuggingFace 下载约 1.1GB，国内网络请先开启代理
+                    </span>
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setEnvPick(null);
+                      try {
+                        const done = await importResourcePackFlow(p.id);
+                        if (done) void reload();
+                      } catch (e) {
+                        window.alert(`导入资源包失败：${e}`);
+                      }
+                    }}
+                    disabled={taskRunning || busy !== null}
+                    className="rounded-md border border-[var(--amber-500)]/60 px-2.5 py-2 text-left transition-colors hover:bg-[var(--amber-500)]/10 disabled:opacity-40"
+                  >
+                    <span className="block text-[11px] font-medium text-[var(--amber-600)]">
+                      导入离线资源包（无需联网）
+                    </span>
+                    <span className="mt-0.5 block text-[10px] leading-relaxed text-[var(--ink-300)]">
+                      下载 genie-resources-v1.zip（约 800MB）后选择导入，无需联网
+                    </span>
+                  </button>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <span className="text-[10px] leading-relaxed text-[var(--ink-300)]">
+                    资源包获取：<ResourcePackLinks />
+                  </span>
+                  <button
+                    onClick={() => setEnvPick(null)}
+                    className="shrink-0 rounded-md border border-[var(--ink-200)] px-2 py-0.5 text-[11px] text-[var(--ink-500)] hover:border-[var(--ink-300)]"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
             ) : (
               <div className="flex items-center gap-2 rounded-lg border border-sky-600/25 bg-sky-600/5 px-3 py-2">
                 <span
@@ -436,11 +509,7 @@ export function PluginPage() {
                   {p.setup_status?.summary ?? "运行环境未安装"}
                 </span>
                 <button
-                  onClick={() => {
-                    startEnv(p.id, p.name).catch(() => {
-                      /* 错误已在 store */
-                    });
-                  }}
+                  onClick={() => setEnvPick(p.id)}
                   disabled={taskRunning || busy !== null}
                   className="shrink-0 rounded-lg bg-sky-600 px-3 py-1 text-[11px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
                 >
@@ -487,7 +556,12 @@ export function PluginPage() {
             </span>
           </div>
           {c.description && (
-            <p className="mt-1 truncate text-[11px] text-[var(--ink-500)]">{c.description}</p>
+            <p
+              className="mt-1 truncate text-[11px] text-[var(--ink-500)]"
+              title={c.description}
+            >
+              {c.description}
+            </p>
           )}
           {c.requirements && (
             <p className="mt-1 text-[10px] leading-relaxed text-[var(--ink-300)]">
@@ -589,6 +663,15 @@ export function PluginPage() {
             </svg>
             {indexLoading ? "正在获取…" : index ? "刷新在线列表" : "获取在线列表"}
           </button>
+          {/* 获取结果提示：成功但无可安装/可更新项时也要有明确反馈 */}
+          {index && !indexLoading && !indexError && (
+            <p className="text-[11px] text-[var(--ink-300)]">
+              ✓ 在线列表已获取（{index.length} 个插件）：
+              {updateCount + freshCount > 0
+                ? `发现 ${updateCount + freshCount} 项可安装/更新，见下方分类`
+                : "已装插件均为最新版本"}
+            </p>
+          )}
         </div>
 
         {loading && <div className="py-4 text-center text-sm text-[var(--ink-300)]">加载中…</div>}

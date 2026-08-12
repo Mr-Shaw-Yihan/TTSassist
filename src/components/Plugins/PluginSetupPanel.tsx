@@ -6,7 +6,10 @@
 //
 // 定量进度（percent>=0）显示百分比进度条；不定量（<0）显示脉冲条。
 
+import { useState } from "react";
 import { usePluginTaskStore } from "../../stores/pluginTaskStore";
+import { importResourcePackFlow, cleanFailedResources } from "../../services/invoke";
+import { ResourcePackLinks } from "./ResourcePackLinks";
 
 export const EVENT_PLUGIN_SETUP_PROGRESS = "plugin-setup-progress";
 
@@ -20,11 +23,16 @@ export function PluginSetupPanel({ pluginId, onClosed }: Props) {
   const task = usePluginTaskStore((s) => s.task);
   const retry = usePluginTaskStore((s) => s.retry);
   const clear = usePluginTaskStore((s) => s.clear);
+  const [importing, setImporting] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
 
   // 无任务或任务属于其他插件 → 不渲染（任务仍在后台跑，切回可见）
   if (!task || task.pluginId !== pluginId) return null;
 
   const kindText = task.kind === "voice" ? "音色安装" : "环境安装";
+  // 资源下载失败（如 GenieData 拉不动）→ 提供离线资源包导入入口
+  const isResourceError =
+    task.status === "error" && (task.error ?? "").includes("资源下载失败");
 
   function handleClose() {
     clear();
@@ -36,6 +44,39 @@ export function PluginSetupPanel({ pluginId, onClosed }: Props) {
       await retry();
     } catch {
       /* 错误已记录在 store，面板会展示 */
+    }
+  }
+
+  /** 导入离线资源包：选 zip → 解压到插件数据目录 → 刷新状态 */
+  async function handleImport() {
+    try {
+      setImporting(true);
+      const done = await importResourcePackFlow(pluginId);
+      if (done) {
+        clear();
+        onClosed?.();
+      }
+    } catch (e) {
+      window.alert(`导入资源包失败：${e}`);
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  /** 清除失败资源：删掉不完整的下载产物，之后可重试或导入离线包 */
+  async function handleClean() {
+    const ok = window.confirm(
+      "将删除已下载失败的语音资源（不影响运行环境与已装音色），删除后可重试在线下载或导入离线资源包。确定清除？"
+    );
+    if (!ok) return;
+    try {
+      setCleaning(true);
+      const msg = await cleanFailedResources(pluginId);
+      window.alert(msg);
+    } catch (e) {
+      window.alert(`清除失败：${e}`);
+    } finally {
+      setCleaning(false);
     }
   }
 
@@ -104,6 +145,30 @@ export function PluginSetupPanel({ pluginId, onClosed }: Props) {
             </div>
           )}
         </>
+      )}
+      {isResourceError && (
+        <div className="mt-2 rounded-md border border-[var(--ink-200)] bg-[var(--paper-card)] px-2.5 py-1.5">
+          <span className="block text-[10px] leading-relaxed text-[var(--ink-300)]">
+            可开启代理（魔法上网）后重试；或清除失败资源后，从<ResourcePackLinks />
+            下载「Genie 语音资源包」导入
+          </span>
+          <div className="mt-1.5 flex items-center gap-2">
+            <button
+              onClick={handleClean}
+              disabled={cleaning || importing}
+              className="shrink-0 rounded-md border border-[var(--ink-200)] px-2 py-0.5 text-[11px] text-[var(--ink-500)] transition-colors hover:border-[var(--ink-300)] disabled:opacity-50"
+            >
+              {cleaning ? "清除中…" : "清除失败资源"}
+            </button>
+            <button
+              onClick={handleImport}
+              disabled={importing || cleaning}
+              className="shrink-0 rounded-md border border-[var(--amber-500)] px-2 py-0.5 text-[11px] text-[var(--amber-600)] transition-colors hover:bg-[var(--amber-500)]/10 disabled:opacity-50"
+            >
+              {importing ? "导入中…" : "导入离线资源包"}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

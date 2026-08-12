@@ -37,3 +37,6 @@ plugins/genie-tts/dist/
 
 # AI/工具生成的中间产物
 .qoder/
+
+# 离线资源包分发产物（793MB，传网盘/群文件，不入仓）
+dist-resources/

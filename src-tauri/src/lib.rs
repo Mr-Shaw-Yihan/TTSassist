@@ -166,6 +166,8 @@ pub fn run() {
             crate::commands::plugins::list_plugins,
             crate::commands::plugins::uninstall_plugin,
             crate::commands::plugins::install_plugin_zip,
+            crate::commands::plugins::import_offline_resources,
+            crate::commands::plugins::clean_failed_resources,
             crate::commands::plugins::fetch_plugin_index,
             crate::commands::plugins::download_install_plugin,
             crate::commands::plugins::list_bundled_plugins,

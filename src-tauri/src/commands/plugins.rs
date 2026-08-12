@@ -1,4 +1,4 @@
-// 插件管理命令：列表 / 卸载 / 拖入安装 / 在线索引 / 下载安装 / 内置插件库。
+// 插件管理命令：列表 / 卸载 / 拖入安装 / 在线索引 / 下载安装 / 内置插件库 / 离线资源包导入。
 
 use std::ffi::{c_char, CStr};
 use std::path::{Path, PathBuf};
@@ -56,6 +56,148 @@ pub fn install_plugin_zip(
             format!("插件「{}」正在运行中，将在重启应用后完成更新。", manifest.name)
         }
     })
+}
+
+// ── 离线资源包导入 ─────────────────────────────
+
+/// 导入离线资源包：用户从网盘/QQ 群下载的资源 zip（如 genie-tts 的 GenieData）
+/// 解压到插件数据目录 `<plugins_root>/<id>/data/`。
+///
+/// zip 结构约定：包内含 `GenieData/` 目录（解压后与 data/ 下已有内容合并覆盖）。
+/// 解压后校验关键文件，缺失则报明确错误。已下载的部分会被保留，
+/// 与后续在线补齐/重新导入兼容（均幂等覆盖）。
+#[tauri::command]
+pub fn import_offline_resources(
+    plugin_id: String,
+    zip_path: String,
+    plugins: State<'_, PluginManager>,
+) -> Result<String, String> {
+    import_offline_resources_inner(plugins.plugins_root(), &plugin_id, &zip_path)
+}
+
+/// 导入核心逻辑（不依赖 tauri State，便于单测）
+fn import_offline_resources_inner(
+    plugins_root: &Path,
+    plugin_id: &str,
+    zip_path: &str,
+) -> Result<String, String> {
+    use std::io::Read;
+
+    // id 合法性兜底（防路径穿越，与 uninstall 一致）
+    if plugin_id.is_empty()
+        || !plugin_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(format!("非法插件 id：{plugin_id}"));
+    }
+    let plugin_dir = plugins_root.join(plugin_id);
+    if !plugin_dir.exists() {
+        return Err(format!("插件「{plugin_id}」未安装，请先安装插件再导入资源包"));
+    }
+    let zip_path = PathBuf::from(zip_path);
+    if !zip_path.exists() {
+        return Err(format!("文件不存在: {}", zip_path.display()));
+    }
+
+    let file = std::fs::File::open(&zip_path).map_err(|e| format!("打开资源包失败: {e}"))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("资源包不是合法的 zip 文件: {e}"))?;
+
+    let dest = plugin_dir.join("data");
+    std::fs::create_dir_all(&dest).map_err(|e| format!("创建数据目录失败: {e}"))?;
+
+    let mut found_hubert = false;
+    let mut found_speaker = false;
+    let mut count = 0u32;
+
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| format!("读取资源包条目失败: {e}"))?;
+        let name = entry.name().replace('\\', "/");
+        // 跳过目录条目与 macOS 元数据
+        if name.is_empty() || name.ends_with('/') || name.starts_with("__MACOSX") {
+            continue;
+        }
+        // 路径安全：拒绝绝对路径与 .. 组件（防 zip slip）
+        let rel = Path::new(&name);
+        if rel.is_absolute() || rel.components().any(|c| c.as_os_str() == "..") {
+            return Err(format!("资源包含非法路径: {name}"));
+        }
+        if name.starts_with("GenieData/chinese-hubert-base/") {
+            found_hubert = true;
+        }
+        if name == "GenieData/speaker_encoder.onnx" {
+            found_speaker = true;
+        }
+        let out = dest.join(rel);
+        if let Some(parent) = out.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("创建目录失败: {e}"))?;
+        }
+        let mut buf = Vec::with_capacity(entry.size().min(64 << 20) as usize);
+        entry
+            .read_to_end(&mut buf)
+            .map_err(|e| format!("解压 {name} 失败: {e}"))?;
+        std::fs::write(&out, &buf).map_err(|e| format!("写入 {name} 失败: {e}"))?;
+        count += 1;
+    }
+
+    if !found_hubert || !found_speaker {
+        return Err(
+            "资源包结构不对：未找到 GenieData/chinese-hubert-base 与 GenieData/speaker_encoder.onnx。"
+                .to_string()
+                + "请确认下载的是「Genie 语音资源包」（zip 内应直接含 GenieData 目录）",
+        );
+    }
+
+    Ok(format!(
+        "资源导入成功（{count} 个文件）。现在可以点击「安装运行环境」继续完成剩余步骤"
+    ))
+}
+
+/// 清除失败资源：删掉下载失败/不完整的语音资源（GenieData，含 HF 缓存元数据）
+/// 与下载中转目录，让用户以干净状态重试在线下载或导入离线资源包。
+/// 不动 python/（运行环境）与 characters/（已装音色）。
+#[tauri::command]
+pub fn clean_failed_resources(
+    plugin_id: String,
+    plugins: State<'_, PluginManager>,
+) -> Result<String, String> {
+    clean_failed_resources_inner(plugins.plugins_root(), &plugin_id)
+}
+
+/// 清除核心逻辑（不依赖 tauri State，便于单测）
+fn clean_failed_resources_inner(plugins_root: &Path, plugin_id: &str) -> Result<String, String> {
+    // id 合法性兜底（与 import_offline_resources_inner 一致）
+    if plugin_id.is_empty()
+        || !plugin_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(format!("非法插件 id：{plugin_id}"));
+    }
+    let data_dir = plugins_root.join(plugin_id).join("data");
+    if !data_dir.exists() {
+        return Ok("没有需要清除的失败资源".to_string());
+    }
+    let mut removed = Vec::new();
+    for name in ["GenieData", ".dl", ".dl-cache"] {
+        let p = data_dir.join(name);
+        if p.exists() {
+            std::fs::remove_dir_all(&p)
+                .map_err(|e| format!("清除 {name} 失败（可能有进程占用，请关闭应用后重试）: {e}"))?;
+            removed.push(name);
+        }
+    }
+    if removed.is_empty() {
+        Ok("没有需要清除的失败资源".to_string())
+    } else {
+        Ok(format!(
+            "已清除失败的语音资源。现在可以重试在线下载，或导入离线资源包"
+        ))
+    }
 }
 
 // ── 在线插件索引 ─────────────────────────────────
@@ -541,7 +683,7 @@ pub async fn import_voice_pack(
 
 #[cfg(test)]
 mod tests {
-    use super::cmp_version;
+    use super::{clean_failed_resources_inner, cmp_version, import_offline_resources_inner};
     use std::cmp::Ordering::*;
 
     #[test]
@@ -553,5 +695,104 @@ mod tests {
         assert_eq!(cmp_version("1.2", "1.2.0"), Equal);
         // 数值比而非字典序（10 > 9）
         assert_eq!(cmp_version("0.10.0", "0.9.0"), Greater);
+    }
+
+    /// 构造测试用资源 zip（Stored 压缩，无额外 feature 依赖）
+    fn build_resource_zip(path: &std::path::Path, entries: &[(&str, &[u8])]) {
+        use std::io::Write;
+        let file = std::fs::File::create(path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        for (name, content) in entries {
+            zip.start_file(*name, opts).unwrap();
+            zip.write_all(content).unwrap();
+        }
+        zip.finish().unwrap();
+    }
+
+    #[test]
+    fn 离线资源包导入成功() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("genie-tts")).unwrap();
+        let zip_path = root.join("res.zip");
+        build_resource_zip(
+            &zip_path,
+            &[
+                ("GenieData/chinese-hubert-base/config.json", b"{}"),
+                ("GenieData/speaker_encoder.onnx", b"onnx-bytes"),
+            ],
+        );
+        let msg =
+            import_offline_resources_inner(root, "genie-tts", zip_path.to_str().unwrap())
+                .unwrap();
+        assert!(msg.contains("资源导入成功"));
+        assert!(root.join("genie-tts/data/GenieData/speaker_encoder.onnx").exists());
+        assert!(root
+            .join("genie-tts/data/GenieData/chinese-hubert-base/config.json")
+            .exists());
+    }
+
+    #[test]
+    fn 离线资源包结构不对被拒绝() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("genie-tts")).unwrap();
+        let zip_path = root.join("bad.zip");
+        build_resource_zip(&zip_path, &[("random.txt", b"hello")]);
+        let err = import_offline_resources_inner(root, "genie-tts", zip_path.to_str().unwrap())
+            .unwrap_err();
+        assert!(err.contains("资源包结构不对"));
+    }
+
+    #[test]
+    fn 离线资源包拒绝路径穿越() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("genie-tts")).unwrap();
+        let zip_path = root.join("evil.zip");
+        build_resource_zip(
+            &zip_path,
+            &[
+                ("../evil.txt", b"boom"),
+                ("GenieData/chinese-hubert-base/config.json", b"{}"),
+                ("GenieData/speaker_encoder.onnx", b"onnx"),
+            ],
+        );
+        let err = import_offline_resources_inner(root, "genie-tts", zip_path.to_str().unwrap())
+            .unwrap_err();
+        assert!(err.contains("非法路径"));
+        assert!(!root.parent().unwrap().join("evil.txt").exists());
+    }
+
+    #[test]
+    fn 离线资源包要求插件已安装() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = import_offline_resources_inner(tmp.path(), "genie-tts", "whatever.zip")
+            .unwrap_err();
+        assert!(err.contains("未安装"));
+    }
+
+    #[test]
+    fn 清除失败资源只删语音资源不动环境() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let data = root.join("genie-tts/data");
+        std::fs::create_dir_all(data.join("GenieData/chinese-hubert-base")).unwrap();
+        std::fs::create_dir_all(data.join(".dl")).unwrap();
+        std::fs::create_dir_all(data.join("python")).unwrap();
+        std::fs::create_dir_all(data.join("characters/feibi")).unwrap();
+
+        let msg = clean_failed_resources_inner(root, "genie-tts").unwrap();
+        assert!(msg.contains("已清除"));
+        assert!(!data.join("GenieData").exists());
+        assert!(!data.join(".dl").exists());
+        // 运行环境与已装音色不受影响
+        assert!(data.join("python").exists());
+        assert!(data.join("characters/feibi").exists());
+        // 再清一次：幂等，提示无可清除项
+        let msg2 = clean_failed_resources_inner(root, "genie-tts").unwrap();
+        assert!(msg2.contains("没有需要清除"));
     }
 }

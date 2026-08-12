@@ -16,7 +16,24 @@
 use std::path::Path;
 use std::process::Command;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 use crate::paths::{Ctx, GenieConfig};
+
+/// Windows: CREATE_NO_WINDOW（GUI 程序拉 python 不弹黑框）。
+/// 注意：has_module 等频繁探测的子进程也必须带此标志，
+/// 否则每次合成兜底链路都会闪控制台窗口。
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// 构造 python 子进程命令（Windows 自动附带无控制台窗口标志）
+fn python_command(python: &Path) -> Command {
+    let mut cmd = Command::new(python);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
 
 /// 进度回调类型（percent<0 表示不定量，以文案为准）
 pub type ProgressCb<'a> = Option<&'a dyn Fn(f32, &str)>;
@@ -97,7 +114,7 @@ fn has_module(python: &Path, module: &str) -> bool {
     let script = format!(
         "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('{module}') else 1)"
     );
-    Command::new(python)
+    python_command(python)
         .args(["-c", &script])
         .output()
         .map(|o| o.status.success())
@@ -182,7 +199,7 @@ fn bootstrap_pip(ctx: &Ctx, python: &Path) -> Result<(), String> {
 
     crate::client::download_file_with_progress(GET_PIP_URL, &get_pip, None)?;
 
-    let output = Command::new(python)
+    let output = python_command(python)
         .arg(&get_pip)
         .arg("--no-warn-script-location")
         .current_dir(&ctx.data_dir)
@@ -204,7 +221,7 @@ fn install_jieba_wheel(ctx: &Ctx, python: &Path) -> Result<(), String> {
     std::fs::write(&wheel_path, JIEBA_WHEEL)
         .map_err(|e| format!("释放内置组件失败: {e}"))?;
 
-    let output = Command::new(python)
+    let output = python_command(python)
         .args(["-m", "pip", "install", "--no-warn-script-location"])
         .arg(&wheel_path)
         .current_dir(&ctx.data_dir)
@@ -221,7 +238,7 @@ fn install_jieba_wheel(ctx: &Ctx, python: &Path) -> Result<(), String> {
 
 /// pip 安装 genie-tts（jieba_fast 已由内嵌 wheel 满足，不会触发源码编译）
 fn install_genie(ctx: &Ctx, python: &Path, cfg: &GenieConfig) -> Result<(), String> {
-    let mut cmd = Command::new(python);
+    let mut cmd = python_command(python);
     cmd.args(["-m", "pip", "install", "--no-warn-script-location"]);
     if !cfg.pip_index_url.trim().is_empty() {
         cmd.args(["-i", cfg.pip_index_url.trim()]);

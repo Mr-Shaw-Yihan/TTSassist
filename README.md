@@ -1,57 +1,90 @@
 # TTSassist · 电子声带
 
-为语言障碍者打造的文本转语音沟通助手，特别针对游戏等全屏场景做了优化。按 `Alt+V` 在任何界面呼出浮窗，输入文字即生成语音播放。
+为语言障碍者打造的语音沟通助手，特别针对游戏等全屏场景做了优化。按 `Alt+V`或自定义按键 在任何界面呼出浮窗，输入文字即生成语音播放；支持语音识别输入、虚拟麦克风输出与插件化引擎扩展。
 
 ## 特性
 
-- **全屏浮窗**：按 `Alt+V` 呼出无边框置顶浮窗，输入文字 → 自动生成语音播放
+- **全屏浮窗**：`Alt+V` 呼出无边框置顶浮窗，输入文字 → 自动生成语音播放
 - **主界面聊天**：类微信聊天界面，历史消息持久化、可重复播放
 - **收藏夹**：右键收藏消息或导入外部音频，通过快捷键直接触发播放
+- **语音输入（ASR）**：MiMo-V2.5-ASR 云端识别，中英文自动语种检测，说话即转文字
 - **克隆音色**：导入一段本地说话音频（mp3/wav，≤10MB），MiMo 复刻相似音色
-- **多 TTS 引擎**：MiMo（小米）/ Moss-TTS / Edge TTS（免费·微软，无需 Key）
+- **本地离线引擎**：Genie TTS（GPT-SoVITS ONNX）纯 CPU 离线合成，音色包可扩展
+- **发送到麦克风**：搭配 VB-CABLE 虚拟声卡，把合成语音输出为麦克风信号，游戏/语音软件里直接"说话"（应用自动检测驱动并引导安装）
+- **插件化引擎**：TTS/ASR 引擎均为插件，内置插件库一键安装，也可从在线插件库获取更新
+- **一体化界面**：自绘无边框标题栏，侧边栏消息/收藏/插件/设置，「其他」面板收纳麦克风开关、音量与语速
 - **皮肤切换**：安墨（浅色）/ 夜窗（深色）两套
 - **系统托盘**：关闭主窗最小化到托盘不退出
 
+## 插件系统
+
+新增引擎能力全部以插件形式提供，当前官方插件：
+
+| 插件 | 类型 | 说明 |
+| --- | --- | --- |
+| Edge TTS | 语音合成 | 免费、无需 Key 的微软 Edge 语音（非官方接口，可能不稳定） |
+| MiMo ASR | 语音识别 | 小米 MiMo-V2.5-ASR 云端识别，中英文自动语种检测 |
+| Genie TTS | 语音合成 | GPT-SoVITS ONNX 本地推理，CPU 离线合成（首次使用需安装运行环境约 1.1GB，每个音色另约 320MB；支持离线资源包导入） |
+
+- **内置插件库**：安装包自带全部官方插件 zip，离线也能一键安装
+- **在线插件库**：插件页点击「获取在线列表」手动拉取官方索引，安装/更新全程 SHA-256 完整性校验
+- **拖入安装**：支持拖入任意插件 zip 安装（会提示来源不可信，请确认来源安全）
+- **音色管理**：本地引擎支持音色安装/卸载/预加载与自定义音色包导入
+- **离线资源包**：本地引擎运行环境在线下载需访问境外源，国内用户可从官方 QQ 群（690907648）/ 网盘下载资源包 zip，在应用内直接导入，无需联网
+- **引擎预热**：选用本地引擎时会询问是否后台提前启动，避免第一次对话长时间等待
+
 ## 下载安装
 
-前往 [Releases](../../releases) 下载最新版本：
+前往 [GitHub Releases](https://github.com/Mr-Shaw-Yihan/TTSassist/releases) 下载最新版本：
 
-- Windows 10/11：`TTSassist_1.0.0_x64-setup.exe`（NSIS 安装包，推荐）
-- 免安装版：`TTSassist.exe`（双击即用）
+- Windows 10/11：`TTSassist_x.x.x_x64-setup.exe`
+
+> 国内用户：插件资源的下载已内置 **Gitee 镜像双通道**，GitHub 不可达时应用会自动回退到镜像地址，无需任何手动配置。
 
 ## 首次使用
 
-1. 启动后右上角 ⋯ → 设置
+1. 启动后点左侧边栏 ⚙️ 进入设置
 2. 选择 TTS 引擎：
+   - **Edge TTS**（微软）：**免费、无需 Key**，非官方接口可能不稳定（开箱即用推荐）
    - **MiMo**（小米）：响应快，需 API Key
    - **Moss-TTS**：音色丰富，需 API Key
-   - **Edge TTS**（微软）：**免费、无需 Key**，但为非官方接口，可能不稳定/受地区限制
-3. 填入 **API Key**（MiMo/Moss 需要；前往 [platform.xiaomimimo.com](https://platform.xiaomimimo.com?ref=U277DH) 注册领取，可填邀请码 `U277DH` 得 10R 额度；Edge TTS 无需 Key）
-4. 主界面右上角，启用 🎤 按钮（未启用则仅扬声器播放）
-5. 输入文字、回车发送即可合成播放
-6. 快捷键 alt + v 打开/关闭 浮窗，快捷输入转语音
+   - **Genie TTS**：完全本地离线，首次使用需安装运行环境（在线下载需代理，或导入离线资源包）
+3. 填入 **API Key**（MiMo/Moss 需要；前往 [platform.xiaomimimo.com](https://platform.xiaomimimo.com?ref=U277DH) 注册领取，可填邀请码 `U277DH` 得 10R 额度）
+4. 如需把语音输出到麦克风（游戏内说话）：安装 [VB-CABLE](https://vb-audio.com/Cable/) 虚拟声卡驱动，然后在左下角「其他」面板打开「发送到麦克风」（未检测到驱动时应用会引导安装）
+5. 输入文字、回车发送即可合成播放；`Alt+V` 随时呼出浮窗快捷输入
+
+## 分发与镜像
+
+- **主通道**：GitHub Releases（应用本体 + 插件索引与 zip）
+- **国内镜像**：Gitee [yihwan/TTSassist](https://gitee.com/yihwan/TTSassist) `dist` 分支（插件索引 + 全部插件 zip），应用拉取索引/下载插件失败时自动回退，双通道 SHA-256 校验一致
+- 插件发布：`plugins\publish.ps1` 一键打包 → 生成索引 → 上传 GitHub Release → 自动同步 Gitee 镜像
 
 ## 技术栈
 
-Tauri 2 + React 19 + TypeScript + Tailwind CSS v4 + Rust
-TTS 采用 [小米 MiMo]、[Mossland]、[Edge TTS](https://github.com/rany2/edge-tts)（免费，基于 [kothok-edge-tts](https://crates.io/crates/kothok-edge-tts)）
+- Tauri 2 + React 19 + TypeScript + Tailwind CSS v4 + Rust
+- 引擎插件化：Rust cdylib + FFI 安全边界，动态加载/卸载，SHA-256 完整性校验
+- TTS：小米 MiMo、Mossland、[Edge TTS](https://github.com/rany2/edge-tts)（基于 [kothok-edge-tts](https://crates.io/crates/kothok-edge-tts)）、GPT-SoVITS ONNX 本地推理
+- ASR：小米 MiMo-V2.5-ASR
 
 ## 开发
 
 ```bash
 npm install
 npm run tauri dev      # 开发
-npm run tauri build   # 打包
+npm run tauri build    # 打包
 ```
 
-需要 Rust 工具链（rustup）和 Windows 的 MSVC + Windows SDK。
+需要 Node.js、Rust 工具链（rustup）以及 Windows MSVC + Windows SDK。
+
+插件开发参考仓库内 `doc/插件系统开发参考.md`；发布见 `plugins\publish.ps1`。
 
 ## 免责声明
 
 - 本软件（TTSassist · 电子声带）为开源项目，**仅供学习与个人使用**。
 - 软件本身**仅提供本地服务功能**：文本输入、本地存储、音频播放等均在用户本地设备完成。
-- 语音合成（TTS）能力由**第三方运营商服务**提供（如小米 MiMo、Mossland）。API Key 由用户自行向对应运营商申请，相关服务条款、资费及可用性以运营商为准。本软件不代理、不转售任何运营商服务。
+- 语音合成（TTS）与语音识别（ASR）能力由**第三方运营商服务**提供（如小米 MiMo、Mossland）。API Key 由用户自行向对应运营商申请，相关服务条款、资费及可用性以运营商为准。本软件不代理、不转售任何运营商服务。
 - **关于 Edge TTS（免费引擎）**：它调用的是微软 Edge 浏览器"大声朗读"的**非官方接口**，免费、无需 Key，但**可能随时因微软调整接口而失效**，且**部分地区可能受限（403）**。该引擎仅作免费备选，其失效不属于本软件缺陷；商用请自行评估合规风险。
+- 在线插件安装前会进行 SHA-256 完整性校验；但拖入安装的第三方插件 zip 来源不可控，请自行确认来源安全。
 - 本软件**不收集、不上传任何用户个人信息**。API Key 仅保存在用户本地设备，消息与音频记录均存储于本地。
 - 使用本软件产生的任何后果（包括但不限于运营商服务费用、使用合规性）由用户自行承担。
 - 本软件按"现状"提供，不含任何明示或暗示的保证。详见 [MIT 许可证](./LICENSE)。
@@ -59,10 +92,3 @@ npm run tauri build   # 打包
 ## License
 
 [MIT](./LICENSE) © Mr-Shaw-Yihan
-
-## 计划备忘录
-1. 移动端输入
-2. 表情功能（表情注入音色情绪微调）
-3. 翻译、语音双向转换
-4. 语音输入（变声器？电子键盘？）
-5. 支持本地tts引擎接入，提供更快的响应速度以及音色自定义能力

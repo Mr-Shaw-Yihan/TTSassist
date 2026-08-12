@@ -16,6 +16,12 @@ import { playStartChime, playEndChime } from "../utils/chime";
 export function useVoiceInputHotkey() {
   const recorderRef = useRef<AudioRecorder | null>(null);
   const timerRef = useRef<number | null>(null);
+  /** startRecording 正在异步启动（申请麦克风等），防止重复进入与竞态判定 */
+  const startingRef = useRef(false);
+  /** 录音还没启动完成就已松开快捷键 → 启动完成后立即静默取消 */
+  const releasedEarlyRef = useRef(false);
+  /** 已加载 ASR 插件 id 缓存（挂载时预查，省掉按下时的 IPC 往返） */
+  const pluginIdCacheRef = useRef<string | null>(null);
 
   useEffect(() => {
     let unPressed: (() => void) | null = null;
@@ -37,33 +43,56 @@ export function useVoiceInputHotkey() {
     }
 
     async function startRecording() {
+      // 上一次按下还没启动完（或已在录音/转写）→ 忽略本次按下
+      if (startingRef.current || store.getState().phase !== "idle") return;
       // 仅可见窗口处理（主窗/浮窗互斥，防止双录）
       const visible = await getCurrentWindow().isVisible().catch(() => true);
       if (!visible) return;
       if (store.getState().phase !== "idle") return;
+      startingRef.current = true;
+      releasedEarlyRef.current = false;
       const settings = useSettingsStore.getState().settings;
 
-      const pluginId = await pickPluginId();
+      let pluginId = pluginIdCacheRef.current;
       if (!pluginId) {
+        pluginId = await pickPluginId();
+        pluginIdCacheRef.current = pluginId;
+      }
+      if (!pluginId) {
+        startingRef.current = false;
         store.getState().set({ error: "暂无可用的语音识别插件，请先安装 ASR 插件" });
         return;
       }
 
+      // 提示音提前到麦克风启动前播放：按下即有反馈，不等 getUserMedia
+      playStartChime();
       try {
         const recorder = new AudioRecorder();
         await recorder.start(settings?.voice_input_device || undefined);
+        if (releasedEarlyRef.current) {
+          // 启动期间已松开：不产生录音，静默取消（修复"松手后仍在录"）
+          recorder.cancel();
+          startingRef.current = false;
+          return;
+        }
         recorderRef.current = recorder;
-        playStartChime();
         store.getState().set({ phase: "recording", recorder, seconds: 0, error: null });
         timerRef.current = window.setInterval(() => {
           store.getState().set({ seconds: store.getState().seconds + 1 });
         }, 1000);
+        startingRef.current = false;
       } catch (e) {
+        startingRef.current = false;
         store.getState().set({ error: `${e}` });
       }
     }
 
     async function stopRecording() {
+      // 录音还没启动完成就松开 → 记标记，启动完成后自行取消，这里直接返回
+      if (startingRef.current) {
+        releasedEarlyRef.current = true;
+        return;
+      }
       if (store.getState().phase !== "recording") return;
       if (timerRef.current) {
         window.clearInterval(timerRef.current);
@@ -91,6 +120,8 @@ export function useVoiceInputHotkey() {
     }
 
     (async () => {
+      // 预查 ASR 插件（首次按下不用等 IPC）
+      pluginIdCacheRef.current = await pickPluginId();
       const a = await listen("voice-input:pressed", () => void startRecording());
       const b = await listen("voice-input:released", () => void stopRecording());
       if (cancelled) {

@@ -27,6 +27,16 @@ export async function installPluginZip(path: string): Promise<string> {
   return invoke<string>("install_plugin_zip", { path });
 }
 
+/** 导入离线资源包（网盘/群下载的 zip），解压到插件数据目录，返回提示文案 */
+export async function importOfflineResources(pluginId: string, zipPath: string): Promise<string> {
+  return invoke<string>("import_offline_resources", { pluginId, zipPath });
+}
+
+/** 清除下载失败的语音资源（GenieData 及下载中转），返回提示文案 */
+export async function cleanFailedResources(pluginId: string): Promise<string> {
+  return invoke<string>("clean_failed_resources", { pluginId });
+}
+
 /** 拉取官方插件索引 */
 export async function fetchPluginIndex(): Promise<PluginIndexEntry[]> {
   return invoke<PluginIndexEntry[]>("fetch_plugin_index");
@@ -91,6 +101,24 @@ export async function uninstallVoice(id: string, voiceId: string): Promise<strin
  *  有安装任务进行时后端直接跳过（仍返回成功）。 */
 export async function preloadVoice(id: string, voiceId: string): Promise<string> {
   return invoke<string>("preload_voice", { id, voiceId });
+}
+
+/** 本地引擎预热提示（通用机制，适用所有 category=local 的引擎）：
+ *  确认后后台启动引擎并加载当前音色权重，避免首次对话长时间等待。
+ *  预热走幂等快路径，绝不触发下载；失败静默（合成时还会幂等补齐）。 */
+export async function promptEngineWarmup(
+  pluginName: string,
+  pluginId: string,
+  voiceId: string,
+): Promise<void> {
+  const ok = window.confirm(
+    `「${pluginName}」是本地引擎，首次合成需要加载模型，会比较慢。\n` +
+      "是否现在在后台启动引擎？启动后第一次对话就不用久等了（不影响其他操作）。",
+  );
+  if (!ok) return;
+  await preloadVoice(pluginId, voiceId).catch(() => {
+    /* 预热失败不拦截，合成时还会幂等补齐 */
+  });
 }
 
 /** 导入用户自备音色包目录（插件校验布局后复制进数据目录，保留原文件）。 */
@@ -202,6 +230,27 @@ export async function pickVoicePackFolder(): Promise<string | null> {
   });
   if (typeof selected === "string") return selected;
   return null;
+}
+
+/** 弹文件选择器，选离线资源包 zip；返回绝对路径或 null（用户取消） */
+export async function pickResourcePackZip(): Promise<string | null> {
+  const selected = await open({
+    multiple: false,
+    title: "选择离线资源包（zip）",
+    filters: [{ name: "资源包", extensions: ["zip"] }],
+  });
+  if (typeof selected === "string") return selected;
+  return null;
+}
+
+/** 离线资源包导入完整流程：选 zip → 导入 → 结果提示。
+ *  返回是否完成了导入（false = 用户取消了文件选择）；导入出错时抛异常由调用方提示 */
+export async function importResourcePackFlow(pluginId: string): Promise<boolean> {
+  const zipPath = await pickResourcePackZip();
+  if (!zipPath) return false;
+  const msg = await importOfflineResources(pluginId, zipPath);
+  window.alert(msg);
+  return true;
 }
 
 // ── Settings ─────────────────────────────────────
