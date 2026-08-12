@@ -5,24 +5,30 @@
                         "name":  "Edge TTS（免费·微软）",
                         "version":  "0.1.0",
                         "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/edge-tts-0.1.0.zip",
-                        "checksum":  "c05c6e51d39fa3da6514dc793e393d6cd5e2c1ad4836d70fcf8dc0dded9e2f8b",
-                        "description":  "免费、无需 Key 的微软 Edge 语音（非官方接口，可能不稳定）"
+                        "mirror_url":  "https://gitee.com/yihwan/TTSassist/raw/dist/edge-tts-0.1.0.zip",
+                        "checksum":  "ba983d52a50569f939d695cdcc909fd8afe23acab4058b28389200ad25ea87d9",
+                        "description":  "免费、无需 Key 的微软 Edge 语音（非官方接口，可能不稳定）",
+                        "plugin_type":  "tts_engine"
                     },
                     {
                         "id":  "mimo-asr",
                         "name":  "MiMo ASR（小米·云端）",
                         "version":  "0.1.0",
                         "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/mimo-asr-0.1.0.zip",
-                        "checksum":  "61bd041284543cb60236a2e4943c3da96a2f246a4002582d2061016ede3fbb1f",
-                        "description":  "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测"
+                        "mirror_url":  "https://gitee.com/yihwan/TTSassist/raw/dist/mimo-asr-0.1.0.zip",
+                        "checksum":  "992fe054b81e19384e95c964c734aed6a8d47ef3197995fc0864be87a8428c0c",
+                        "description":  "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测",
+                        "plugin_type":  "asr_engine"
                     },
                     {
                         "id":  "genie-tts",
                         "name":  "Genie TTS（本地·离线）",
                         "version":  "0.1.0",
                         "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/genie-tts-0.1.0.zip",
-                        "checksum":  "11deeb2c9c68b02d37a99fd990acb5a5dd5b131a9fda49e9da258e4891bc5620",
-                        "description":  "GPT-SoVITS ONNX 本地推理引擎，CPU 离线合成，音色包可扩展（首次使用自动下载运行环境约 1.1GB，每个音色另约 320MB）"
+                        "mirror_url":  "https://gitee.com/yihwan/TTSassist/raw/dist/genie-tts-0.1.0.zip",
+                        "checksum":  "8f73d55febb6cffd0c6a72b8c0d073c544c9d8b329da09c05767e86203fe9752",
+                        "description":  "GPT-SoVITS ONNX 本地推理引擎，CPU 离线合成，音色包可扩展（首次使用自动下载运行环境约 1.1GB，每个音色另约 320MB）",
+                        "plugin_type":  "tts_engine"
                     }
                 ]
 }
