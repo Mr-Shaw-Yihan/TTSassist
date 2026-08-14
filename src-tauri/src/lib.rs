@@ -146,6 +146,39 @@ pub fn run() {
                 current: Mutex::new(vi_ok.then_some(vi_accel)),
             });
 
+            // 播放最近一条消息 / 开关麦克风快捷键：非空才注册，失败只记日志
+            let pl_accel = settings.hotkey_play_last.clone();
+            let pl_ok = if pl_accel.is_empty() {
+                false
+            } else {
+                match hotkey::register_play_last_hotkey(app.handle(), &pl_accel) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        eprintln!("注册播放最近消息快捷键 {pl_accel} 失败: {e}");
+                        false
+                    }
+                }
+            };
+            app.manage(hotkey::PlayLastHotkeyState {
+                current: Mutex::new(pl_ok.then_some(pl_accel)),
+            });
+
+            let mt_accel = settings.hotkey_mic_toggle.clone();
+            let mt_ok = if mt_accel.is_empty() {
+                false
+            } else {
+                match hotkey::register_mic_toggle_hotkey(app.handle(), &mt_accel) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        eprintln!("注册麦克风开关快捷键 {mt_accel} 失败: {e}");
+                        false
+                    }
+                }
+            };
+            app.manage(hotkey::MicToggleHotkeyState {
+                current: Mutex::new(mt_ok.then_some(mt_accel)),
+            });
+
             // 加载收藏用于注册收藏快捷键（data_dir 随后移入 AppState）
             let favorites = storage::favorites::load_favorites(&data_dir);
 
@@ -204,6 +237,8 @@ pub fn run() {
             crate::asr::asr_transcribe,
             crate::hotkey::set_hotkey,
             crate::hotkey::set_voice_input_hotkey,
+            crate::hotkey::set_play_last_hotkey,
+            crate::hotkey::set_mic_toggle_hotkey,
             crate::show_main_window,
         ])
         .run(tauri::generate_context!())

@@ -194,12 +194,14 @@ export async function importFavorite(
   return invoke<Favorite>("import_favorite", { filePath, note });
 }
 
-/** 为收藏设置快捷键（后端检测冲突，冲突时抛错） */
+/** 为收藏设置快捷键（后端检测冲突，冲突时抛错）；
+ *  takeover=true 时与其它收藏冲突会先解绑对方再绑定（前端需先弹确认） */
 export async function setFavoriteHotkey(
   id: string,
   hotkey: string,
+  takeover = false,
 ): Promise<Favorite[]> {
-  return invoke<Favorite[]>("set_favorite_hotkey", { id, hotkey });
+  return invoke<Favorite[]>("set_favorite_hotkey", { id, hotkey, takeover });
 }
 
 /** 移除收藏的快捷键 */
@@ -352,6 +354,16 @@ export async function setHotkey(accel: string): Promise<void> {
 /** 设置语音输入快捷键（按住说话）；空串 = 清除 */
 export async function setVoiceInputHotkey(accel: string): Promise<void> {
   return invoke<void>("set_voice_input_hotkey", { accel });
+}
+
+/** 设置「播放最近一条消息」快捷键；空串 = 清除 */
+export async function setPlayLastHotkey(accel: string): Promise<void> {
+  return invoke<void>("set_play_last_hotkey", { accel });
+}
+
+/** 设置「开关发送到麦克风」快捷键；空串 = 清除 */
+export async function setMicToggleHotkey(accel: string): Promise<void> {
+  return invoke<void>("set_mic_toggle_hotkey", { accel });
 }
 
 // ── VB-CABLE 驱动下载与安装 ───────────────────

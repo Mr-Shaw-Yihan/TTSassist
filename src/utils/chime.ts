@@ -1,5 +1,6 @@
 // 叮咚提示音：Web Audio 振荡器合成，无需音频素材文件。
 // 开始录音 = 上行两音（叮~咚），结束录音 = 下行两音（咚~叮），听感可区分起止。
+// 麦克风开关 = 上行/下行三音（大三和弦），与录音两音区分。
 
 let ctx: AudioContext | null = null;
 
@@ -44,6 +45,32 @@ export function playEndChime() {
     const t = ac.currentTime;
     tone(ac, 880.0, t, 0.16);
     tone(ac, 659.25, t + 0.16, 0.22);
+  } catch {
+    /* 音频不可用时静默 */
+  }
+}
+
+/** 上行三音（C5→E5→G5，C 大三和弦）：发送到麦克风开启 */
+export function playMicOnChime() {
+  try {
+    const ac = audioCtx();
+    const t = ac.currentTime;
+    tone(ac, 523.25, t, 0.12);
+    tone(ac, 659.25, t + 0.12, 0.12);
+    tone(ac, 783.99, t + 0.24, 0.2);
+  } catch {
+    /* 音频不可用时静默 */
+  }
+}
+
+/** 下行三音（G5→E5→C5，C 大三和弦反向）：发送到麦克风关闭 */
+export function playMicOffChime() {
+  try {
+    const ac = audioCtx();
+    const t = ac.currentTime;
+    tone(ac, 783.99, t, 0.12);
+    tone(ac, 659.25, t + 0.12, 0.12);
+    tone(ac, 523.25, t + 0.24, 0.2);
   } catch {
     /* 音频不可用时静默 */
   }

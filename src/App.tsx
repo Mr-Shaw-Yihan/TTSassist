@@ -9,6 +9,7 @@ import { InputBox } from "./components/Chat/InputBox";
 import { MessageBubble } from "./components/Chat/MessageBubble";
 import { VolumeControl } from "./components/Chat/VolumeSlider";
 import { MicToggle } from "./components/Chat/MicToggle";
+import { MicIcon } from "./components/icons/MicIcon";
 import { FavoriteList } from "./components/Favorites/FavoriteList";
 import { SettingsPage } from "./components/Settings/SettingsPage";
 import { QuickInput } from "./components/QuickInput/QuickInput";
@@ -17,6 +18,7 @@ import { UpdateDialog } from "./components/Settings/UpdateDialog";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "./stores/updateStore";
 import { usePluginTaskStore } from "./stores/pluginTaskStore";
+import { playMicOnChime, playMicOffChime } from "./utils/chime";
 import {
   generateTTS,
   listMessages,
@@ -24,6 +26,7 @@ import {
   getSettings,
   getAudioUrl,
   playToMic,
+  stopMic,
   listPlugins,
   promptEngineWarmup,
 } from "./services/invoke";
@@ -58,6 +61,10 @@ function App() {
   const settings = useSettingsStore((s) => s.settings);
   const setSettings = useSettingsStore((s) => s.setSettings);
   const patch = useSettingsStore((s) => s.patch);
+  // 麦克风发送状态指示（标题栏图标）：开关开启且已配置设备 = 生效中（绿色），与 MicToggle 口径一致
+  const micSendOn =
+    (settings?.mic_send_enabled ?? false) &&
+    !!(settings?.mic_output_device && settings.mic_output_device.trim());
 
   // 版本更新状态
   const updateLatest = useUpdateStore((s) => s.latest);
@@ -260,8 +267,19 @@ function App() {
     }
   }, [volume, playbackRate]);
 
-  // 互斥播放：停旧 → 设新 → 播放
-  const playAudio = useCallback(async (relPath: string) => {
+  // 互斥播放：停旧 → 设新 → 播放；再次点击正在播的同一条 → 停止（扬声器 + 虚拟麦克风）。
+  // 返回 true=开始播放 / false=停止，供 playAudioWithMic 判断是否还要发麦克风。
+  const playAudio = useCallback(async (relPath: string): Promise<boolean> => {
+    const cur = playingRef.current;
+    if (playingPathRef.current === relPath && cur && !cur.paused) {
+      cur.pause();
+      playingRef.current = null;
+      playingPathRef.current = null;
+      setPlayingPath(null);
+      // 虚拟麦克风侧可能正在播同一条，同步停止（未在播时无副作用）
+      stopMic().catch(() => {});
+      return false;
+    }
     playingRef.current?.pause();
     const url = await getAudioUrl(relPath);
     const a = new Audio(url);
@@ -278,6 +296,7 @@ function App() {
     playingRef.current = a;
     playingPathRef.current = relPath;
     setPlayingPath(relPath);
+    return true;
   }, [volume, playbackRate]);
 
   // 手动播放（收藏/消息重播）：扬声器 + 若全局开关开启则同时发虚拟麦克风。
@@ -287,7 +306,8 @@ function App() {
   const micDevice = settings?.mic_output_device ?? "";
   const micVolume = settings?.mic_playback_volume ?? 1.0;
   const playAudioWithMic = useCallback(async (relPath: string) => {
-    await playAudio(relPath);
+    const started = await playAudio(relPath);
+    if (!started) return; // 再次点击停止：不再发麦克风
     if (micEnabled && micDevice.trim()) {
       try {
         await playToMic(relPath, micDevice, micVolume);
@@ -307,6 +327,17 @@ function App() {
     void playAudio(payload);
   }, [playAudio]);
 
+  // 「播放最近一条消息」全局快捷键：用 ref 拿最新消息（避免闭包捕获旧值），
+  // 走 playAudioWithMic（扬声器 + 开关开启时发虚拟麦克风，与手动重播一致）
+  const messagesRef = useRef<Message[]>([]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+  useTauriListen("playback:play-last", () => {
+    const last = messagesRef.current[messagesRef.current.length - 1];
+    if (last) void playAudioWithMic(last.audio_path);
+  }, [playAudioWithMic]);
+
   // 监听 settings:changed，重读 settings 到 store（克隆命令在别处改 settings 时同步）
   useTauriListen("settings:changed", async () => {
     try {
@@ -315,6 +346,19 @@ function App() {
       console.error("重读设置失败", e);
     }
   }, [setSettings]);
+
+  // 「发送到麦克风」开关音效：开启上行音 / 关闭下行音。
+  // 三条切换路径（主窗按钮 / 浮窗按钮 / 全局快捷键）最终都落在这个 store 值上，
+  // 此处集中监听，避免多个 MicToggle 实例重复播音；首次加载不播。
+  const micSendRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    const cur = settings?.mic_send_enabled ?? false;
+    const prev = micSendRef.current;
+    micSendRef.current = cur;
+    if (prev === null || prev === cur) return;
+    if (cur) playMicOnChime();
+    else playMicOffChime();
+  }, [settings?.mic_send_enabled]);
 
   // 语音输入全局快捷键会话（按住说话）：录音状态展示在 InputBox
   useVoiceInputHotkey();
@@ -364,6 +408,17 @@ function App() {
         <div data-tauri-drag-region className="flex min-w-0 flex-1 items-baseline gap-2">
           <span className="font-display text-sm text-[var(--ink-900)] tracking-tight">电子声带</span>
           <span className="text-[9px] text-[var(--ink-300)] tracking-[0.3em] uppercase">TTSassist</span>
+          {/* 麦克风发送状态指示：开启发绿，未开启为灰色描边 */}
+          <span
+            title={micSendOn ? "发送到麦克风：已开启" : "发送到麦克风：未开启"}
+            className="self-center"
+          >
+            <MicIcon
+              size={13}
+              filled={micSendOn}
+              className={["transition-colors", micSendOn ? "text-emerald-600" : "text-[var(--ink-300)]"].join(" ")}
+            />
+          </span>
         </div>
         {/* 窗口控制：最小化 / 最大化 / 关闭 */}
         <div className="flex h-full shrink-0 items-stretch">

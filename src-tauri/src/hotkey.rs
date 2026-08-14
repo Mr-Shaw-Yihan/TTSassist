@@ -28,6 +28,16 @@ pub struct VoiceInputHotkeyState {
     pub current: Mutex<Option<String>>,
 }
 
+/// 记录当前已注册的「播放最近一条消息」快捷键
+pub struct PlayLastHotkeyState {
+    pub current: Mutex<Option<String>>,
+}
+
+/// 记录当前已注册的「开关发送到麦克风」快捷键
+pub struct MicToggleHotkeyState {
+    pub current: Mutex<Option<String>>,
+}
+
 impl FavoriteHotkeys {
     pub fn new() -> Self {
         Self { registered: Mutex::new(HashSet::new()) }
@@ -85,6 +95,11 @@ pub fn set_hotkey(
     // 无变化则直接返回
     if current.as_deref() == Some(accel.as_str()) {
         return Ok(());
+    }
+
+    // 0. 冲突检测：与其它快捷键项（含收藏）重复时拒绝
+    if let Some(name) = find_accel_conflict(&app_state, &accel, Some("hotkey_show_window")) {
+        return Err(format!("快捷键 {accel} 已被「{name}」占用，请先清除或换一个"));
     }
 
     // 1. 先注册新快捷键（验证有效；失败则旧的保持不动）
@@ -157,6 +172,13 @@ pub fn set_voice_input_hotkey(
         return Ok(());
     }
 
+    // 冲突检测：与其它快捷键项（含收藏）重复时拒绝
+    if !accel.is_empty() {
+        if let Some(name) = find_accel_conflict(&app_state, &accel, Some("voice_input_hotkey")) {
+            return Err(format!("快捷键 {accel} 已被「{name}」占用，请先清除或换一个"));
+        }
+    }
+
     // 1. 先注册新快捷键（验证有效；失败则旧的保持不动）
     if !accel.is_empty() {
         register_voice_input_hotkey(&app, &accel)?;
@@ -213,6 +235,170 @@ fn register_favorite_hotkey(app: &AppHandle, hotkey: &str, audio_path: String) -
             let _ = app.emit("favorite:play", audio_path.clone());
         })
         .map_err(|e| format!("注册收藏快捷键失败：{e}"))
+}
+
+/// 注册「播放最近一条消息」快捷键：按下时通知前端播最近一条消息的音频
+/// （扬声器 + 开关开启时发虚拟麦克风，均由前端 playAudioWithMic 处理）。
+pub fn register_play_last_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
+    app.global_shortcut()
+        .on_shortcut(accel, |app, _shortcut, event| {
+            if event.state() != ShortcutState::Pressed {
+                return;
+            }
+            let _ = app.emit("playback:play-last", ());
+        })
+        .map_err(|e| format!("注册播放最近消息快捷键失败：{e}"))
+}
+
+/// 注册「开关发送到麦克风」快捷键：按下时翻转 mic_send_enabled（持久化 + 通知前端刷新）。
+pub fn register_mic_toggle_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
+    app.global_shortcut()
+        .on_shortcut(accel, |app, _shortcut, event| {
+            if event.state() != ShortcutState::Pressed {
+                return;
+            }
+            let Some(state) = app.try_state::<AppState>() else { return };
+            // 先翻转内存态再持久化（锁作用域尽量短）
+            let new_val = match state.settings.write() {
+                Ok(mut s) => {
+                    s.mic_send_enabled = !s.mic_send_enabled;
+                    s.mic_send_enabled
+                }
+                Err(_) => return,
+            };
+            if let Err(e) = crate::storage::settings::update_setting(
+                &state.data_dir,
+                "mic_send_enabled",
+                serde_json::json!(new_val),
+            ) {
+                eprintln!("持久化麦克风开关失败: {e}");
+            }
+            notify_changed(app, EVENT_SETTINGS_CHANGED);
+        })
+        .map_err(|e| format!("注册麦克风开关快捷键失败：{e}"))
+}
+
+/// 检测快捷键是否已被其它项占用（四项全局快捷键 + 全部收藏），返回冲突方名称。
+/// exclude_key：正在设置的设置项自身（跳过，不算冲突）。
+pub fn find_accel_conflict(app_state: &AppState, accel: &str, exclude_key: Option<&str>) -> Option<String> {
+    let s = match app_state.settings.read() {
+        Ok(s) => s.clone(),
+        Err(_) => return None,
+    };
+    if exclude_key != Some("hotkey_show_window") && s.hotkey_show_window == accel {
+        return Some("呼出浮窗".to_string());
+    }
+    if exclude_key != Some("voice_input_hotkey") && !s.voice_input_hotkey.is_empty() && s.voice_input_hotkey == accel {
+        return Some("语音输入".to_string());
+    }
+    if exclude_key != Some("hotkey_play_last") && !s.hotkey_play_last.is_empty() && s.hotkey_play_last == accel {
+        return Some("播放最近一条消息".to_string());
+    }
+    if exclude_key != Some("hotkey_mic_toggle") && !s.hotkey_mic_toggle.is_empty() && s.hotkey_mic_toggle == accel {
+        return Some("开关发送到麦克风".to_string());
+    }
+    let favorites = crate::storage::favorites::load_favorites(&app_state.data_dir);
+    favorites
+        .iter()
+        .find(|f| f.hotkey.as_deref() == Some(accel))
+        .map(|f| format!("收藏「{}」", f.note))
+}
+
+/// 通用「设置/清除快捷键」流程（供可清除的快捷键共用）：
+/// 无变化直接返回 → 冲突检测 → 注册新（非空；失败则旧的保持）→ 注销旧 → 更新状态 → 持久化 + 同步内存 + 广播。
+fn replace_hotkey(
+    app: &AppHandle,
+    state_lock: &Mutex<Option<String>>,
+    accel: &str,
+    setting_key: &str,
+    register: fn(&AppHandle, &str) -> Result<(), String>,
+    app_state: &AppState,
+) -> Result<(), String> {
+    let current = state_lock
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or(None);
+    if current.as_deref() == Some(accel) || (accel.is_empty() && current.is_none()) {
+        return Ok(());
+    }
+
+    // 1. 冲突检测：与其它快捷键项（含收藏）重复时拒绝，避免同一组合键触发多个动作
+    if !accel.is_empty() {
+        if let Some(name) = find_accel_conflict(app_state, accel, Some(setting_key)) {
+            return Err(format!("快捷键 {accel} 已被「{name}」占用，请先清除或换一个"));
+        }
+    }
+
+    // 2. 先注册新快捷键（验证有效；失败则旧的保持不动）
+    if !accel.is_empty() {
+        register(app, accel)?;
+    }
+
+    // 3. 注销旧快捷键
+    if let Some(old) = current.as_ref() {
+        if old != accel {
+            let _ = app.global_shortcut().unregister(old.as_str());
+        }
+    }
+
+    // 4. 更新状态
+    if let Ok(mut g) = state_lock.lock() {
+        *g = if accel.is_empty() { None } else { Some(accel.to_string()) };
+    }
+
+    // 5. 持久化 + 同步内存 settings + 广播
+    crate::storage::settings::update_setting(
+        &app_state.data_dir,
+        setting_key,
+        serde_json::json!(accel),
+    )
+    .map_err(|e| format!("保存快捷键失败：{e}"))?;
+    if let Ok(mut g) = app_state.settings.write() {
+        match setting_key {
+            "hotkey_play_last" => g.hotkey_play_last = accel.to_string(),
+            "hotkey_mic_toggle" => g.hotkey_mic_toggle = accel.to_string(),
+            _ => {}
+        }
+    }
+    notify_changed(app, EVENT_SETTINGS_CHANGED);
+
+    Ok(())
+}
+
+/// 设置（更换/清除）「播放最近一条消息」快捷键。空串 = 注销并清除。
+#[tauri::command]
+pub fn set_play_last_hotkey(
+    app: AppHandle,
+    accel: String,
+    state: State<'_, PlayLastHotkeyState>,
+    app_state: State<'_, crate::commands::AppState>,
+) -> Result<(), String> {
+    replace_hotkey(
+        &app,
+        &state.current,
+        accel.trim(),
+        "hotkey_play_last",
+        register_play_last_hotkey,
+        &app_state,
+    )
+}
+
+/// 设置（更换/清除）「开关发送到麦克风」快捷键。空串 = 注销并清除。
+#[tauri::command]
+pub fn set_mic_toggle_hotkey(
+    app: AppHandle,
+    accel: String,
+    state: State<'_, MicToggleHotkeyState>,
+    app_state: State<'_, crate::commands::AppState>,
+) -> Result<(), String> {
+    replace_hotkey(
+        &app,
+        &state.current,
+        accel.trim(),
+        "hotkey_mic_toggle",
+        register_mic_toggle_hotkey,
+        &app_state,
+    )
 }
 
 /// 刷新所有收藏快捷键：先注销已注册的全部收藏快捷键，再为所有带快捷键的收藏重新注册。

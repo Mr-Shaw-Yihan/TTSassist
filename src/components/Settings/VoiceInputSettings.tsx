@@ -1,14 +1,13 @@
 // 输入设备设置（ASR 插件的语音输入配置）：
-// 触发快捷键（按住说话） + ASR 插件选择 + 识别语言 + 录音设备 + 端到端测试。
+// ASR 插件选择 + 识别语言 + 录音设备 + 端到端测试（触发快捷键已移至「设置-快捷键」）。
 // 设备枚举说明：浏览器只在授予麦克风权限后才返回设备名（label），
 // 未授权时显示「授权麦克风」按钮引导用户开启。
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { listAsrPlugins, asrTranscribe, setVoiceInputHotkey } from "../../services/invoke";
+import { listAsrPlugins, asrTranscribe } from "../../services/invoke";
 import { AudioRecorder } from "../../utils/audioRecorder";
 import { VolumeMeter } from "../Chat/VolumeMeter";
-import { HotkeyRecorder } from "./HotkeyRecorder";
 import type { AsrPluginInfo } from "../../types";
 
 /** enumerateDevices 拿到的输入设备（只留我们需要的字段） */
@@ -153,36 +152,6 @@ export function VoiceInputSettings() {
 
   return (
     <div className="space-y-3">
-      {/* 触发快捷键（按住说话） */}
-      <div>
-        <label className="mb-1 block text-[11px] text-[var(--ink-300)]">触发快捷键（按住说话）</label>
-        <div className="flex items-center gap-2">
-          <div className="min-w-0 flex-1">
-            <HotkeyRecorder
-              value={settings?.voice_input_hotkey ?? ""}
-              onApply={setVoiceInputHotkey}
-            />
-          </div>
-          {settings?.voice_input_hotkey && (
-            <button
-              onClick={async () => {
-                try {
-                  await setVoiceInputHotkey("");
-                } catch (e) {
-                  window.alert(`清除快捷键失败：${e}`);
-                }
-              }}
-              className="shrink-0 rounded-lg border border-[var(--ink-200)] px-2.5 py-2 text-xs text-[var(--ink-300)] transition-colors hover:border-[var(--seal)] hover:text-[var(--seal)]"
-            >
-              清除
-            </button>
-          )}
-        </div>
-        <p className="mt-1 text-[10px] leading-relaxed text-[var(--ink-300)]">
-          按下快捷键响叮咚声并开始录音，松开快捷键再响一声并自动识别，结果填入输入框。
-        </p>
-      </div>
-
       {/* ASR 插件选择 */}
       <div>
         <label className="mb-1 block text-[11px] text-[var(--ink-300)]">识别插件</label>

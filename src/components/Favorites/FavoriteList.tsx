@@ -90,10 +90,18 @@ export function FavoriteList({ favorites, playingPath, onPlay, onChanged }: Prop
     }
   }
 
-  // 设置快捷键（后端检测冲突，冲突时抛错 → 弹提示）
+  // 设置快捷键：与其它收藏冲突时先弹确认（是否解绑原收藏），后端仍做安全兜底检测
   async function handleSetHotkey(id: string, hotkey: string) {
+    const conflict = favorites.find((f) => f.id !== id && f.hotkey === hotkey);
+    let takeover = false;
+    if (conflict) {
+      takeover = window.confirm(
+        `快捷键 ${hotkey} 已绑定到收藏「${conflict.note}」。\n是否解绑该收藏，改为绑定当前收藏？`,
+      );
+      if (!takeover) return;
+    }
     try {
-      await setFavoriteHotkey(id, hotkey);
+      await setFavoriteHotkey(id, hotkey, takeover);
       setCapturingId(null);
       onChanged();
     } catch (e) {

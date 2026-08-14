@@ -54,6 +54,7 @@ pub fn add_favorite(
 }
 
 /// 删除一条收藏（存储层自动处理：收藏删除后音频无引用则清除）。
+/// 被删收藏若带快捷键，同步注销其全局快捷键注册（否则残留注册无法再取消）。
 #[tauri::command]
 pub fn delete_favorite(
     id: String,
@@ -64,6 +65,9 @@ pub fn delete_favorite(
     let result = crate::storage::favorites::delete_favorite(data_dir, &id)
         .map_err(|e| format!("删除收藏失败: {e}"))?;
     if result {
+        // 刷新快捷键注册：注销已删收藏残留的全局快捷键
+        let remaining = crate::storage::favorites::load_favorites(data_dir);
+        crate::hotkey::refresh_favorite_hotkeys(&app, &remaining)?;
         notify_changed(&app, EVENT_FAVORITE_CHANGED);
     }
     Ok(result)
@@ -123,39 +127,48 @@ pub fn import_favorite(
 }
 
 /// 为某收藏设置快捷键（含冲突检测），设置后刷新全局快捷键注册。
+/// takeover=true：与其它收藏冲突时先解绑对方再绑定当前收藏（前端已弹确认）。
 #[tauri::command]
 pub fn set_favorite_hotkey(
     app: AppHandle,
     state: State<'_, AppState>,
     id: String,
     hotkey: String,
+    takeover: Option<bool>,
 ) -> Result<Vec<Favorite>, String> {
     let hotkey = hotkey.trim().to_string();
     if hotkey.is_empty() {
         return Err("快捷键不能为空".into());
     }
 
-    // 冲突检测 1：与浮窗呼出快捷键相同
-    let floating_hotkey = state
-        .settings
-        .read()
-        .map(|s| s.hotkey_show_window.clone())
-        .unwrap_or_default();
-    if hotkey == floating_hotkey {
-        return Err("与「呼出浮窗」快捷键冲突，请换一个".into());
+    // 冲突检测 1：与全局快捷键项（浮窗/语音输入/播放最近消息/麦克风开关）相同
+    if let Some(name) = crate::hotkey::find_accel_conflict(&state, &hotkey, None) {
+        return Err(format!("与「{name}」的快捷键冲突，请换一个"));
     }
 
     // 冲突检测 2：与其它收藏的快捷键相同
     let favorites = crate::storage::favorites::load_favorites(&state.data_dir);
-    for fav in &favorites {
-        if fav.id != id && fav.hotkey.as_deref() == Some(hotkey.as_str()) {
-            return Err(format!("与收藏「{}」的快捷键冲突，请换一个", fav.note));
+    let conflict = favorites
+        .iter()
+        .find(|f| f.id != id && f.hotkey.as_deref() == Some(hotkey.as_str()));
+    let updated = match (conflict, takeover.unwrap_or(false)) {
+        (Some(f), true) => {
+            // 接管：先解绑冲突收藏的快捷键，再绑定当前收藏
+            crate::storage::favorites::set_favorite_hotkey(&state.data_dir, &f.id, None)
+                .map_err(|e| format!("{e}"))?;
+            crate::storage::favorites::set_favorite_hotkey(&state.data_dir, &id, Some(hotkey))
+                .map_err(|e| format!("{e}"))?
         }
-    }
-
-    // 写入快捷键
-    let updated = crate::storage::favorites::set_favorite_hotkey(&state.data_dir, &id, Some(hotkey))
-        .map_err(|e| format!("{e}"))?;
+        (Some(f), false) => {
+            return Err(format!("与收藏「{}」的快捷键冲突，请换一个", f.note));
+        }
+        (None, _) => crate::storage::favorites::set_favorite_hotkey(
+            &state.data_dir,
+            &id,
+            Some(hotkey),
+        )
+        .map_err(|e| format!("{e}"))?,
+    };
 
     // 刷新全局快捷键注册
     crate::hotkey::refresh_favorite_hotkeys(&app, &updated)?;

@@ -8,7 +8,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "../../stores/updateStore";
 import { usePluginTaskStore } from "../../stores/pluginTaskStore";
-import { importCloneVoice, removeCloneVoice, pickAudioFile, listPlugins, listAsrPlugins, setHotkey, preloadVoice, importResourcePackFlow, promptEngineWarmup, getRemoteConfig } from "../../services/invoke";
+import { importCloneVoice, removeCloneVoice, pickAudioFile, listPlugins, listAsrPlugins, setHotkey, setVoiceInputHotkey, setPlayLastHotkey, setMicToggleHotkey, preloadVoice, importResourcePackFlow, promptEngineWarmup, getRemoteConfig } from "../../services/invoke";
 import type { MossVoice, PluginInfo } from "../../types";
 import { HotkeyRecorder } from "./HotkeyRecorder";
 import { MicSettings } from "./MicSettings";
@@ -673,13 +673,37 @@ export function SettingsPage() {
             </Section>
           )}
 
-          {/* 快捷键 */}
+          {/* 快捷键：浮窗呼出 / 语音输入 / 播放最近一条消息 / 开关发送到麦克风 */}
           <Section title="快捷键">
-            <HotkeyRecorder
-              value={settings?.hotkey_show_window ?? "Alt+V"}
-              onApply={setHotkey}
-              hint="点「录入」后按下想要的组合键（如 Alt+V、Ctrl+Shift+F1）。"
-            />
+            <div className="space-y-4">
+              <HotkeyRow
+                label="呼出浮窗"
+                value={settings?.hotkey_show_window ?? "Alt+V"}
+                onApply={setHotkey}
+                hint="按下显示/收起快速输入浮窗。点「录入」后按下想要的组合键（如 Alt+V、Ctrl+Shift+F1）。"
+              />
+              <HotkeyRow
+                label="语音输入（按住说话）"
+                value={settings?.voice_input_hotkey ?? ""}
+                onApply={setVoiceInputHotkey}
+                clearable
+                hint="按住快捷键开始录音，松开自动识别并填入输入框（需已安装识别插件）。"
+              />
+              <HotkeyRow
+                label="播放最近一条消息"
+                value={settings?.hotkey_play_last ?? ""}
+                onApply={setPlayLastHotkey}
+                clearable
+                hint="按下即播最近一条消息的语音；麦克风发送开关开启时同时发到虚拟麦克风。"
+              />
+              <HotkeyRow
+                label="开关发送到麦克风"
+                value={settings?.hotkey_mic_toggle ?? ""}
+                onApply={setMicToggleHotkey}
+                clearable
+                hint="按下切换「语音是否发送到虚拟麦克风」开关，无需鼠标操作。"
+              />
+            </div>
           </Section>
 
           {/* 外观 */}
@@ -843,6 +867,55 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div>
       <h3 className="mb-2 text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--ink-300)]">{label}</h3>
       {children}
+    </div>
+  );
+}
+
+/** 快捷键设置行：琥珀竖条 + 衬线标题（与插件页分类标题同款）+ 描述 + 录入器 + 清除按钮 */
+function HotkeyRow({
+  label,
+  value,
+  onApply,
+  hint,
+  clearable = false,
+}: {
+  label: string;
+  value: string;
+  onApply: (accel: string) => Promise<void>;
+  hint?: string;
+  clearable?: boolean;
+}) {
+  return (
+    <div>
+      {/* 标题行：与插件页分类头部同款（琥珀竖条 + 衬线标题） */}
+      <div className="flex items-center gap-2">
+        <span className="h-3.5 w-[3px] shrink-0 rounded-full bg-[var(--amber-500)]" aria-hidden />
+        <h3 className="font-display text-sm font-semibold tracking-wide text-[var(--ink-900)]">
+          {label}
+        </h3>
+      </div>
+      {hint && (
+        <p className="mt-1 pl-[11px] text-[11px] leading-relaxed text-[var(--ink-300)]">{hint}</p>
+      )}
+      <div className="mt-2 flex items-center gap-2 pl-[11px]">
+        <div className="min-w-0 flex-1">
+          <HotkeyRecorder value={value} onApply={onApply} />
+        </div>
+        {clearable && value && (
+          <button
+            onClick={async () => {
+              try {
+                await onApply("");
+              } catch (e) {
+                window.alert(`清除快捷键失败：${e}`);
+              }
+            }}
+            className="shrink-0 rounded-lg border border-[var(--ink-200)] px-2.5 py-2 text-xs text-[var(--ink-300)] transition-colors hover:border-[var(--seal)] hover:text-[var(--seal)]"
+          >
+            清除
+          </button>
+        )}
+      </div>
     </div>
   );
 }

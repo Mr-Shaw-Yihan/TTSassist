@@ -1,11 +1,28 @@
 // 快捷键录入组件（通用）：点「录入」→ 按下组合键 → 自动识别 → 「应用」生效。
 // 游戏/Discord 标准的快捷键录入交互。
 // 泛化后供浮窗快捷键与语音输入快捷键共用：value 提供当前值，onApply 负责后端注册与持久化。
+// 互斥录制：全局同一时间只允许一个录入器处于录制态（模块级注册表 + 订阅通知）。
 
 import { useState, useEffect, useRef } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { getSettings } from "../../services/invoke";
 import { buildAccelerator } from "../../utils/accelerator";
+
+// ── 录制互斥注册表（模块级）：新录入器开始录制时，其它正在录制的自动退出 ──
+let activeRecorderId: number | null = null;
+const recorderListeners = new Set<(id: number | null) => void>();
+
+function claimRecorder(id: number) {
+  activeRecorderId = id;
+  recorderListeners.forEach((fn) => fn(id));
+}
+
+/** 释放录制权（幂等：仅当自己是当前持有者时才通知） */
+function releaseRecorder(id: number) {
+  if (activeRecorderId !== id) return;
+  activeRecorderId = null;
+  recorderListeners.forEach((fn) => fn(null));
+}
 
 interface Props {
   /** 当前已设置的快捷键（空串显示「未设置」） */
@@ -25,6 +42,8 @@ export function HotkeyRecorder({ value, onApply, hint }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
+  // 实例唯一 id（用于录制互斥注册表）
+  const idRef = useRef(Math.floor(Math.random() * 1e9));
 
   // 录入态监听键盘（全局，避免焦点丢失）
   useEffect(() => {
@@ -39,13 +58,35 @@ export function HotkeyRecorder({ value, onApply, hint }: Props) {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [recording]);
 
+  // 录制互斥：别的录入器开始录制时，自己退出录制态
+  useEffect(() => {
+    if (!recording) return;
+    const fn = (activeId: number | null) => {
+      if (activeId !== idRef.current) {
+        setRecording(false);
+        setPending(null);
+        setError(null);
+      }
+    };
+    recorderListeners.add(fn);
+    return () => {
+      recorderListeners.delete(fn);
+      releaseRecorder(idRef.current);
+    };
+  }, [recording]);
+
   function startRecording() {
     setRecording(true);
     setPending(null);
     setError(null);
+    // 异步认领：等本组件的订阅 effect 先挂载，再通知其它录入器退出，
+    // 避免同步通知时自己刚加的监听器被误触发（activeId 判断已兜底，此处双保险）
+    const id = idRef.current;
+    queueMicrotask(() => claimRecorder(id));
   }
 
   function cancelRecording() {
+    releaseRecorder(idRef.current);
     setRecording(false);
     setPending(null);
     setError(null);
@@ -64,6 +105,7 @@ export function HotkeyRecorder({ value, onApply, hint }: Props) {
     } catch (e) {
       setError(String(e));
     } finally {
+      releaseRecorder(idRef.current);
       setSaving(false);
     }
   }

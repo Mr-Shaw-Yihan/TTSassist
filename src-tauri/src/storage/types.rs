@@ -101,6 +101,12 @@ pub struct Settings {
     /// 语音输入录音设备 id（浏览器 deviceId，空=系统默认麦克风）
     #[serde(default)]
     pub voice_input_device: String,
+    /// 播放最近一条消息的全局快捷键（空=未设置）
+    #[serde(default)]
+    pub hotkey_play_last: String,
+    /// 开关「发送到麦克风」的全局快捷键（空=未设置）
+    #[serde(default)]
+    pub hotkey_mic_toggle: String,
 }
 
 impl Default for Settings {
@@ -132,6 +138,8 @@ impl Default for Settings {
             voice_input_hotkey: String::new(),
             voice_input_enabled: true,
             voice_input_device: String::new(),
+            hotkey_play_last: String::new(),
+            hotkey_mic_toggle: String::new(),
         }
     }
 }

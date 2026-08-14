@@ -26,6 +26,12 @@ export function QuickInput() {
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const inpRef = useRef<HTMLInputElement | null>(null);
   const setSettings = useSettingsStore((s) => s.setSettings);
+  // 麦克风发送状态指示（标题栏图标）：开关开启且已配置设备 = 生效中（绿色）
+  const micSendOn = useSettingsStore(
+    (s) =>
+      (s.settings?.mic_send_enabled ?? false) &&
+      !!(s.settings?.mic_output_device && s.settings.mic_output_device.trim()),
+  );
 
   // 语音输入全局快捷键会话（按住说话）：浮窗是游戏内主场景，必须支持
   useVoiceInputHotkey();
@@ -157,6 +163,14 @@ export function QuickInput() {
         >
           <span className="text-[var(--ink-300)]">⠿</span>
           <span className="font-display text-xs text-[var(--ink-500)]">电子声带</span>
+          {/* 麦克风发送状态指示：开启发绿，未开启为灰色描边 */}
+          <span title={micSendOn ? "发送到麦克风：已开启" : "发送到麦克风：未开启"}>
+            <MicIcon
+              size={11}
+              filled={micSendOn}
+              className={["transition-colors", micSendOn ? "text-emerald-600" : "text-[var(--ink-300)]"].join(" ")}
+            />
+          </span>
         </div>
         {/* 语音输入按钮（点击切换录音；快捷键见 title 提示） */}
         <button
