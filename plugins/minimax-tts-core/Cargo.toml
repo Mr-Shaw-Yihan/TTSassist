@@ -1,0 +1,15 @@
+[package]
+name = "minimax-tts-core"
+version = "0.1.0"
+description = "MiniMax TTS API 共享核心库（国内版 + 国际版插件共用）"
+edition = "2021"
+
+[lib]
+# 静态库，供两个插件 crate 链接（不单独产出 dll）
+crate-type = ["rlib"]
+
+[dependencies]
+plugin-api = { path = "../plugin-api" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "2", features = ["json"] }

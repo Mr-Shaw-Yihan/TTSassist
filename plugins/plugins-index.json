@@ -1,0 +1,44 @@
+{
+    "plugins":  [
+                    {
+                        "id":  "edge-tts",
+                        "name":  "Edge TTS (Free/Microsoft)",
+                        "version":  "1.0.0",
+                        "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/edge-tts-1.0.0.zip",
+                        "mirror_url":  "https://gitee.com/yihwan/TTSassist/raw/dist/edge-tts-1.0.0.zip",
+                        "checksum":  "aea047a65bbf5e199a73912d73858115522cd03f551c9c89a79fca5d9fc50a85",
+                        "description":  "Free Microsoft Edge TTS, no API key required (unofficial API)",
+                        "plugin_type":  "tts_engine"
+                    },
+                    {
+                        "id":  "genie-tts",
+                        "name":  "Genie TTS (Local/Offline)",
+                        "version":  "0.1.0",
+                        "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/genie-tts-0.1.0.zip",
+                        "mirror_url":  "https://gitee.com/yihwan/TTSassist/raw/dist/genie-tts-0.1.0.zip",
+                        "checksum":  "a3eb9bfb4692d96863e17b57f2ce40d1741ad15149ada91de5d6c4a66fea1a14",
+                        "description":  "GPT-SoVITS ONNX local inference, CPU offline, expandable voice packs",
+                        "plugin_type":  "tts_engine"
+                    },
+                    {
+                        "id":  "minimax-tts",
+                        "name":  "MiniMax TTS（国内版）",
+                        "version":  "0.2.0",
+                        "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-0.2.0.zip",
+                        "mirror_url":  "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-0.2.0.zip",
+                        "checksum":  "8a36ee550b95ac03c20472906a48baa31e3dc6c59a41e1c2bab17e64755df2f9",
+                        "description":  "MiniMax 云端语音合成（国内版·阉割版），需 API Key，50+ 音色、40 种语言，不支持音色克隆",
+                        "plugin_type":  "tts_engine"
+                    },
+                    {
+                        "id":  "minimax-tts-global",
+                        "name":  "MiniMax TTS（国际版）",
+                        "version":  "0.2.0",
+                        "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-global-0.2.0.zip",
+                        "mirror_url":  "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-global-0.2.0.zip",
+                        "checksum":  "ab8863c6ef48d6de4d139bee8d1e8f3088ca7a6bd6a6ae3a0f1b9a66f4b252d6",
+                        "description":  "MiniMax 云端语音合成（国际版），需 API Key，50+ 音色、40 种语言，支持音色克隆与音色管理",
+                        "plugin_type":  "tts_engine"
+                    }
+                ]
+}

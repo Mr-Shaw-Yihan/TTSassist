@@ -39,6 +39,21 @@ pub fn update_setting(
         .map_err(|e| format!("更新内存设置失败: {e}"))?;
     *guard = settings.clone();
 
+    // MiniMax Key 变更时同步环境变量（插件下次合成即可读到新值）
+    match key.as_str() {
+        "minimax_api_key" => {
+            if !settings.minimax_api_key.is_empty() {
+                std::env::set_var("MINIMAX_API_KEY", &settings.minimax_api_key);
+            }
+        }
+        "minimax_global_api_key" => {
+            if !settings.minimax_global_api_key.is_empty() {
+                std::env::set_var("MINIMAX_GLOBAL_API_KEY", &settings.minimax_global_api_key);
+            }
+        }
+        _ => {}
+    }
+
     notify_changed(&app, EVENT_SETTINGS_CHANGED);
 
     Ok(settings)

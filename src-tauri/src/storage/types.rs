@@ -69,6 +69,15 @@ pub struct Settings {
     pub theme: String,
     /// Moss-TTS API Key（Authorization: Bearer <key>）
     pub moss_api_key: String,
+    /// MiniMax TTS 国内版 API Key
+    #[serde(default)]
+    pub minimax_api_key: String,
+    /// MiniMax TTS 国际版 API Key
+    #[serde(default)]
+    pub minimax_global_api_key: String,
+    /// MiniMax 国际版本地记录的克隆音色 id（克隆音色首次合成前 get_voice 查不到，本地保证下拉可用）
+    #[serde(default)]
+    pub minimax_global_cloned_voices: Vec<String>,
     /// Moss-TTS 当前选中音色 id（需在 moss 控制台创建后填入）
     pub moss_voice_id: String,
     /// Moss-TTS 音色库（用户手动维护，默认含"曼波"）
@@ -101,6 +110,9 @@ impl Default for Settings {
             clone_voice_path: String::new(),
             theme: "light".to_string(),
             moss_api_key: String::new(),
+            minimax_api_key: String::new(),
+            minimax_global_api_key: String::new(),
+            minimax_global_cloned_voices: Vec::new(),
             moss_voice_id: "11d3a27a-0951-4bcd-96ae-ab414f454764".to_string(),
             moss_voices: vec![MossVoice {
                 name: "曼波".to_string(),
