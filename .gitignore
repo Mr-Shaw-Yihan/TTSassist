@@ -22,6 +22,9 @@ plugins/mimo-asr/target/
 plugins/mimo-asr/dist/
 plugins/mimo-asr/Cargo.lock
 plugins/genie-tts/target/
+plugins/minimax-tts/target/
+plugins/minimax-tts-global/target/
+plugins/minimax-tts-core/target/
 plugins/genie-tts/dist/
 
 # Editor directories and files

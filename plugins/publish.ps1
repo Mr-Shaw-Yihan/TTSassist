@@ -36,7 +36,9 @@ $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $Plugins = @(
     @{ Id = "edge-tts"; Name = "Edge TTS（免费·微软）";    Type = "tts_engine"; Desc = "免费、无需 Key 的微软 Edge 语音（非官方接口，可能不稳定）" },
     @{ Id = "mimo-asr"; Name = "MiMo ASR（小米·云端）";    Type = "asr_engine"; Desc = "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测" },
-    @{ Id = "genie-tts"; Name = "Genie TTS（本地·离线）";  Type = "tts_engine"; Desc = "GPT-SoVITS ONNX 本地推理引擎，CPU 离线合成，音色包可扩展（首次使用自动下载运行环境约 1.1GB，每个音色另约 320MB）" }
+    @{ Id = "genie-tts"; Name = "Genie TTS（本地·离线）";  Type = "tts_engine"; Desc = "GPT-SoVITS ONNX 本地推理引擎，CPU 离线合成，音色包可扩展（首次使用自动下载运行环境约 1.1GB，每个音色另约 320MB）" },
+    @{ Id = "minimax-tts"; Name = "MiniMax TTS（国内版）"; Type = "tts_engine"; Desc = "MiniMax 云端语音合成（国内版），需 API Key，50+ 音色、40 种语言" },
+    @{ Id = "minimax-tts-global"; Name = "MiniMax TTS（国际版）"; Type = "tts_engine"; Desc = "MiniMax 云端语音合成（国际版），需 API Key，50+ 音色、40 种语言" }
 )
 
 # ── 1. 逐个打包（复用各插件自己的 package.ps1）─────────────
