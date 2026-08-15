@@ -520,10 +520,10 @@ export function PluginPage() {
           </div>
         )}
 
-        {/* 音色清单（仅 TTS 引擎有意义） */}
+        {/* 音色清单（仅 TTS 引擎有意义；最多展示 6 个，避免云端引擎音色过多撞爆版面） */}
         {!isAsr && p.loaded && p.voices.length > 0 && (
           <div className="mt-2.5 flex flex-wrap gap-1.5">
-            {p.voices.map((v) => (
+            {p.voices.slice(0, 6).map((v) => (
               <span
                 key={v.id}
                 className="rounded-md border border-[var(--ink-200)] bg-[var(--paper)] px-2 py-0.5 text-[10px] text-[var(--ink-500)]"
@@ -532,6 +532,14 @@ export function PluginPage() {
                 {v.label}
               </span>
             ))}
+            {p.voices.length > 6 && (
+              <span
+                className="rounded-md border border-dashed border-[var(--ink-200)] px-2 py-0.5 text-[10px] text-[var(--ink-300)]"
+                title={p.voices.slice(6).map((v) => v.label).join("、")}
+              >
+                +{p.voices.length - 6} 更多
+              </span>
+            )}
           </div>
         )}
       </div>

@@ -773,7 +773,7 @@ export function SettingsPage() {
                       <p className="mt-1 text-[10px] leading-relaxed text-[var(--ink-500)]">
                         上传 10s~5min 的清晰人声音频（mp3/m4a/wav，≤20MB），克隆出的音色 7 天不使用会被平台回收。
                       </p>
-                      {/* 音频文件选择 */}
+                      {/* 音频文件选择（克隆唯一音源，API 必填） */}
                       <div className="mt-2 flex items-center gap-2">
                         <button
                           onClick={async () => {
@@ -785,7 +785,7 @@ export function SettingsPage() {
                           选择音频
                         </button>
                         <span className="truncate text-[11px] text-[var(--ink-500)]">
-                          {mmCloneFile ? mmCloneFile.split(/[/\\]/).pop() : "未选择"}
+                          {mmCloneFile ? mmCloneFile.split(/[/\\]/).pop() : "未选择（必填，克隆的唯一音源）"}
                         </span>
                       </div>
                       {/* 自定义 voice_id */}
@@ -806,6 +806,7 @@ export function SettingsPage() {
                         <div className="mt-2 space-y-2 rounded-lg border border-dashed border-[var(--ink-200)] p-2.5">
                           <p className="text-[10px] leading-relaxed text-[var(--ink-500)]">
                             提供一段 8 秒以内的样本音频及其对应文字稿，可提升克隆相似度。
+                            注意：本项仅增强效果，不能替代上方必填的主音频（平台接口要求两者同时提供）。
                           </p>
                           <div className="flex items-center gap-2">
                             <button
@@ -829,7 +830,7 @@ export function SettingsPage() {
                           />
                         </div>
                       )}
-                      {/* 开始克隆 */}
+                      {/* 开始克隆（主音频 + 音色 ID 必填；高级选项仅作增强） */}
                       <button
                         onClick={() => handleMinimaxClone(cur)}
                         disabled={mmCloning || !mmCloneFile || !mmCloneVoiceId.trim()}
@@ -837,6 +838,15 @@ export function SettingsPage() {
                       >
                         {mmCloning ? "克隆中…" : "开始克隆"}
                       </button>
+                      {!mmCloning && (!mmCloneFile || !mmCloneVoiceId.trim()) && (
+                        <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-300)]">
+                          {!mmCloneFile && !mmCloneVoiceId.trim()
+                            ? "请先选择主音频并填写音色 ID"
+                            : !mmCloneFile
+                              ? "请先选择主音频（10s~5min，高级选项的样本音频不能替代）"
+                              : "请填写音色 ID"}
+                        </p>
+                      )}
                       {mmCloneMsg && (
                         <p className={`mt-1.5 text-[11px] leading-relaxed ${mmCloneMsg.ok ? "text-[var(--ink-500)]" : "text-red-500"}`}>
                           {mmCloneMsg.text}
