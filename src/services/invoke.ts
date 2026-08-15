@@ -236,6 +236,40 @@ export async function pickAudioFile(): Promise<string | null> {
   return null;
 }
 
+/** MiniMax 国际版音色克隆：上传音频（+可选样本）→ voice_clone API，返回克隆的 voice_id */
+export async function minimaxGlobalVoiceClone(
+  filePath: string,
+  voiceId: string,
+  apiKey: string,
+  baseUrl: string,
+  promptFilePath?: string,
+  promptText?: string,
+): Promise<string> {
+  return invoke<string>("minimax_global_voice_clone", {
+    filePath,
+    voiceId,
+    apiKey,
+    baseUrl,
+    promptFilePath: promptFilePath ?? null,
+    promptText: promptText ?? null,
+  });
+}
+
+/** MiniMax 国际版音色查询（system/voice_cloning/voice_generation 三组），返回原始 JSON */
+export async function minimaxGlobalGetVoices(apiKey: string, baseUrl: string): Promise<string> {
+  return invoke<string>("minimax_global_get_voices", { apiKey, baseUrl });
+}
+
+/** MiniMax 国际版音色删除（删除后 voice_id 不可复用），返回被删的 voice_id */
+export async function minimaxGlobalDeleteVoice(
+  apiKey: string,
+  baseUrl: string,
+  voiceType: string,
+  voiceId: string,
+): Promise<string> {
+  return invoke<string>("minimax_global_delete_voice", { apiKey, baseUrl, voiceType, voiceId });
+}
+
 /** 弹文件夹选择器，选自定义音色包目录；返回绝对路径或 null（用户取消） */
 export async function pickVoicePackFolder(): Promise<string | null> {
   const selected = await open({
@@ -276,7 +310,7 @@ export async function getSettings(): Promise<Settings> {
 
 export async function updateSetting(
   key: string,
-  value: string | number | boolean | MossVoice[] | Record<string, string>,
+  value: string | number | boolean | string[] | MossVoice[] | Record<string, string>,
 ): Promise<Settings> {
   return invoke<Settings>("update_setting", { key, value });
 }

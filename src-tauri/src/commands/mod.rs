@@ -10,6 +10,7 @@ pub mod clone_voice;
 pub mod favorite;
 pub mod message;
 pub mod mic;
+pub mod minimax_clone;
 pub mod plugins;
 pub mod remote;
 pub mod settings;

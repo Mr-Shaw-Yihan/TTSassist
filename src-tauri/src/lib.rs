@@ -108,6 +108,14 @@ pub fn run() {
                 std::env::set_var("MIMO_API_KEY", &settings.mimo_api_key);
             }
 
+            // MiniMax 插件环境变量注入（插件通过 std::env::var 读取 API Key）
+            if !settings.minimax_api_key.is_empty() {
+                std::env::set_var("MINIMAX_API_KEY", &settings.minimax_api_key);
+            }
+            if !settings.minimax_global_api_key.is_empty() {
+                std::env::set_var("MINIMAX_GLOBAL_API_KEY", &settings.minimax_global_api_key);
+            }
+
             // 阶段 22：插件根目录改为 exe 同级 plugins/（脱离 APPDATA 系统盘）
             let plugins_root = resolve_plugins_root();
             migrate_plugins_if_needed(&data_dir, &plugins_root);
@@ -235,6 +243,9 @@ pub fn run() {
             crate::commands::vbcable::install_vb_cable,
             crate::asr::list_asr_plugins,
             crate::asr::asr_transcribe,
+            crate::commands::minimax_clone::minimax_global_voice_clone,
+            crate::commands::minimax_clone::minimax_global_get_voices,
+            crate::commands::minimax_clone::minimax_global_delete_voice,
             crate::hotkey::set_hotkey,
             crate::hotkey::set_voice_input_hotkey,
             crate::hotkey::set_play_last_hotkey,

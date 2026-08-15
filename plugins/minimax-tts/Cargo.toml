@@ -1,0 +1,16 @@
+[package]
+name = "minimax-tts"
+version = "0.2.0"
+description = "MiniMax TTS 插件（国内版）— 调用 api.minimaxi.com 云端语音合成"
+edition = "2021"
+
+[lib]
+# 插件必须是动态库（Windows 上产出 minimax_tts.dll，打包时改名 plugin.dll）
+crate-type = ["cdylib"]
+
+[dependencies]
+plugin-api = { path = "../plugin-api" }
+minimax-tts-core = { path = "../minimax-tts-core" }
+
+[dev-dependencies]
+serde_json = "1"

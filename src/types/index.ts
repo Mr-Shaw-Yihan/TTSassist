@@ -39,6 +39,12 @@ export interface Settings {
   theme: string;
   /** Moss-TTS API Key */
   moss_api_key: string;
+  /** MiniMax TTS 国内版 API Key */
+  minimax_api_key?: string;
+  /** MiniMax TTS 国际版 API Key */
+  minimax_global_api_key?: string;
+  /** MiniMax 国际版本地记录的克隆音色 id 列表 */
+  minimax_global_cloned_voices?: string[];
   /** Moss-TTS 当前选中音色 id */
   moss_voice_id: string;
   /** Moss-TTS 音色库（用户手动维护） */
