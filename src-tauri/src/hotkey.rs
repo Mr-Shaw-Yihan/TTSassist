@@ -1,15 +1,17 @@
 // 浮窗呼出全局快捷键：注册 / 注销 / 自定义。
 //
 // 关键点：
-// - 回调从 handler 第一个参数拿 &AppHandle（无需闭包捕获），切换 quick_input 显隐。
+// - 后端为 hotkey_ll（WH_KEYBOARD_LL 低级键盘钩子）：全屏独占游戏内也能触发，
+//   且非注入型钩子，不进入游戏进程（详见 hotkey_ll.rs 头注释）。
+// - 回调通过闭包捕获 AppHandle，切换 quick_input 显隐。
 // - set_hotkey 先注册新快捷键（验证有效）再注销旧的——避免"新快捷键无效→旧的也没了"。
 
 use std::collections::HashSet;
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use crate::commands::mic::MicPlayback;
 use crate::commands::AppState;
+use crate::hotkey_ll::{self, HotkeyPhase};
 use crate::storage::types::Favorite;
 use crate::sync::{notify_changed, EVENT_SETTINGS_CHANGED};
 
@@ -47,27 +49,26 @@ impl FavoriteHotkeys {
 /// 注册一个全局快捷键，回调切换 quick_input 窗口显隐。
 /// 呼出浮窗时隐藏主窗（避免两窗同现）；收起浮窗时主窗保持隐藏（用户自行通过托盘/浮窗按钮打开）。
 pub fn register_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
-    app.global_shortcut()
-        .on_shortcut(accel, |app, _shortcut, event| {
-            // 只响应按下事件
-            if event.state() != ShortcutState::Pressed {
-                return;
-            }
-            if let Some(floating) = app.get_webview_window("quick_input") {
-                if floating.is_visible().unwrap_or(false) {
-                    // 浮窗已显示 → 收起浮窗（主窗保持隐藏）
-                    let _ = floating.hide();
-                } else {
-                    // 呼出浮窗，同时隐藏主窗（避免两窗同现）
-                    let _ = floating.show();
-                    let _ = floating.set_focus();
-                    if let Some(main) = app.get_webview_window("main") {
-                        let _ = main.hide();
-                    }
+    let app = app.clone();
+    hotkey_ll::register(accel, move |phase| {
+        // 只响应按下事件
+        if phase != HotkeyPhase::Pressed {
+            return;
+        }
+        if let Some(floating) = app.get_webview_window("quick_input") {
+            if floating.is_visible().unwrap_or(false) {
+                // 浮窗已显示 → 收起浮窗（主窗保持隐藏）
+                let _ = floating.hide();
+            } else {
+                // 呼出浮窗，同时隐藏主窗（避免两窗同现）
+                let _ = floating.show();
+                let _ = floating.set_focus();
+                if let Some(main) = app.get_webview_window("main") {
+                    let _ = main.hide();
                 }
             }
-        })
-        .map_err(|e| format!("注册快捷键失败：{e}"))
+        }
+    })
 }
 
 /// 设置（更换）全局快捷键命令。
@@ -108,7 +109,7 @@ pub fn set_hotkey(
     // 2. 注销旧快捷键
     if let Some(old) = current.as_ref() {
         if old != &accel {
-            let _ = app.global_shortcut().unregister(old.as_str());
+            let _ = hotkey_ll::unregister(old.as_str());
         }
     }
 
@@ -137,18 +138,15 @@ pub fn set_hotkey(
 /// 注册语音输入全局快捷键：按住说话模式。
 /// 按下 emit "voice-input:pressed"，松开 emit "voice-input:released"，前端可见窗口接管录音会话。
 pub fn register_voice_input_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
-    app.global_shortcut()
-        .on_shortcut(accel, |app, _shortcut, event| {
-            match event.state() {
-                ShortcutState::Pressed => {
-                    let _ = app.emit("voice-input:pressed", ());
-                }
-                ShortcutState::Released => {
-                    let _ = app.emit("voice-input:released", ());
-                }
-            }
-        })
-        .map_err(|e| format!("注册语音输入快捷键失败：{e}"))
+    let app = app.clone();
+    hotkey_ll::register(accel, move |phase| match phase {
+        HotkeyPhase::Pressed => {
+            let _ = app.emit("voice-input:pressed", ());
+        }
+        HotkeyPhase::Released => {
+            let _ = app.emit("voice-input:released", ());
+        }
+    })
 }
 
 /// 设置（更换/清除）语音输入快捷键。空串 = 注销并清除。
@@ -187,7 +185,7 @@ pub fn set_voice_input_hotkey(
     // 2. 注销旧快捷键
     if let Some(old) = current.as_ref() {
         if old != &accel {
-            let _ = app.global_shortcut().unregister(old.as_str());
+            let _ = hotkey_ll::unregister(old.as_str());
         }
     }
 
@@ -213,51 +211,49 @@ pub fn set_voice_input_hotkey(
 
 /// 注册一个收藏快捷键：按下时发麦克风（若开启）+ emit 事件让前端播扬声器。
 fn register_favorite_hotkey(app: &AppHandle, hotkey: &str, audio_path: String) -> Result<(), String> {
-    app.global_shortcut()
-        .on_shortcut(hotkey, move |app, _shortcut, event| {
-            if event.state() != ShortcutState::Pressed {
-                return;
-            }
-            // 发麦克风（若全局开关开启且配置了设备）
-            if let Some(state) = app.try_state::<AppState>() {
-                let abs = state.data_dir.join(&audio_path);
-                let (enabled, device, volume) = match state.settings.read() {
-                    Ok(s) => (s.mic_send_enabled, s.mic_output_device.clone(), s.mic_playback_volume),
-                    Err(_) => (false, String::new(), 1.0),
-                };
-                if enabled && !device.is_empty() {
-                    if let Some(mic) = app.try_state::<MicPlayback>() {
-                        mic.play(abs, device, volume);
-                    }
+    let app = app.clone();
+    hotkey_ll::register(hotkey, move |phase| {
+        if phase != HotkeyPhase::Pressed {
+            return;
+        }
+        // 发麦克风（若全局开关开启且配置了设备）
+        if let Some(state) = app.try_state::<AppState>() {
+            let abs = state.data_dir.join(&audio_path);
+            let (enabled, device, volume) = match state.settings.read() {
+                Ok(s) => (s.mic_send_enabled, s.mic_output_device.clone(), s.mic_playback_volume),
+                Err(_) => (false, String::new(), 1.0),
+            };
+            if enabled && !device.is_empty() {
+                if let Some(mic) = app.try_state::<MicPlayback>() {
+                    mic.play(abs, device, volume);
                 }
             }
-            // emit 事件让前端主窗播扬声器
-            let _ = app.emit("favorite:play", audio_path.clone());
-        })
-        .map_err(|e| format!("注册收藏快捷键失败：{e}"))
+        }
+        // emit 事件让前端主窗播扬声器
+        let _ = app.emit("favorite:play", audio_path.clone());
+    })
 }
 
 /// 注册「播放最近一条消息」快捷键：按下时通知前端播最近一条消息的音频
 /// （扬声器 + 开关开启时发虚拟麦克风，均由前端 playAudioWithMic 处理）。
 pub fn register_play_last_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
-    app.global_shortcut()
-        .on_shortcut(accel, |app, _shortcut, event| {
-            if event.state() != ShortcutState::Pressed {
-                return;
-            }
-            let _ = app.emit("playback:play-last", ());
-        })
-        .map_err(|e| format!("注册播放最近消息快捷键失败：{e}"))
+    let app = app.clone();
+    hotkey_ll::register(accel, move |phase| {
+        if phase != HotkeyPhase::Pressed {
+            return;
+        }
+        let _ = app.emit("playback:play-last", ());
+    })
 }
 
 /// 注册「开关发送到麦克风」快捷键：按下时翻转 mic_send_enabled（持久化 + 通知前端刷新）。
 pub fn register_mic_toggle_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
-    app.global_shortcut()
-        .on_shortcut(accel, |app, _shortcut, event| {
-            if event.state() != ShortcutState::Pressed {
-                return;
-            }
-            let Some(state) = app.try_state::<AppState>() else { return };
+    let app = app.clone();
+    hotkey_ll::register(accel, move |phase| {
+        if phase != HotkeyPhase::Pressed {
+            return;
+        }
+        let Some(state) = app.try_state::<AppState>() else { return };
             // 先翻转内存态再持久化（锁作用域尽量短）
             let new_val = match state.settings.write() {
                 Ok(mut s) => {
@@ -273,9 +269,8 @@ pub fn register_mic_toggle_hotkey(app: &AppHandle, accel: &str) -> Result<(), St
             ) {
                 eprintln!("持久化麦克风开关失败: {e}");
             }
-            notify_changed(app, EVENT_SETTINGS_CHANGED);
-        })
-        .map_err(|e| format!("注册麦克风开关快捷键失败：{e}"))
+            notify_changed(&app, EVENT_SETTINGS_CHANGED);
+    })
 }
 
 /// 检测快捷键是否已被其它项占用（四项全局快捷键 + 全部收藏），返回冲突方名称。
@@ -337,7 +332,7 @@ fn replace_hotkey(
     // 3. 注销旧快捷键
     if let Some(old) = current.as_ref() {
         if old != accel {
-            let _ = app.global_shortcut().unregister(old.as_str());
+            let _ = hotkey_ll::unregister(old.as_str());
         }
     }
 
@@ -414,7 +409,7 @@ pub fn refresh_favorite_hotkeys(app: &AppHandle, favorites: &[Favorite]) -> Resu
 
     // 先注销所有已注册的收藏快捷键
     for hk in registered.iter() {
-        let _ = app.global_shortcut().unregister(hk.as_str());
+        let _ = hotkey_ll::unregister(hk.as_str());
     }
     registered.clear();
 

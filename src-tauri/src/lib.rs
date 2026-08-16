@@ -4,6 +4,7 @@
 pub mod asr;
 pub mod commands;
 pub mod hotkey;
+pub mod hotkey_ll;
 pub mod plugins;
 pub mod storage;
 pub mod sync;
@@ -93,7 +94,6 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             storage::ensure_data_dirs(&data_dir)?;
