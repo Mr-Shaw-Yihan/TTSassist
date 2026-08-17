@@ -231,7 +231,7 @@ dependencies = [
 
 [[package]]
 name = "minimax-tts-global"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "minimax-tts-core",
  "plugin-api",

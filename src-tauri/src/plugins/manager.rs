@@ -6,8 +6,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
+use super::config;
 use super::loader::{LoadedAsrPlugin, LoadedPlugin, PluginEngine};
-use super::manifest::PluginManifest;
+use super::manifest::{PluginConfigDecl, PluginManifest};
 use super::registry;
 use super::PluginError;
 
@@ -52,6 +53,8 @@ pub struct PluginInfo {
     pub has_voice_management: bool,
     /// 资源需求说明（manifest.requirements，供用户下载前判断配置；可为空）
     pub requirements: Option<String>,
+    /// 配置声明（manifest.config，通用插件配置机制）：None = 无配置项
+    pub config: Option<PluginConfigDecl>,
 }
 
 /// 插件管理器。dll 一经加载常驻到进程退出（运行期卸载有崩溃风险，见 loader.rs 头注）。
@@ -156,6 +159,9 @@ impl PluginManager {
         };
 
         if manifest.plugin_type == "asr_engine" {
+            if self.reject_env_conflict(id, &manifest) {
+                return;
+            }
             match LoadedAsrPlugin::load(&dir, APP_VERSION) {
                 Ok(plugin) => {
                     eprintln!("ASR 插件已加载: {id} v{}", plugin.manifest.version);
@@ -171,6 +177,9 @@ impl PluginManager {
                 }
             }
         } else {
+            if self.reject_env_conflict(id, &manifest) {
+                return;
+            }
             match LoadedPlugin::load(&dir, APP_VERSION) {
                 Ok(plugin) => {
                     eprintln!("插件已加载: {id} v{}", plugin.manifest.version);
@@ -185,6 +194,63 @@ impl PluginManager {
                     }
                 }
             }
+        }
+    }
+
+    /// 必填配置环境变量与已加载插件冲突：记失败原因并返回 true（load_one 直接返回）。
+    /// 同步收口在加载期，防止插件 A 的配置被插件 B 读走（设计稿 §3.3）。
+    fn reject_env_conflict(&self, id: &str, manifest: &PluginManifest) -> bool {
+        let Some(conflict) = self.find_env_conflict(manifest) else {
+            return false;
+        };
+        let msg = format!(
+            "清单错误: 插件「{}」的必填配置环境变量与已加载插件「{}」冲突，请让插件作者改名",
+            manifest.id, conflict
+        );
+        eprintln!("插件加载失败 [{id}]: {msg}");
+        if let Ok(mut map) = self.failed.write() {
+            map.insert(id.to_string(), msg);
+        }
+        true
+    }
+
+    /// 收集全部已加载插件（TTS + ASR）的 (id, manifest)，供 env 冲突检测
+    fn loaded_manifests(&self) -> Vec<(String, PluginManifest)> {
+        let mut out = Vec::new();
+        if let Ok(map) = self.loaded.read() {
+            for (id, p) in map.iter() {
+                out.push((id.clone(), p.manifest.clone()));
+            }
+        }
+        if let Ok(map) = self.loaded_asr.read() {
+            for (id, p) in map.iter() {
+                out.push((id.clone(), p.manifest.clone()));
+            }
+        }
+        out
+    }
+
+    fn find_env_conflict(&self, manifest: &PluginManifest) -> Option<String> {
+        config::find_required_env_conflict(&self.loaded_manifests(), &manifest.id, manifest)
+    }
+
+    /// 取插件 manifest：优先已加载的（TTS/ASR 两个注册表），否则读磁盘（含加载失败的）。
+    /// 通用配置命令用——设置面板对已安装插件都可展示声明。
+    pub fn manifest_of(&self, id: &str) -> Option<PluginManifest> {
+        if let Some(p) = self.get(id) {
+            return Some(p.manifest.clone());
+        }
+        if let Some(p) = self.get_asr(id) {
+            return Some(p.manifest.clone());
+        }
+        PluginManifest::load(&self.plugins_root.join(id)).ok()
+    }
+
+    /// 启动时按 manifest 声明把 settings.plugin_config 注入环境变量。
+    /// 替代旧的 minimax 硬编码注入；值为空则 remove，保证「清空配置」生效。
+    pub fn inject_config_env(&self, plugin_config: &HashMap<String, HashMap<String, String>>) {
+        for (id, manifest) in self.loaded_manifests() {
+            config::inject_manifest(&manifest, plugin_config.get(&id));
         }
     }
 
@@ -260,6 +326,8 @@ impl PluginManager {
                 .unwrap_or(false);
             // 资源需求说明（读自磁盘清单，未安装/加载失败的插件也能展示）
             let requirements = manifest.as_ref().and_then(|m| m.requirements.clone());
+            // 配置声明（读自磁盘清单，加载失败的插件设置面板也要能展示）
+            let config_decl = manifest.as_ref().and_then(|m| m.config.clone());
 
             result.push(PluginInfo {
                 id: entry.id.clone(),
@@ -277,6 +345,7 @@ impl PluginManager {
                 setup_status,
                 has_voice_management,
                 requirements,
+                config: config_decl,
             });
         }
         result

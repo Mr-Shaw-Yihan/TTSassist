@@ -2,6 +2,7 @@
 
 use tauri::{AppHandle, State};
 use crate::commands::AppState;
+use crate::plugins::PluginManager;
 use crate::storage::types::Settings;
 use crate::sync::{notify_changed, EVENT_SETTINGS_CHANGED};
 
@@ -24,6 +25,7 @@ pub fn update_setting(
     key: String,
     value: serde_json::Value,
     state: State<'_, AppState>,
+    plugins: State<'_, PluginManager>,
     app: AppHandle,
 ) -> Result<Settings, String> {
     let data_dir = &state.data_dir;
@@ -49,23 +51,9 @@ pub fn update_setting(
         }
     }
 
-    // MiniMax Key 变更时同步环境变量（插件下次合成即可读到新值）
-    match key.as_str() {
-        "minimax_api_key" => {
-            if settings.minimax_api_key.is_empty() {
-                std::env::remove_var("MINIMAX_API_KEY");
-            } else {
-                std::env::set_var("MINIMAX_API_KEY", &settings.minimax_api_key);
-            }
-        }
-        "minimax_global_api_key" => {
-            if settings.minimax_global_api_key.is_empty() {
-                std::env::remove_var("MINIMAX_GLOBAL_API_KEY");
-            } else {
-                std::env::set_var("MINIMAX_GLOBAL_API_KEY", &settings.minimax_global_api_key);
-            }
-        }
-        _ => {}
+    // 插件配置变更：按 manifest 声明同步环境变量（通用机制，插件下次合成即生效）
+    if key == "plugin_config" {
+        plugins.inject_config_env(&settings.plugin_config);
     }
 
     notify_changed(&app, EVENT_SETTINGS_CHANGED);

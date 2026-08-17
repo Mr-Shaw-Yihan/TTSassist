@@ -14,9 +14,24 @@ $ErrorActionPreference = "Stop"
 
 $PluginId   = "minimax-tts"
 $PluginName = "MiniMax TTS（国内版）"
-$Version    = "0.2.0"
-$MinAppVer  = "1.0.0"
+$Version    = "0.2.1"
+$MinAppVer  = "1.8.0"
 $Desc       = "MiniMax 云端语音合成（国内版·阉割版），需 API Key，50+ 音色、40 种语言，不支持音色克隆"
+
+# 通用插件配置声明（宿主 ≥1.8.0 据此渲染设置面板并注入 MINIMAX_API_KEY）
+$ConfigDecl = @{
+    help_url = "https://platform.minimaxi.com/user-center/basic-information/interface-key"
+    fields   = @(
+        @{
+            key         = "api_key"
+            type        = "secret"
+            label       = "API Key"
+            description = "从 MiniMax 开放平台（国内版）获取"
+            env         = "MINIMAX_API_KEY"
+            required    = $true
+        }
+    )
+}
 
 $PluginDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DistDir   = Join-Path $PluginDir "dist"
@@ -53,10 +68,11 @@ $Manifest = [ordered]@{
     min_app_version = $MinAppVer
     checksum        = $Hash
     description     = $Desc
+    config          = $ConfigDecl
 }
 [System.IO.File]::WriteAllText(
     (Join-Path $StageDir "manifest.json"),
-    ($Manifest | ConvertTo-Json),
+    ($Manifest | ConvertTo-Json -Depth 6),
     $Utf8NoBom
 )
 

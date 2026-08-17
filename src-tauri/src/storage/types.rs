@@ -116,6 +116,10 @@ pub struct Settings {
     /// 开关「发送到麦克风」的全局快捷键（空=未设置）
     #[serde(default)]
     pub hotkey_mic_toggle: String,
+    /// 插件配置（通用插件配置机制）：插件 id → { 字段 key → 值 }。
+    /// 宿主按插件 manifest 的 config 声明注入环境变量。
+    #[serde(default)]
+    pub plugin_config: HashMap<String, HashMap<String, String>>,
 }
 
 impl Default for Settings {
@@ -152,6 +156,7 @@ impl Default for Settings {
             voice_input_device: String::new(),
             hotkey_play_last: String::new(),
             hotkey_mic_toggle: String::new(),
+            plugin_config: HashMap::new(),
         }
     }
 }

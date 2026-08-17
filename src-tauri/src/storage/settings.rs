@@ -28,7 +28,7 @@ pub fn load_settings(data_dir: &Path) -> Settings {
     };
     // 解析成 Value，缺失字段用默认值一层层补
     let default = Settings::default();
-    match serde_json::from_str::<serde_json::Value>(&raw) {
+    let mut settings = match serde_json::from_str::<serde_json::Value>(&raw) {
         Ok(v) => Settings {
             tts_engine: v.get("tts_engine").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.tts_engine),
             tts_model: v.get("tts_model").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.tts_model),
@@ -64,9 +64,61 @@ pub fn load_settings(data_dir: &Path) -> Settings {
             voice_input_device: v.get("voice_input_device").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.voice_input_device),
             hotkey_play_last: v.get("hotkey_play_last").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.hotkey_play_last),
             hotkey_mic_toggle: v.get("hotkey_mic_toggle").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.hotkey_mic_toggle),
+            plugin_config: v.get("plugin_config")
+                .and_then(|x| serde_json::from_value::<std::collections::HashMap<String, std::collections::HashMap<String, String>>>(x.clone()).ok())
+                .unwrap_or(default.plugin_config),
         },
         Err(_) => default,
+    };
+    // 存量迁移：旧顶层 API Key 键搬入 plugin_config（一次性，搬完落盘删旧键）
+    if migrate_legacy_plugin_keys(&mut settings) {
+        let _ = save_settings(data_dir, &settings);
     }
+    settings
+}
+
+/// 旧硬编码插件 Key → plugin_config 的迁移映射。
+/// 一次性历史包袱清理代码：宿主删除 minimax 硬编码两个版本后可删。
+const LEGACY_PLUGIN_KEY_MAP: &[(&str, &str, &str)] = &[
+    // (settings 旧键, 插件 id, plugin_config 字段 key)
+    ("minimax_api_key", "minimax-tts", "api_key"),
+    ("minimax_global_api_key", "minimax-tts-global", "api_key"),
+];
+
+/// 把旧顶层 Key 键搬入 plugin_config 对应条目并清空旧键。
+/// 仅当旧键非空且新位置为空时搬入（不覆盖用户已在新面板填写的值）。
+/// 返回是否发生了改动（调用方据此落盘）。
+fn migrate_legacy_plugin_keys(s: &mut Settings) -> bool {
+    let mut changed = false;
+    for (legacy_key, plugin_id, field_key) in LEGACY_PLUGIN_KEY_MAP {
+        let legacy_value = match *legacy_key {
+            "minimax_api_key" => s.minimax_api_key.clone(),
+            "minimax_global_api_key" => s.minimax_global_api_key.clone(),
+            _ => String::new(),
+        };
+        if legacy_value.is_empty() {
+            continue;
+        }
+        let empty_here = s
+            .plugin_config
+            .get(*plugin_id)
+            .and_then(|m| m.get(*field_key))
+            .map_or(true, |v| v.is_empty());
+        if empty_here {
+            s.plugin_config
+                .entry(plugin_id.to_string())
+                .or_default()
+                .insert(field_key.to_string(), legacy_value);
+        }
+        // 无论是否搬入（新位置已有值时旧值作废），旧键都清空
+        match *legacy_key {
+            "minimax_api_key" => s.minimax_api_key = String::new(),
+            "minimax_global_api_key" => s.minimax_global_api_key = String::new(),
+            _ => {}
+        }
+        changed = true;
+    }
+    changed
 }
 
 /// 整体写回设置。
@@ -106,6 +158,7 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "voice_input_device" => if let Some(v) = value.as_str() { s.voice_input_device = v.to_string() },
         "hotkey_play_last" => if let Some(v) = value.as_str() { s.hotkey_play_last = v.to_string() },
         "hotkey_mic_toggle" => if let Some(v) = value.as_str() { s.hotkey_mic_toggle = v.to_string() },
+        "plugin_config" => if let Ok(map) = serde_json::from_value::<std::collections::HashMap<String, std::collections::HashMap<String, String>>>(value.clone()) { s.plugin_config = map },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;
@@ -165,6 +218,64 @@ mod tests {
         let back = update_setting(&d, "playback_volume", serde_json::json!(0.9)).unwrap();
         assert!((back.playback_volume - 0.9).abs() < 1e-6, "新值写入");
         assert_eq!(back.hotkey_show_window, "Ctrl+Shift+V", "其它键保留");
+    }
+
+    #[test]
+    fn plugin_config读写往返与白名单更新() {
+        let dir = tempdir().unwrap();
+        let d = dir.path().to_path_buf();
+        let mut s = Settings::default();
+        s.plugin_config.insert(
+            "foo-tts".into(),
+            std::collections::HashMap::from([("api_key".to_string(), "sk-123".to_string())]),
+        );
+        save_settings(&d, &s).unwrap();
+        let got = load_settings(&d);
+        assert_eq!(got.plugin_config["foo-tts"]["api_key"], "sk-123");
+
+        // update_setting 白名单
+        let back = update_setting(
+            &d,
+            "plugin_config",
+            serde_json::json!({ "foo-tts": { "api_key": "sk-456" } }),
+        )
+        .unwrap();
+        assert_eq!(back.plugin_config["foo-tts"]["api_key"], "sk-456");
+        // 其它键不丢
+        assert_eq!(back.hotkey_show_window, s.hotkey_show_window);
+    }
+
+    #[test]
+    fn 旧minimax键一次性迁移进plugin_config() {
+        let dir = tempdir().unwrap();
+        let d = dir.path().to_path_buf();
+        // 模拟存量用户的 settings.json：旧顶层键有值
+        std::fs::write(
+            d.join("settings.json"),
+            r#"{"minimax_api_key":"k1","minimax_global_api_key":"k2","theme":"dark"}"#,
+        )
+        .unwrap();
+        let s = load_settings(&d);
+        assert_eq!(s.plugin_config["minimax-tts"]["api_key"], "k1", "国内版 Key 应搬入");
+        assert_eq!(s.plugin_config["minimax-tts-global"]["api_key"], "k2", "国际版 Key 应搬入");
+        assert!(s.minimax_api_key.is_empty(), "旧键应清空");
+        assert!(s.minimax_global_api_key.is_empty());
+        assert_eq!(s.theme, "dark", "无关字段不受影响");
+
+        // 迁移已落盘：重新加载不再变动（幂等）
+        let raw = std::fs::read_to_string(d.join("settings.json")).unwrap();
+        assert!(raw.contains("plugin_config"), "迁移结果应已写回文件");
+        let s2 = load_settings(&d);
+        assert_eq!(s2.plugin_config, s.plugin_config);
+
+        // 新面板已填值时旧键不覆盖（旧值作废丢弃）
+        std::fs::write(
+            d.join("settings.json"),
+            r#"{"minimax_api_key":"old","plugin_config":{"minimax-tts":{"api_key":"new"}}}"#,
+        )
+        .unwrap();
+        let s3 = load_settings(&d);
+        assert_eq!(s3.plugin_config["minimax-tts"]["api_key"], "new");
     }
 
     #[test]

@@ -14,6 +14,7 @@ import { HotkeyRecorder } from "./HotkeyRecorder";
 import { MicSettings } from "./MicSettings";
 import { VoiceInputSettings } from "./VoiceInputSettings";
 import { PluginSetupPanel } from "../Plugins/PluginSetupPanel";
+import { PluginConfigPanel } from "./PluginConfigPanel";
 import { ResourcePackLinks } from "../Plugins/ResourcePackLinks";
 import { VoiceManager } from "./VoiceManager";
 
@@ -254,9 +255,9 @@ export function SettingsPage() {
   async function handleMinimaxClone(plugin: PluginInfo) {
     const vid = mmCloneVoiceId.trim();
     if (!mmCloneFile || !vid || mmCloning) return;
-    const apiKey = settings?.minimax_global_api_key;
+    const apiKey = mmGlobalKey;
     if (!apiKey) {
-      setMmCloneMsg({ ok: false, text: "请先在上方填写 MiniMax 国际版 API Key" });
+      setMmCloneMsg({ ok: false, text: "请先在上方配置卡中填写 MiniMax 国际版 API Key" });
       return;
     }
     setMmCloning(true);
@@ -294,9 +295,9 @@ export function SettingsPage() {
 
   /** 刷新 MiniMax 账号音色列表（克隆音色须先合成过一次才会出现） */
   async function handleMmRefreshVoices() {
-    const apiKey = settings?.minimax_global_api_key;
+    const apiKey = mmGlobalKey;
     if (!apiKey) {
-      setMmManageMsg({ ok: false, text: "请先在上方填写 MiniMax 国际版 API Key" });
+      setMmManageMsg({ ok: false, text: "请先在上方配置卡中填写 MiniMax 国际版 API Key" });
       return;
     }
     setMmVoicesLoading(true);
@@ -325,9 +326,9 @@ export function SettingsPage() {
     if (!mmDeleteTarget) return;
     const { type, id } = mmDeleteTarget;
     setMmDeleteTarget(null);
-    const apiKey = settings?.minimax_global_api_key;
+    const apiKey = mmGlobalKey;
     if (!apiKey) {
-      setMmManageMsg({ ok: false, text: "请先在上方填写 MiniMax 国际版 API Key" });
+      setMmManageMsg({ ok: false, text: "请先在上方配置卡中填写 MiniMax 国际版 API Key" });
       return;
     }
     try {
@@ -371,6 +372,9 @@ export function SettingsPage() {
     });
     setMmManageMsg({ ok: true, text: `已切换到音色 ${voiceId}` });
   }
+
+  /** MiniMax 国际版 API Key：通用插件配置机制迁移后从 plugin_config 读取 */
+  const mmGlobalKey = settings?.plugin_config?.["minimax-tts-global"]?.["api_key"] ?? "";
 
   const currentVoice = settings?.tts_model ?? "mimo_default";
   const mossVoices = settings?.moss_voices ?? [];
@@ -719,26 +723,8 @@ export function SettingsPage() {
                     </div>
                   )}
 
-                  {/* MiniMax 国内版 API Key */}
-                  {cur.id === "minimax-tts" && (
-                    <Field label="MiniMax API Key（国内版）">
-                      <input
-                        type="password"
-                        defaultValue={settings?.minimax_api_key ?? ""}
-                        onBlur={(e) => patch("minimax_api_key", e.target.value.trim())}
-                        placeholder="输入 MiniMax 国内版 API Key"
-                        className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none transition-colors placeholder:text-[var(--ink-300)] focus:border-[var(--amber-500)]"
-                      />
-                      <a
-                        href="https://platform.minimaxi.com/user-center/basic-information/interface-key"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-1.5 inline-block text-xs text-[var(--ink-500)] underline underline-offset-2 hover:text-[var(--amber-600)] transition-colors"
-                      >
-                        前往 MiniMax 平台获取 API Key
-                      </a>
-                    </Field>
-                  )}
+                  {/* 通用插件配置卡（manifest 声明驱动，内联在当前引擎下方；保存即生效） */}
+                  {cur.config && <PluginConfigPanel pluginId={cur.id} pluginName={cur.name} />}
                   {/* 国内版阉割版提示：暂不提供音色克隆 */}
                   {cur.id === "minimax-tts" && (
                     <div className="rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/20 px-3 py-2 text-[11px] leading-relaxed text-[var(--amber-600)]">
@@ -746,26 +732,7 @@ export function SettingsPage() {
                     </div>
                   )}
 
-                  {/* MiniMax 国际版 API Key */}
-                  {cur.id === "minimax-tts-global" && (
-                    <Field label="MiniMax API Key（国际版）">
-                      <input
-                        type="password"
-                        defaultValue={settings?.minimax_global_api_key ?? ""}
-                        onBlur={(e) => patch("minimax_global_api_key", e.target.value.trim())}
-                        placeholder="输入 MiniMax 国际版 API Key"
-                        className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none transition-colors placeholder:text-[var(--ink-300)] focus:border-[var(--amber-500)]"
-                      />
-                      <a
-                        href="https://www.minimax.io"
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-1.5 inline-block text-xs text-[var(--ink-500)] underline underline-offset-2 hover:text-[var(--amber-600)] transition-colors"
-                      >
-                        前往 MiniMax 国际版获取 API Key
-                      </a>
-                    </Field>
-                  )}
+
                   {/* MiniMax 音色克隆子面板（仅国际版，国内版不提供） */}
                   {cur.id === "minimax-tts-global" && (
                     <div className="rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2.5">
@@ -1059,6 +1026,12 @@ export function SettingsPage() {
           {/* 语音输入（ASR 插件的配置，仅装了 ASR 插件时显示） */}
           {asrAvailable && (
             <Section title="语音输入">
+              {/* 声明了配置的 ASR 插件：通用配置卡（无 config 声明时不渲染） */}
+              {plugins
+                .filter((p) => p.plugin_type === "asr_engine" && p.config)
+                .map((p) => (
+                  <PluginConfigPanel key={p.id} pluginId={p.id} pluginName={p.name} />
+                ))}
               <VoiceInputSettings />
             </Section>
           )}

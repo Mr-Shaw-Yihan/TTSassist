@@ -39,10 +39,6 @@ export interface Settings {
   theme: string;
   /** Moss-TTS API Key */
   moss_api_key: string;
-  /** MiniMax TTS 国内版 API Key */
-  minimax_api_key?: string;
-  /** MiniMax TTS 国际版 API Key */
-  minimax_global_api_key?: string;
   /** MiniMax 国际版本地记录的克隆音色 id 列表 */
   minimax_global_cloned_voices?: string[];
   /** Moss-TTS 当前选中音色 id */
@@ -73,6 +69,39 @@ export interface Settings {
   hotkey_play_last: string;
   /** 开关「发送到麦克风」的全局快捷键（空=未设置） */
   hotkey_mic_toggle: string;
+  /** 插件配置（通用机制）：插件 id → 字段 key → 值 */
+  plugin_config: Record<string, Record<string, string>>;
+}
+
+/** 通用插件配置：manifest 的 config 声明 */
+export interface PluginConfigDecl {
+  help_url?: string | null;
+  fields: PluginConfigField[];
+}
+
+/** 通用插件配置：manifest 声明的单个配置字段 */
+export interface PluginConfigField {
+  key: string;
+  type: "text" | "secret" | "select" | "number";
+  label: string;
+  description: string;
+  placeholder: string;
+  env: string;
+  required: boolean;
+  options?: { value: string; label: string }[] | null;
+}
+
+/** get_plugin_config 返回的字段视图：声明 + 当前值 */
+export interface PluginConfigFieldView extends PluginConfigField {
+  /** 当前值：secret 非空时为掩码「已设置」（明文不出后端） */
+  value: string;
+}
+
+/** get_plugin_config 返回：声明 + 当前值（secret 已脱敏为「已设置」/空） */
+export interface PluginConfigInfo {
+  id: string;
+  help_url: string | null;
+  fields: PluginConfigFieldView[];
 }
 
 /** 版本更新信息（check_app_update 返回） */
@@ -142,6 +171,8 @@ export interface PluginInfo {
   setup_status?: PluginSetupStatus | null;
   /** 是否支持音色管理（安装/卸载/预加载/导入音色包） */
   has_voice_management?: boolean;
+  /** 配置声明（manifest.config，通用插件配置机制）：null = 无配置项 */
+  config?: PluginConfigDecl | null;
   /** 资源需求说明（供用户下载前判断配置；可为空） */
   requirements?: string | null;
 }

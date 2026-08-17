@@ -2,7 +2,7 @@
 // 后端每个 #[tauri::command] 对应一个函数，参数名与后端 fn 参数 snake_case 一致。
 
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry, BundledPluginInfo, UpdateInfo, AsrPluginInfo } from "../types";
+import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry, BundledPluginInfo, UpdateInfo, AsrPluginInfo, PluginConfigInfo } from "../types";
 
 // ── TTS ──────────────────────────────────────────
 
@@ -55,6 +55,26 @@ export async function listBundledPlugins(): Promise<BundledPluginInfo[]> {
 /** 安装内置插件，返回提示文案 */
 export async function installBundledPlugin(id: string): Promise<string> {
   return invoke<string>("install_bundled_plugin", { id });
+}
+
+// ── 通用插件配置 ──────────────────────────────
+
+/** 读取插件配置声明 + 当前值（secret 已脱敏：非空回「已设置」） */
+export async function getPluginConfig(id: string): Promise<PluginConfigInfo> {
+  return invoke<PluginConfigInfo>("get_plugin_config", { id });
+}
+
+/** 批量保存插件配置（立即生效，无需重启）。secret 留空 = 保持不变 */
+export async function setPluginConfig(
+  id: string,
+  values: Record<string, string>,
+): Promise<Settings> {
+  return invoke<Settings>("set_plugin_config", { id, values });
+}
+
+/** 清空插件全部配置（含环境变量移除） */
+export async function clearPluginConfig(id: string): Promise<Settings> {
+  return invoke<Settings>("clear_plugin_config", { id });
 }
 
 // ── ASR 语音识别 ──────────────────────────────

@@ -7,7 +7,7 @@
 plugin_api::va_tts_plugin! {
     id: "minimax-tts",
     name: "MiniMax TTS（国内版）",
-    version: "0.2.0",
+    version: "0.2.1",
     audio_format: "mp3",
     voices: minimax_tts_core::voices_list,
     synthesize: synthesize,

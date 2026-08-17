@@ -6,7 +6,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use tauri::{Emitter, Manager, State};
-use crate::plugins::{InstallOutcome, PluginInfo, PluginManager};
+use crate::plugins::{config as plugin_config, InstallOutcome, PluginInfo, PluginManager};
+use crate::commands::AppState;
+use crate::sync::{notify_changed, EVENT_SETTINGS_CHANGED};
 
 /// 官方插件索引地址（托管在 GitHub Releases 资产）
 const PLUGIN_INDEX_URL: &str =
@@ -24,14 +26,199 @@ pub fn list_plugins(plugins: State<'_, PluginManager>) -> Vec<PluginInfo> {
     plugins.list()
 }
 
-/// 卸载插件：注册表移除 + 删目录。已加载的 dll 常驻到进程退出，
-/// 返回文案告知用户是否需要重启。
+/// 卸载插件：注册表移除 + 删目录 + 清理 plugin_config 条目与环境变量。
+/// 已加载的 dll 常驻到进程退出，返回文案告知用户是否需要重启。
 #[tauri::command]
 pub fn uninstall_plugin(
     id: String,
     plugins: State<'_, PluginManager>,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
+    // 卸载前取 manifest：清环境变量需要声明的 env 名
+    let manifest = plugins.manifest_of(&id);
+
+    // 插件配置清理：删除 plugin_config[id]（避免残留密钥，重装后需重新填写）
+    let had_config = {
+        let mut settings = state
+            .settings
+            .write()
+            .map_err(|e| format!("读取设置失败: {e}"))?;
+        settings.plugin_config.remove(&id).is_some()
+    };
+    if had_config {
+        let settings = state.settings.read().map_err(|e| format!("读取设置失败: {e}"))?.clone();
+        crate::storage::settings::save_settings(&state.data_dir, &settings)
+            .map_err(|e| format!("保存设置失败: {e}"))?;
+        if let Some(m) = &manifest {
+            plugin_config::remove_manifest_envs(m);
+        }
+        notify_changed(&app, EVENT_SETTINGS_CHANGED);
+    }
+
     plugins.uninstall(&id).map_err(|e| e.to_string())
+}
+
+// ── 通用插件配置（manifest 声明 → 设置页通用面板）────────────────
+
+/// 配置字段视图：manifest 声明 + 当前值（secret 只回掩码，明文不出后端）
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PluginConfigFieldView {
+    pub key: String,
+    #[serde(rename = "type")]
+    pub field_type: String,
+    pub label: String,
+    pub description: String,
+    pub placeholder: String,
+    pub env: String,
+    pub required: bool,
+    pub options: Option<Vec<serde_json::Value>>,
+    /// 当前值：secret 类型非空时返回掩码「已设置」；其余类型返回原值
+    pub value: String,
+}
+
+/// get_plugin_config 返回：插件配置声明 + 当前已存值（脱敏后）
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PluginConfigInfo {
+    pub id: String,
+    pub help_url: Option<String>,
+    pub fields: Vec<PluginConfigFieldView>,
+}
+
+const SECRET_MASK: &str = "已设置";
+
+/// 读取插件配置声明 + 当前值。secret 字段只回掩码（前端编辑走「留空保持不变」）。
+#[tauri::command]
+pub fn get_plugin_config(
+    id: String,
+    plugins: State<'_, PluginManager>,
+    state: State<'_, AppState>,
+) -> Result<PluginConfigInfo, String> {
+    let manifest = plugins
+        .manifest_of(&id)
+        .ok_or_else(|| format!("插件「{id}」未安装"))?;
+    let decl = manifest
+        .config
+        .as_ref()
+        .ok_or_else(|| format!("插件「{}」没有声明配置项", manifest.name))?;
+
+    let settings = state
+        .settings
+        .read()
+        .map_err(|e| format!("读取设置失败: {e}"))?;
+    let stored = settings.plugin_config.get(&id);
+
+    let fields = decl
+        .fields
+        .iter()
+        .map(|f| {
+            let raw = stored
+                .and_then(|m| m.get(&f.key))
+                .map(|s| s.trim())
+                .unwrap_or("");
+            let value = if f.r#type == "secret" && !raw.is_empty() {
+                SECRET_MASK.to_string()
+            } else {
+                raw.to_string()
+            };
+            PluginConfigFieldView {
+                key: f.key.clone(),
+                field_type: f.r#type.clone(),
+                label: f.label.clone(),
+                description: f.description.clone(),
+                placeholder: f.placeholder.clone(),
+                env: f.env.clone(),
+                required: f.required,
+                options: f.options.clone(),
+                value,
+            }
+        })
+        .collect();
+    Ok(PluginConfigInfo {
+        id,
+        help_url: decl.help_url.clone(),
+        fields,
+    })
+}
+
+/// 批量写入插件配置：落盘 → 更新内存 → 按声明同步环境变量。
+/// 只接受 manifest 声明过的字段；secret 留空且已有值时保持不变（前端不回显明文）。
+#[tauri::command]
+pub fn set_plugin_config(
+    id: String,
+    values: std::collections::HashMap<String, String>,
+    plugins: State<'_, PluginManager>,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<crate::storage::types::Settings, String> {
+    let manifest = plugins
+        .manifest_of(&id)
+        .ok_or_else(|| format!("插件「{id}」未安装"))?;
+    let decl = manifest
+        .config
+        .clone()
+        .ok_or_else(|| format!("插件「{}」没有声明配置项", manifest.name))?;
+
+    // 逐声明字段合并：values 优先；secret 空值不覆盖已有值
+    let mut entry: std::collections::HashMap<String, String> = {
+        let settings = state
+            .settings
+            .read()
+            .map_err(|e| format!("读取设置失败: {e}"))?;
+        settings.plugin_config.get(&id).cloned().unwrap_or_default()
+    };
+    for f in &decl.fields {
+        let Some(v) = values.get(&f.key) else { continue };
+        let v = v.trim();
+        if v.is_empty() && f.r#type == "secret" {
+            let existing = entry.get(&f.key).map(|s| !s.trim().is_empty()).unwrap_or(false);
+            if existing {
+                continue; // 留空保持不变
+            }
+        }
+        entry.insert(f.key.clone(), v.to_string());
+    }
+
+    // 落盘 + 内存 + 环境变量 + 广播
+    let settings = {
+        let mut settings = state
+            .settings
+            .write()
+            .map_err(|e| format!("读取设置失败: {e}"))?;
+        settings.plugin_config.insert(id.clone(), entry.clone());
+        settings.clone()
+    };
+    crate::storage::settings::save_settings(&state.data_dir, &settings)
+        .map_err(|e| format!("保存设置失败: {e}"))?;
+    plugin_config::inject_manifest(&manifest, Some(&entry));
+    notify_changed(&app, EVENT_SETTINGS_CHANGED);
+    Ok(settings)
+}
+
+/// 清空插件全部配置：删除存储条目 + 移除声明的环境变量。
+#[tauri::command]
+pub fn clear_plugin_config(
+    id: String,
+    plugins: State<'_, PluginManager>,
+    state: State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<crate::storage::types::Settings, String> {
+    let manifest = plugins.manifest_of(&id);
+    let settings = {
+        let mut settings = state
+            .settings
+            .write()
+            .map_err(|e| format!("读取设置失败: {e}"))?;
+        settings.plugin_config.remove(&id);
+        settings.clone()
+    };
+    crate::storage::settings::save_settings(&state.data_dir, &settings)
+        .map_err(|e| format!("保存设置失败: {e}"))?;
+    if let Some(m) = &manifest {
+        plugin_config::remove_manifest_envs(m);
+    }
+    notify_changed(&app, EVENT_SETTINGS_CHANGED);
+    Ok(settings)
 }
 
 // ── 安装 ─────────────────────────────────────────

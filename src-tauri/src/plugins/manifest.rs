@@ -42,10 +42,63 @@ pub struct PluginManifest {
     /// 供用户在下载安装前判断本机配置是否够用。本地推理引擎建议填写。
     #[serde(default)]
     pub requirements: Option<String>,
+    /// 插件配置声明（可选，通用插件配置机制）：声明本插件需要用户填写
+    /// 的配置项（API Key 等），宿主按声明渲染通用设置面板并注入环境变量。
+    /// 缺省 = 无配置项，老插件零影响。设计见 doc/通用插件配置机制设计.md。
+    #[serde(default)]
+    pub config: Option<PluginConfigDecl>,
+}
+
+/// 插件配置声明（manifest.config）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginConfigDecl {
+    /// 配置获取指引链接（如开放平台控制台地址），设置面板展示
+    #[serde(default)]
+    pub help_url: Option<String>,
+    /// 配置字段列表（空 = 无配置项）
+    #[serde(default)]
+    pub fields: Vec<PluginConfigField>,
+}
+
+/// 单个配置字段声明
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginConfigField {
+    /// 字段标识（插件内唯一，只允许字母/数字/_/-）
+    pub key: String,
+    /// 字段类型：text / secret / select / number（缺省 text）
+    #[serde(default = "default_field_type")]
+    pub r#type: String,
+    /// UI 标签
+    pub label: String,
+    /// 辅助说明（可选）
+    #[serde(default)]
+    pub description: String,
+    /// 输入占位提示（可选）
+    #[serde(default)]
+    pub placeholder: String,
+    /// 注入的环境变量名（插件用 env::var 读）
+    pub env: String,
+    /// 是否必填（可选，默认 false；未填只提示不阻断保存）
+    #[serde(default)]
+    pub required: bool,
+    /// 仅 select 类型：选项列表 [{"value":"a","label":"甲"}]
+    #[serde(default)]
+    pub options: Option<Vec<serde_json::Value>>,
+}
+
+impl PluginConfigDecl {
+    /// 声明用到的全部环境变量名（冲突检测用）
+    pub fn env_names(&self) -> impl Iterator<Item = &str> {
+        self.fields.iter().map(|f| f.env.as_str())
+    }
 }
 
 fn default_category() -> String {
     "remote".to_string()
+}
+
+fn default_field_type() -> String {
+    "text".to_string()
 }
 
 fn default_timeout_secs() -> u64 {
@@ -100,6 +153,48 @@ impl PluginManifest {
                 self.id
             )));
         }
+        if let Some(config) = &self.config {
+            self.validate_config(config)?;
+        }
+        Ok(())
+    }
+
+    /// 校验配置声明：key/env 合法、type 白名单、select 必须带选项
+    fn validate_config(&self, config: &PluginConfigDecl) -> Result<(), PluginError> {
+        let legal = |s: &str| !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        let mut seen_keys = std::collections::HashSet::new();
+        for f in &config.fields {
+            if !legal(&f.key) {
+                return Err(PluginError::Unsupported(format!(
+                    "插件「{}」配置字段 key「{}」不合法（只允许字母、数字、-、_，最长 64）",
+                    self.id, f.key
+                )));
+            }
+            if !legal(&f.env) {
+                return Err(PluginError::Unsupported(format!(
+                    "插件「{}」配置字段「{}」的 env「{}」不合法",
+                    self.id, f.key, f.env
+                )));
+            }
+            if !seen_keys.insert(f.key.clone()) {
+                return Err(PluginError::Unsupported(format!(
+                    "插件「{}」配置字段 key「{}」重复",
+                    self.id, f.key
+                )));
+            }
+            if !matches!(f.r#type.as_str(), "text" | "secret" | "select" | "number") {
+                return Err(PluginError::Unsupported(format!(
+                    "插件「{}」配置字段「{}」类型「{}」不受支持（text/secret/select/number）",
+                    self.id, f.key, f.r#type
+                )));
+            }
+            if f.r#type == "select" && f.options.as_deref().map_or(true, |o| o.is_empty()) {
+                return Err(PluginError::Unsupported(format!(
+                    "插件「{}」select 字段「{}」必须声明非空 options",
+                    self.id, f.key
+                )));
+            }
+        }
         Ok(())
     }
 }
@@ -139,6 +234,7 @@ mod tests {
             category: default_category(),
             timeout_secs: default_timeout_secs(),
             requirements: None,
+            config: None,
         }
     }
 
@@ -245,5 +341,100 @@ mod tests {
         assert_eq!(m.category, "local");
         assert_eq!(m.timeout_secs, 1200);
         assert!(m.requirements.as_deref().unwrap_or("").contains("800MB"));
+    }
+
+    /// 带 config 声明的合法清单（云端插件典型样例）
+    fn manifest_json_with_config(config: serde_json::Value) -> String {
+        serde_json::json!({
+            "id": "foo-tts",
+            "name": "Foo TTS",
+            "version": "0.1.0",
+            "type": "tts_engine",
+            "platform": ["windows"],
+            "entry": "plugin.dll",
+            "min_app_version": "1.0.0",
+            "checksum": "abc",
+            "config": config
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn 合法config声明解析并校验通过() {
+        let dir = tempfile::tempdir().unwrap();
+        let json = manifest_json_with_config(serde_json::json!({
+            "help_url": "https://foo.example.com/keys",
+            "fields": [
+                { "key": "api_key", "type": "secret", "label": "API Key",
+                  "env": "FOO_API_KEY", "required": true,
+                  "description": "在 Foo 控制台创建" },
+                { "key": "endpoint", "label": "自定义端点", "env": "FOO_ENDPOINT",
+                  "placeholder": "https://api.foo.com" }
+            ]
+        }));
+        std::fs::write(dir.path().join("manifest.json"), json).unwrap();
+        let m = PluginManifest::load(dir.path()).unwrap();
+        let config = m.config.clone().expect("config 应解析");
+        assert_eq!(config.fields.len(), 2);
+        assert_eq!(config.fields[0].r#type, "secret");
+        // type 缺省为 text
+        assert_eq!(config.fields[1].r#type, "text");
+        assert!(!config.fields[1].required);
+        assert!(m.validate("1.4.0").is_ok());
+        // env_names 供冲突检测
+        assert_eq!(config.env_names().collect::<Vec<_>>(), vec!["FOO_API_KEY", "FOO_ENDPOINT"]);
+    }
+
+    #[test]
+    fn 未知字段类型拒绝加载() {
+        let dir = tempfile::tempdir().unwrap();
+        let json = manifest_json_with_config(serde_json::json!({
+            "fields": [ { "key": "a", "type": "color", "label": "颜色", "env": "FOO_A" } ]
+        }));
+        std::fs::write(dir.path().join("manifest.json"), json).unwrap();
+        let m = PluginManifest::load(dir.path()).unwrap();
+        let err = m.validate("1.4.0").unwrap_err();
+        assert!(err.to_string().contains("不受支持"), "实际: {err}");
+    }
+
+    #[test]
+    fn config字段key或env非法拒绝() {
+        let dir = tempfile::tempdir().unwrap();
+        let json = manifest_json_with_config(serde_json::json!({
+            "fields": [ { "key": "a b", "label": "x", "env": "FOO_A" } ]
+        }));
+        std::fs::write(dir.path().join("manifest.json"), json).unwrap();
+        assert!(PluginManifest::load(dir.path()).unwrap().validate("1.4.0").is_err());
+
+        let json = manifest_json_with_config(serde_json::json!({
+            "fields": [ { "key": "a", "label": "x", "env": "" } ]
+        }));
+        std::fs::write(dir.path().join("manifest.json"), json).unwrap();
+        assert!(PluginManifest::load(dir.path()).unwrap().validate("1.4.0").is_err());
+    }
+
+    #[test]
+    fn select缺options拒绝() {
+        let dir = tempfile::tempdir().unwrap();
+        let json = manifest_json_with_config(serde_json::json!({
+            "fields": [ { "key": "tier", "type": "select", "label": "档位", "env": "FOO_TIER" } ]
+        }));
+        std::fs::write(dir.path().join("manifest.json"), json).unwrap();
+        let err = PluginManifest::load(dir.path()).unwrap().validate("1.4.0").unwrap_err();
+        assert!(err.to_string().contains("options"), "实际: {err}");
+    }
+
+    #[test]
+    fn 带bom的config清单也能解析() {
+        let dir = tempfile::tempdir().unwrap();
+        let json = format!(
+            "\u{FEFF}{}",
+            manifest_json_with_config(serde_json::json!({
+                "fields": [ { "key": "api_key", "type": "secret", "label": "K", "env": "FOO_API_KEY" } ]
+            }))
+        );
+        std::fs::write(dir.path().join("manifest.json"), json).unwrap();
+        let m = PluginManifest::load(dir.path()).expect("带 BOM 应能解析");
+        assert!(m.config.unwrap().fields.len() == 1);
     }
 }

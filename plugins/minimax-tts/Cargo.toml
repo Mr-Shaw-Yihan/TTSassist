@@ -1,6 +1,6 @@
 [package]
 name = "minimax-tts"
-version = "0.2.0"
+version = "0.2.1"
 description = "MiniMax TTS 插件（国内版）— 调用 api.minimaxi.com 云端语音合成"
 edition = "2021"
 

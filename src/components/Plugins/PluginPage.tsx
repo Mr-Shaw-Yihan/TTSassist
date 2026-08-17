@@ -337,6 +337,21 @@ export function PluginPage() {
               本地·离线
             </span>
           )}
+          {/* 通用插件配置：有未填的必填字段时提示（不阻断安装/使用，合成时插件会报缺配置） */}
+          {(() => {
+            const missing = (p.config?.fields ?? []).filter(
+              (f) => f.required && !(settings?.plugin_config?.[p.id]?.[f.key] ?? "").trim(),
+            );
+            if (missing.length === 0) return null;
+            return (
+              <span
+                className="rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600"
+                title={`待配置：${missing.map((f) => f.label).join("、")}。请在设置页选中该引擎后，于配置卡中填写`}
+              >
+                ⚙ 待配置
+              </span>
+            );
+          })()}
         </div>
 
         {/* 操作行：引擎状态/更新在左，打开位置/卸载在右（独立一行，窄窗可换行） */}
