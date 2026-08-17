@@ -1,6 +1,6 @@
 [package]
 name = "voiceassist"
-version = "1.7.3"
+version = "1.8.0"
 description = "VoiceAssist - 为语言障碍者打造的文本转语音沟通助手"
 authors = ["you"]
 edition = "2021"
@@ -21,6 +21,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
 rodio = "0.20"
 cpal = "0.15"
@@ -42,13 +43,4 @@ tokio = { version = "1", features = ["time"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
-
-# Windows 低级键盘钩子（WH_KEYBOARD_LL）：全屏游戏内全局快捷键，替代 RegisterHotKey
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = [
-    "Win32_Foundation",
-    "Win32_System_LibraryLoader",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_UI_WindowsAndMessaging",
-] }
 

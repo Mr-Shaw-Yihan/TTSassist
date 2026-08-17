@@ -4,7 +4,6 @@
 pub mod asr;
 pub mod commands;
 pub mod hotkey;
-pub mod hotkey_ll;
 pub mod plugins;
 pub mod storage;
 pub mod sync;
@@ -94,6 +93,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             storage::ensure_data_dirs(&data_dir)?;
@@ -108,20 +108,16 @@ pub fn run() {
                 std::env::set_var("MIMO_API_KEY", &settings.mimo_api_key);
             }
 
-            // MiniMax 插件环境变量注入（插件通过 std::env::var 读取 API Key）
-            if !settings.minimax_api_key.is_empty() {
-                std::env::set_var("MINIMAX_API_KEY", &settings.minimax_api_key);
-            }
-            if !settings.minimax_global_api_key.is_empty() {
-                std::env::set_var("MINIMAX_GLOBAL_API_KEY", &settings.minimax_global_api_key);
-            }
-
             // 阶段 22：插件根目录改为 exe 同级 plugins/（脱离 APPDATA 系统盘）
             let plugins_root = resolve_plugins_root();
             migrate_plugins_if_needed(&data_dir, &plugins_root);
 
             // 插件系统：加载已安装插件（单个插件失败只记日志，不影响主流程）
-            app.manage(plugins::PluginManager::load_all(&plugins_root));
+            let plugin_manager = plugins::PluginManager::load_all(&plugins_root);
+            // 通用插件配置注入：按各插件 manifest 的 config 声明把
+            // settings.plugin_config 注入环境变量（替代旧 minimax 硬编码注入）
+            plugin_manager.inject_config_env(&settings.plugin_config);
+            app.manage(plugin_manager);
 
             // 浮窗呼出快捷键：读设置 → 注册（失败只记日志，不影响主功能）
             let accel = settings.hotkey_show_window.clone();
@@ -206,6 +202,9 @@ pub fn run() {
             crate::commands::tts::generate_tts,
             crate::commands::plugins::list_plugins,
             crate::commands::plugins::uninstall_plugin,
+            crate::commands::plugins::get_plugin_config,
+            crate::commands::plugins::set_plugin_config,
+            crate::commands::plugins::clear_plugin_config,
             crate::commands::plugins::install_plugin_zip,
             crate::commands::plugins::import_offline_resources,
             crate::commands::plugins::clean_failed_resources,
