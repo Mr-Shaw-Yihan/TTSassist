@@ -186,6 +186,30 @@ pub fn run() {
             // 加载收藏用于注册收藏快捷键（data_dir 随后移入 AppState）
             let favorites = storage::favorites::load_favorites(&data_dir);
 
+            // 悬浮球：设置开启时显示（有保存位置用保存值，否则放主显示器右下角）。
+            // 必须在 AppState::new 之前读 settings（那边会 move）
+            if settings.floating_ball_enabled {
+                if let Some(ball) = app.get_webview_window("floating_ball") {
+                    let ball_px = storage::types::clamp_ball_size(settings.floating_ball_size);
+                    let (mut x, mut y) = (settings.floating_ball_x, settings.floating_ball_y);
+                    if x < 0 || y < 0 {
+                        if let Ok(Some(mon)) = app.primary_monitor() {
+                            let size = mon.size();
+                            let scale = mon.scale_factor();
+                            // 右下角留边：右侧 24px，底部多留 80px 避开任务栏
+                            x = size.width as i32 - (((ball_px as f64) * scale) as i32 + 24);
+                            y = size.height as i32 - (((ball_px as f64) * scale) as i32 + 80);
+                        }
+                    }
+                    if x >= 0 && y >= 0 {
+                        let _ = ball.set_position(tauri::PhysicalPosition::new(x, y));
+                    }
+                    // 窗口尺寸跟随用户设置（tauri.conf.json 里的 56x56 只是初始值）
+                    let _ = ball.set_size(tauri::LogicalSize::new(ball_px, ball_px));
+                    let _ = ball.show();
+                }
+            }
+
             app.manage(AppState::new(data_dir, settings));
             // 虚拟麦克风播放控制（专用音频线程）
             app.manage(crate::commands::mic::MicPlayback::spawn());
@@ -249,6 +273,12 @@ pub fn run() {
             crate::hotkey::set_voice_input_hotkey,
             crate::hotkey::set_play_last_hotkey,
             crate::hotkey::set_mic_toggle_hotkey,
+            crate::commands::floating_ball::toggle_quick_input,
+            crate::commands::floating_ball::toggle_mic_send,
+            crate::commands::floating_ball::set_floating_ball_enabled,
+            crate::commands::floating_ball::save_floating_ball_pos,
+            crate::commands::floating_ball::start_outside_click_watch,
+            crate::commands::floating_ball::stop_outside_click_watch,
             crate::show_main_window,
         ])
         .run(tauri::generate_context!())

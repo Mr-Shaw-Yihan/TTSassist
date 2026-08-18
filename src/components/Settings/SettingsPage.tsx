@@ -15,6 +15,7 @@ import { MicSettings } from "./MicSettings";
 import { VoiceInputSettings } from "./VoiceInputSettings";
 import { PluginSetupPanel } from "../Plugins/PluginSetupPanel";
 import { PluginConfigPanel } from "./PluginConfigPanel";
+import { setFloatingBallEnabled } from "../../services/invoke";
 import { ResourcePackLinks } from "../Plugins/ResourcePackLinks";
 import { VoiceManager } from "./VoiceManager";
 
@@ -1066,6 +1067,76 @@ export function SettingsPage() {
                 clearable
                 hint="按下切换「语音是否发送到虚拟麦克风」开关，无需鼠标操作。"
               />
+
+              {/* 悬浮球：不依赖快捷键的常驻启动方式（游戏内可用） */}
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="h-3.5 w-[3px] shrink-0 rounded-full bg-[var(--amber-500)]" aria-hidden />
+                    <h3 className="font-display text-sm font-semibold tracking-wide text-[var(--ink-900)]">悬浮球</h3>
+                  </div>
+                  <p className="mt-1 pl-[11px] text-[11px] leading-relaxed text-[var(--ink-300)]">
+                    常驻置顶小球，适合快捷键无法触发的游戏：单击展开输入浮窗，长按拖动位置，右键打开菜单。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={settings?.floating_ball_enabled ?? false}
+                  onClick={() => {
+                    void setFloatingBallEnabled(!(settings?.floating_ball_enabled ?? false)).catch((e) => {
+                      window.alert(`切换悬浮球失败：${e}`);
+                    });
+                  }}
+                  className={[
+                    "relative mt-1 h-6 w-11 shrink-0 rounded-full transition-colors",
+                    (settings?.floating_ball_enabled ?? false)
+                      ? "bg-[var(--amber-500)]"
+                      : "bg-[var(--ink-200)]",
+                  ].join(" ")}
+                >
+                  <span
+                    className={[
+                      "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all",
+                      (settings?.floating_ball_enabled ?? false) ? "left-[22px]" : "left-0.5",
+                    ].join(" ")}
+                  />
+                </button>
+              </div>
+
+              {/* 悬浮球大小：三档固定大小（固定档位比滑块更不易出 bug）。
+                  标准 56 = 初始档位；小 44 / 大 72 为缩小、放大档，均在后端 40~96 安全范围内 */}
+              <div className="pl-[11px]">
+                <div className="flex items-center justify-between text-[11px] text-[var(--ink-300)]">
+                  <span>球体大小</span>
+                </div>
+                <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-xl bg-[var(--ink-100)]/60 p-1">
+                  {([
+                    { label: "小", size: 44 },
+                    { label: "标准", size: 56 },
+                    { label: "大", size: 72 },
+                  ] as const).map((tier) => {
+                    const cur = settings?.floating_ball_size ?? 56;
+                    const active = cur === tier.size;
+                    return (
+                      <button
+                        key={tier.label}
+                        type="button"
+                        onClick={() => { void patch("floating_ball_size", tier.size).catch(() => {}); }}
+                        aria-pressed={active}
+                        className={[
+                          "rounded-lg py-1.5 text-xs transition-colors",
+                          active
+                            ? "bg-[var(--paper-card)] font-semibold text-[var(--ink-900)] shadow-sm"
+                            : "text-[var(--ink-400)] hover:text-[var(--ink-700)]",
+                        ].join(" ")}
+                      >
+                        {tier.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           </Section>
 

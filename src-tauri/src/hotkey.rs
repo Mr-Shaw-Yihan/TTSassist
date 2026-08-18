@@ -53,21 +53,27 @@ pub fn register_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
             if event.state() != ShortcutState::Pressed {
                 return;
             }
-            if let Some(floating) = app.get_webview_window("quick_input") {
-                if floating.is_visible().unwrap_or(false) {
-                    // 浮窗已显示 → 收起浮窗（主窗保持隐藏）
-                    let _ = floating.hide();
-                } else {
-                    // 呼出浮窗，同时隐藏主窗（避免两窗同现）
-                    let _ = floating.show();
-                    let _ = floating.set_focus();
-                    if let Some(main) = app.get_webview_window("main") {
-                        let _ = main.hide();
-                    }
-                }
-            }
+            toggle_quick_input(app);
         })
         .map_err(|e| format!("注册快捷键失败：{e}"))
+}
+
+/// 切换快速输入浮窗显隐（呼出快捷键与悬浮球点击共用）。
+/// 呼出浮窗时隐藏主窗（避免两窗同现）；收起浮窗时主窗保持隐藏（用户自行通过托盘/浮窗按钮打开）。
+pub fn toggle_quick_input(app: &AppHandle) {
+    if let Some(floating) = app.get_webview_window("quick_input") {
+        if floating.is_visible().unwrap_or(false) {
+            // 浮窗已显示 → 收起浮窗（主窗保持隐藏）
+            let _ = floating.hide();
+        } else {
+            // 呼出浮窗，同时隐藏主窗（避免两窗同现）
+            let _ = floating.show();
+            let _ = floating.set_focus();
+            if let Some(main) = app.get_webview_window("main") {
+                let _ = main.hide();
+            }
+        }
+    }
 }
 
 /// 设置（更换）全局快捷键命令。
@@ -257,25 +263,30 @@ pub fn register_mic_toggle_hotkey(app: &AppHandle, accel: &str) -> Result<(), St
             if event.state() != ShortcutState::Pressed {
                 return;
             }
-            let Some(state) = app.try_state::<AppState>() else { return };
-            // 先翻转内存态再持久化（锁作用域尽量短）
-            let new_val = match state.settings.write() {
-                Ok(mut s) => {
-                    s.mic_send_enabled = !s.mic_send_enabled;
-                    s.mic_send_enabled
-                }
-                Err(_) => return,
-            };
-            if let Err(e) = crate::storage::settings::update_setting(
-                &state.data_dir,
-                "mic_send_enabled",
-                serde_json::json!(new_val),
-            ) {
-                eprintln!("持久化麦克风开关失败: {e}");
-            }
-            notify_changed(app, EVENT_SETTINGS_CHANGED);
+            toggle_mic_send(app);
         })
         .map_err(|e| format!("注册麦克风开关快捷键失败：{e}"))
+}
+
+/// 翻转「发送到麦克风」全局开关（快捷键与悬浮球菜单共用）：
+/// 翻转内存态 → 持久化 → 广播 settings:changed 让前端刷新。
+pub fn toggle_mic_send(app: &AppHandle) {
+    let Some(state) = app.try_state::<AppState>() else { return };
+    let new_val = match state.settings.write() {
+        Ok(mut s) => {
+            s.mic_send_enabled = !s.mic_send_enabled;
+            s.mic_send_enabled
+        }
+        Err(_) => return,
+    };
+    if let Err(e) = crate::storage::settings::update_setting(
+        &state.data_dir,
+        "mic_send_enabled",
+        serde_json::json!(new_val),
+    ) {
+        eprintln!("持久化麦克风开关失败: {e}");
+    }
+    notify_changed(app, EVENT_SETTINGS_CHANGED);
 }
 
 /// 检测快捷键是否已被其它项占用（四项全局快捷键 + 全部收藏），返回冲突方名称。

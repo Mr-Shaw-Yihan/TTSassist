@@ -8,6 +8,7 @@
 pub mod audio;
 pub mod clone_voice;
 pub mod favorite;
+pub mod floating_ball;
 pub mod message;
 pub mod mic;
 pub mod minimax_clone;

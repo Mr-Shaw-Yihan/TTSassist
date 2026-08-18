@@ -420,6 +420,39 @@ export async function setMicToggleHotkey(accel: string): Promise<void> {
   return invoke<void>("set_mic_toggle_hotkey", { accel });
 }
 
+// ── 悬浮球 ────────────────────────────────────
+
+/** 单击悬浮球：切换快速输入浮窗（与「呼出浮窗」快捷键同一逻辑） */
+export async function toggleQuickInput(): Promise<void> {
+  return invoke<void>("toggle_quick_input");
+}
+
+/** 悬浮球菜单：开关「发送到麦克风」（与快捷键同一逻辑） */
+export async function toggleMicSend(): Promise<void> {
+  return invoke<void>("toggle_mic_send");
+}
+
+/** 设置里开关悬浮球（后端同时显示/隐藏窗口） */
+export async function setFloatingBallEnabled(enabled: boolean): Promise<void> {
+  return invoke<void>("set_floating_ball_enabled", { enabled });
+}
+
+/** 悬浮球拖拽结束后保存位置（屏幕物理像素，下次启动还原） */
+export async function saveFloatingBallPos(x: number, y: number): Promise<void> {
+  return invoke<void>("save_floating_ball_pos", { x, y });
+}
+
+/** 菜单展开时启动「窗口外点击」监视（免焦点窗口收不到外部点击，后端轮询检测）；
+ *  width/height 为展开后窗口的逻辑尺寸 */
+export async function startOutsideClickWatch(width: number, height: number): Promise<void> {
+  return invoke<void>("start_outside_click_watch", { width, height });
+}
+
+/** 菜单收起 / 窗口销毁：停止窗口外点击监视 */
+export async function stopOutsideClickWatch(): Promise<void> {
+  return invoke<void>("stop_outside_click_watch");
+}
+
 // ── VB-CABLE 驱动下载与安装 ───────────────────
 
 /** 下载 VB-CABLE 驱动包（返回下载的 zip 路径），进度通过事件推送 */

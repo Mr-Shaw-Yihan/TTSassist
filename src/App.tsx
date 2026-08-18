@@ -13,6 +13,7 @@ import { MicIcon } from "./components/icons/MicIcon";
 import { FavoriteList } from "./components/Favorites/FavoriteList";
 import { SettingsPage } from "./components/Settings/SettingsPage";
 import { QuickInput } from "./components/QuickInput/QuickInput";
+import { FloatingBall } from "./components/FloatingBall/FloatingBall";
 import { PluginPage } from "./components/Plugins/PluginPage";
 import { UpdateDialog } from "./components/Settings/UpdateDialog";
 import { useSettingsStore } from "./stores/settingsStore";
@@ -42,6 +43,9 @@ function App() {
   const win = getCurrentWindow();
   if (win.label === "quick_input") {
     return <QuickInput />;
+  }
+  if (win.label === "floating_ball") {
+    return <FloatingBall />;
   }
 
   const [messages, setMessages] = useState<Message[]>([]);

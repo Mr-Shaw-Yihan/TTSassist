@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "quick_input"],
+  "windows": ["main", "quick_input", "floating_ball"],
   "permissions": [
     "core:default",
     "opener:default",
@@ -13,6 +13,11 @@
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
-    "core:window:allow-is-maximized"
+    "core:window:allow-is-maximized",
+    "core:window:allow-set-position",
+    "core:window:allow-outer-position",
+    "core:window:allow-set-size",
+    "core:window:allow-scale-factor",
+    "core:window:allow-current-monitor"
   ]
 }

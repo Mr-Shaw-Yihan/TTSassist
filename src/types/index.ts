@@ -71,6 +71,13 @@ export interface Settings {
   hotkey_mic_toggle: string;
   /** 插件配置（通用机制）：插件 id → 字段 key → 值 */
   plugin_config: Record<string, Record<string, string>>;
+  /** 悬浮球开关（不依赖快捷键的常驻启动方式） */
+  floating_ball_enabled: boolean;
+  /** 悬浮球位置（屏幕物理像素；-1 = 未设置，用默认右下角） */
+  floating_ball_x: number;
+  floating_ball_y: number;
+  /** 悬浮球直径（逻辑像素），三档固定：44 / 56（初始）/ 72 */
+  floating_ball_size: number;
 }
 
 /** 通用插件配置：manifest 的 config 声明 */

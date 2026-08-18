@@ -31,13 +31,28 @@
         "visible": false,
         "focus": true,
         "resizable": false
+      },
+      {
+        "label": "floating_ball",
+        "title": "",
+        "width": 56,
+        "height": 56,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "visible": false,
+        "focus": false,
+        "resizable": false,
+        "transparent": true,
+        "skipTaskbar": true
       }
     ],
     "security": {
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": [
+          "**"
+        ]
       }
     }
   },
@@ -51,6 +66,8 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["resources/plugins/*.zip"]
+    "resources": [
+      "resources/plugins/*.zip"
+    ]
   }
 }

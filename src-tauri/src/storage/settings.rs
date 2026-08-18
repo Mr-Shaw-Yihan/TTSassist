@@ -67,6 +67,10 @@ pub fn load_settings(data_dir: &Path) -> Settings {
             plugin_config: v.get("plugin_config")
                 .and_then(|x| serde_json::from_value::<std::collections::HashMap<String, std::collections::HashMap<String, String>>>(x.clone()).ok())
                 .unwrap_or(default.plugin_config),
+            floating_ball_enabled: v.get("floating_ball_enabled").and_then(|x| x.as_bool()).unwrap_or(default.floating_ball_enabled),
+            floating_ball_x: v.get("floating_ball_x").and_then(|x| x.as_i64()).map(|x| x as i32).unwrap_or(default.floating_ball_x),
+            floating_ball_y: v.get("floating_ball_y").and_then(|x| x.as_i64()).map(|x| x as i32).unwrap_or(default.floating_ball_y),
+            floating_ball_size: v.get("floating_ball_size").and_then(|x| x.as_i64()).map(|x| super::types::clamp_ball_size(x as i32)).unwrap_or(default.floating_ball_size),
         },
         Err(_) => default,
     };
@@ -159,6 +163,10 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "hotkey_play_last" => if let Some(v) = value.as_str() { s.hotkey_play_last = v.to_string() },
         "hotkey_mic_toggle" => if let Some(v) = value.as_str() { s.hotkey_mic_toggle = v.to_string() },
         "plugin_config" => if let Ok(map) = serde_json::from_value::<std::collections::HashMap<String, std::collections::HashMap<String, String>>>(value.clone()) { s.plugin_config = map },
+        "floating_ball_enabled" => if let Some(v) = value.as_bool() { s.floating_ball_enabled = v },
+        "floating_ball_x" => if let Some(v) = value.as_i64() { s.floating_ball_x = v as i32 },
+        "floating_ball_y" => if let Some(v) = value.as_i64() { s.floating_ball_y = v as i32 },
+        "floating_ball_size" => if let Some(v) = value.as_i64() { s.floating_ball_size = super::types::clamp_ball_size(v as i32) },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;
