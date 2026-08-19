@@ -78,7 +78,7 @@ npm run tauri build    # 打包
 
 环境要求：Node.js、Rust 工具链（rustup）、Windows MSVC 构建链 + Windows SDK。
 
-- 插件开发：见仓库 `doc/` 目录下的插件系统开发参考
+- 插件开发：应用内插件页提供安装/更新入口；插件接口规范（manifest、C ABI）见项目维护文档，欢迎通过 Issues 交流
 - 目录结构：前端 `src/`（React 组件 + Zustand 状态）、后端 `src-tauri/`（Rust 命令与存储）、插件 `plugins/`（各引擎 crate）
 
 ## 免责声明
