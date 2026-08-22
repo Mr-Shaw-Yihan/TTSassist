@@ -1,0 +1,65 @@
+{
+  "hooks": {
+    "events": {
+      "SessionStart": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "bash -lc \"teamai hook-dispatch session-start --tool zcode 2>/dev/null\" || true"
+            }
+          ]
+        }
+      ],
+      "Stop": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "bash -lc \"teamai hook-dispatch stop --tool zcode 2>/dev/null\" || true"
+            }
+          ]
+        }
+      ],
+      "PostToolUse": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "bash -lc \"teamai hook-dispatch post-tool-use --tool zcode 2>/dev/null\" || true"
+            }
+          ]
+        },
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "bash -lc \"teamai hook-dispatch post-tool-use --tool zcode --matcher Skill 2>/dev/null\" || true"
+            }
+          ],
+          "matcher": "Skill"
+        },
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "bash -lc \"teamai hook-dispatch post-tool-use --tool zcode --matcher TodoWrite 2>/dev/null\" || true"
+            }
+          ],
+          "matcher": "TodoWrite"
+        }
+      ],
+      "UserPromptSubmit": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "bash -lc \"teamai hook-dispatch prompt-submit --tool zcode 2>/dev/null\" || true"
+            }
+          ]
+        }
+      ]
+    },
+    "enabled": true
+  }
+}

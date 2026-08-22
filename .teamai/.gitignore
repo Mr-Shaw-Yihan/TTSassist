@@ -1,0 +1,24 @@
+# teamai single-repo mode — machine-local state (never commit)
+config.yaml
+state.json
+token
+.update-lock
+.reports-lock
+.bootstrap-lock
+env.sh
+env.local
+usage.jsonl
+known-skills.json
+search-index.json
+dashboard/
+# git worktrees for reports (orphan branch) and knowledge PRs
+reports-wt/
+knowledge-wt/
+# report data lives on the teamai-reports orphan branch, not on main
+members/
+sessions/
+votes/
+stats/
+pending-review.jsonl
+
+# Knowledge (skills/, rules/, docs/, learnings/) is intentionally committed to main.
