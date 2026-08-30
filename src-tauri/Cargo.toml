@@ -1,6 +1,6 @@
 [package]
 name = "voiceassist"
-version = "1.9.0"
+version = "1.7.9"
 description = "VoiceAssist - 为语言障碍者打造的文本转语音沟通助手"
 authors = ["you"]
 edition = "2021"

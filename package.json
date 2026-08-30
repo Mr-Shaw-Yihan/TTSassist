@@ -1,7 +1,7 @@
 {
   "name": "voiceassist",
   "private": true,
-  "version": "1.7.5",
+  "version": "1.7.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
