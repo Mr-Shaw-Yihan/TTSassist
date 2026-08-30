@@ -9,6 +9,7 @@ import '../proto/messages.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
 import 'grok_logo.dart';
+import 'update_banner.dart';
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key, required this.app});
@@ -68,6 +69,13 @@ class _MainPageState extends State<MainPage> {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
                 child: _topRow(app),
               ),
+              if (app.updateInfo != null)
+                UpdateBanner(
+                  info: app.updateInfo!,
+                  onTap: () => showDialog(
+                      context: context,
+                      builder: (_) => const UpdateDialog()),
+                ),
               const SizedBox(height: 12),
               Expanded(child: _list(app)),
               _bottomBar(app),

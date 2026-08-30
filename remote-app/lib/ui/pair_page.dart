@@ -9,6 +9,7 @@ import '../net/remote_client.dart';
 import '../state/app_state.dart';
 import '../theme.dart';
 import 'grok_logo.dart';
+import 'update_banner.dart';
 
 class PairPage extends StatefulWidget {
   const PairPage({super.key, required this.app});
@@ -82,6 +83,15 @@ class _PairPageState extends State<PairPage> {
                               app.connected ? 'suspicious' : 'sleeping',
                         ),
                       ),
+                      if (app.updateInfo != null) ...[
+                        const SizedBox(height: 10),
+                        UpdateBanner(
+                          info: app.updateInfo!,
+                          onTap: () => showDialog(
+                              context: context,
+                              builder: (_) => const UpdateDialog()),
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       // 标题：哑金瘦体
                       const Text(

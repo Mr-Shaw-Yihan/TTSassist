@@ -9,7 +9,9 @@ import 'package:flutter/foundation.dart';
 import '../net/discovery.dart';
 import '../net/remote_client.dart';
 import '../net/session.dart';
+import '../net/updater.dart';
 import '../proto/messages.dart';
+import '../ui/update_banner.dart';
 
 class AppState extends ChangeNotifier {
   AppState() {
@@ -47,6 +49,8 @@ class AppState extends ChangeNotifier {
   String deviceName = '移动设备';
   String? toast;
   Timer? _toastTimer;
+  /// 有新版本时的远端更新信息（启动静默检查；null = 无更新或检查失败）
+  UpdateInfo? updateInfo;
 
   bool get connected => phase == ConnPhase.connected;
   bool get synthesizing => state?.synthesizing ?? false;
@@ -67,6 +71,13 @@ class AppState extends ChangeNotifier {
       needsPairing = true;
       notifyListeners();
     }
+    // 应用内更新：静默检查（失败不打扰）；有新版本时通知 UI 显示更新条
+    checkForUpdate().then((info) {
+      if (info != null) {
+        updateInfo = info;
+        notifyListeners();
+      }
+    });
   }
 
   void _onPhase(ConnPhase p) {
