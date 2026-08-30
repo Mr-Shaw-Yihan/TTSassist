@@ -11,6 +11,7 @@ import { MessageBubble } from "./components/Chat/MessageBubble";
 import { VolumeControl } from "./components/Chat/VolumeSlider";
 import { MicToggle } from "./components/Chat/MicToggle";
 import { MicIcon } from "./components/icons/MicIcon";
+import { TexDefs, TexIcon } from "./components/icons/TexIcon";
 import { FavoriteList } from "./components/Favorites/FavoriteList";
 import { SettingsPage } from "./components/Settings/SettingsPage";
 import { QuickInput } from "./components/QuickInput/QuickInput";
@@ -444,6 +445,8 @@ function App() {
 
   return (
     <div className="relative flex h-screen flex-col bg-[var(--paper)] text-[var(--ink-900)]">
+      {/* 纹理图标/按钮的全局定义（金磨砂 + 紫星点 pattern 与符号库） */}
+      <TexDefs />
       {/* 自定义标题栏（系统标题栏已关）：品牌字 + 窗口控制，品牌区可拖拽移动窗口 */}
       <header
         data-tauri-drag-region
@@ -504,16 +507,16 @@ function App() {
       <div className="flex min-h-0 flex-1">
         {/* 左侧边栏（永久）：消息 / 收藏 / 插件 / 设置（恒为按钮组最后一个），「其他」置底 */}
         <nav className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-[var(--ink-200)] bg-[var(--paper)] py-3">
-          <SideButton icon="💬" label="消息" active={tab === "messages"} onClick={() => setTab("messages")} />
-          <SideButton icon={<StarIcon />} label="收藏" active={tab === "favorites"} onClick={() => setTab("favorites")} />
-          <SideButton icon="⧉" label="插件" active={tab === "plugins"} onClick={() => setTab("plugins")} />
-          <SideButton icon={<GearIcon />} label="设置" active={tab === "settings"} dot={updateDot} onClick={() => setTab("settings")} />
+          <SideButton icon={<TexIcon name="msg" size={16} />} label="消息" active={tab === "messages"} onClick={() => setTab("messages")} />
+          <SideButton icon={<TexIcon name="star" size={16} />} label="收藏" active={tab === "favorites"} onClick={() => setTab("favorites")} />
+          <SideButton icon={<TexIcon name="grid" size={16} />} label="插件" active={tab === "plugins"} onClick={() => setTab("plugins")} />
+          <SideButton icon={<TexIcon name="gear" size={16} />} label="设置" active={tab === "settings"} dot={updateDot} onClick={() => setTab("settings")} />
           <div className="flex-1" />
 
           {/* 「其他」：收纳麦克风开关、音量与播放速度 */}
           <div ref={moreRef} className="relative flex justify-center">
             <SideButton
-              icon="⋯"
+              icon={<TexIcon name="dots" size={16} />}
               label="其他"
               active={moreOpen}
               onClick={() => setMoreOpen((v) => !v)}
@@ -645,7 +648,8 @@ function App() {
   );
 }
 
-/** 侧边栏按钮：图标 + 小字标签，可选红点 */
+/** 侧边栏按钮：纹理图标 + 小字标签，可选红点。
+ *  选中态铺皮肤质感（浅色哑金磨砂 / 深色紫晶星点），图标变为实心断线形态 */
 function SideButton({
   icon,
   label,
@@ -666,35 +670,16 @@ function SideButton({
       className={[
         "relative flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-xl transition-colors",
         active
-          ? "bg-[var(--amber-200)]/40 text-[var(--amber-600)]"
+          ? "btn-tex border"
           : "text-[var(--ink-300)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
       ].join(" ")}
     >
-      <span className="flex h-4 w-4 items-center justify-center text-base leading-none">{icon}</span>
+      <span className="flex h-4 w-4 items-center justify-center leading-none">{icon}</span>
       <span className="text-[9px] leading-none tracking-wide">{label}</span>
       {dot && (
         <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[var(--seal)]" />
       )}
     </button>
-  );
-}
-
-/** 简约星星图标（收藏用） */
-function StarIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-    </svg>
-  );
-}
-
-/** 齿轮图标（设置用） */
-function GearIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-    </svg>
   );
 }
 

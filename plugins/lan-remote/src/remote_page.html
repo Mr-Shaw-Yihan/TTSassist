@@ -1,0 +1,465 @@
+<!doctype html>
+<!-- 电子声带 · Web 遥控（自托管单文件版）：由 lan-remote 插件在 45271 端口直接托管。
+     手机/平板浏览器扫码或输入 http://<PC-IP>:45271 即用，无需安装。
+     与 App 同一 WS 协议（doc/移动端遥控器设计.md §三）；仅限局域网，Safari 前台使用。 -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>电子声带遥控</title>
+<style>
+  :root {
+    --bg: #F8F4EA; --ink: #1A1816; --sub: #6B675F;
+    --gold: #A9821C; --gold-text: #8A7414; --gold-dim: rgba(138,116,20,.55);
+    --btn-black: #17150F; --on-black: #F7F3EA;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+    background: var(--bg); min-height: 100vh; overflow-x: hidden; position: relative;
+  }
+  /* 弥散背景：暖黄 + 雾蓝 */
+  .blob { position: fixed; border-radius: 50%; filter: blur(90px); pointer-events: none; }
+  .b1 { width: 130vw; height: 130vw; left: -33vw; top: -25vw; background: rgba(237,217,164,.55); }
+  .b2 { width: 108vw; height: 108vw; left: 44vw; top: 56vh; background: rgba(185,199,220,.55); }
+  .b3 { width: 77vw; height: 77vw; left: -28vw; top: 71vh; background: rgba(237,217,164,.35); }
+
+  .wrap { position: relative; max-width: 430px; margin: 0 auto; padding: max(10px, env(safe-area-inset-top)) 16px max(12px, env(safe-area-inset-bottom)); }
+  .page { display: none; flex-direction: column; min-height: calc(100vh - 40px); }
+  .page.on { display: flex; }
+
+  /* 哑金磨砂图标：金渐变底 + feTurbulence 噪斑，图标形状做 mask */
+  .gicon {
+    display: inline-block; width: 46px; height: 46px;
+    background: linear-gradient(180deg, #E9CA6B, #C69A2E);
+    -webkit-mask-image: var(--m); -webkit-mask-repeat: no-repeat;
+    -webkit-mask-position: center; -webkit-mask-size: contain;
+    mask-image: var(--m); mask-repeat: no-repeat; mask-position: center; mask-size: contain;
+    position: relative;
+  }
+  .gicon::after {
+    content: ""; position: absolute; inset: 0;
+    background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='2' seed='7' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 0.94  0 0 0 0 0.72  2.6 0 0 0 -1.45'/></filter><rect width='160' height='160' filter='url(%23n)'/></svg>") repeat;
+    background-size: 160px;
+  }
+  .sm .gicon { width: 22px; height: 22px; }
+
+  /* 毛玻璃 */
+  .glass {
+    background: rgba(255,255,255,.52);
+    -webkit-backdrop-filter: blur(22px); backdrop-filter: blur(22px);
+    border: 1px solid rgba(255,255,255,.4); border-radius: 22px;
+    box-shadow: 0 10px 28px rgba(26,24,22,.06);
+  }
+
+  /* 纯黑按钮面 */
+  .fbk { background: var(--btn-black); }
+  .press { transition: transform .12s ease; cursor: pointer; user-select: none; -webkit-user-select: none; }
+  .press:active { transform: scale(.96); }
+
+  /* logo：CSS 金球（grok 简化形） */
+  .orb { width: 64px; height: 64px; border-radius: 18px; background: var(--btn-black);
+         display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .orb .ball { width: 46px; height: 40px; border-radius: 50%; background: #D9B44A; position: relative; }
+  .orb .ball::before, .orb .ball::after {
+    content: ""; position: absolute; width: 12px; height: 4px; border-radius: 2px; background: #17150F; top: 14px;
+    animation: blink 4.2s ease-in-out infinite;
+  }
+  .orb .ball::before { left: 9px; } .orb .ball::after { right: 9px; }
+  @keyframes blink { 0%, 90%, 100% { height: 4px; top: 14px; } 93%, 97% { height: 1px; top: 16px; } }
+  .orb.sleep .ball::before, .orb.sleep .ball::after { height: 3px; top: 17px; animation: none; }
+
+  /* 顶部三黑钮（正方形） */
+  .toprow { display: flex; gap: 10px; margin-top: 8px; }
+  .tile { flex: 1; aspect-ratio: 1; border-radius: 18px; display: flex; align-items: center; justify-content: center; }
+
+  /* 收藏列表 */
+  .list { flex: 1; overflow-y: auto; margin: 12px 0 10px; padding-bottom: 4px; }
+  .fav {
+    display: flex; align-items: center; gap: 10px; padding: 14px 16px;
+    border-radius: 18px; margin-bottom: 10px;
+  }
+  .fav .t { flex: 1; min-width: 0; }
+  .fav .note { font-size: 15px; font-weight: 300; letter-spacing: .5px; color: var(--gold-text); line-height: 1.5; }
+  .fav .hk { font-size: 11px; color: var(--gold-dim); margin-top: 4px; }
+  .fav .dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--gold); }
+  @keyframes pulse { from { box-shadow: 0 0 12px 1px rgba(169,130,28,.22); } to { box-shadow: 0 0 20px 1px rgba(169,130,28,.44); } }
+  .pulsing { animation: pulse .9s ease-in-out infinite alternate; }
+
+  .empty { padding: 28px; text-align: center; }
+  .empty .l1 { font-size: 14px; font-weight: 300; color: var(--ink); margin-top: 12px; }
+  .empty .l2 { font-size: 12px; color: var(--sub); margin-top: 6px; }
+
+  .bottombar { border-radius: 28px; padding: 6px 8px 6px 18px; display: flex; align-items: center; gap: 8px; }
+  .bottombar input {
+    flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
+    font-size: 14px; color: var(--ink); font-family: inherit;
+  }
+  .bottombar input::placeholder { font-size: 13px; color: var(--sub); }
+  .bottombar .send { padding: 10px; display: flex; }
+  .bottombar .send.dim { opacity: .4; pointer-events: none; }
+
+  /* 配对页 */
+  .paircard { padding: 22px; }
+  .paircard h1 {
+    font-size: 22px; font-weight: 300; letter-spacing: 2px; color: var(--gold-text); margin-top: 12px;
+  }
+  .paircard .sub { font-size: 12px; color: var(--sub); margin-top: 6px; }
+  .dlabel { font-size: 11px; color: var(--sub); margin-top: 16px; }
+  .dpc {
+    margin-top: 6px; border-radius: 16px; padding: 13px 14px;
+    display: flex; align-items: center; gap: 8px;
+    background: linear-gradient(180deg, #E6C25C, #C69A2E);
+    position: relative; overflow: hidden;
+  }
+  .dpc::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='96' height='96'><filter id='t'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='11' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 0.93  0 0 0 0 0.65  1.4 0 0 0 -0.9'/></filter><rect width='96' height='96' filter='url(%23t)'/></svg>") repeat;
+    background-size: 96px;
+  }
+  .dpc > * { position: relative; z-index: 1; }
+  .dpc .n { flex: 1; font-size: 14px; font-weight: 600; color: var(--ink); }
+  .dpc .a { font-size: 11px; color: rgba(26,24,22,.62); }
+
+  .waitcard { margin-top: 14px; border-radius: 16px; padding: 14px 16px; display: flex; gap: 12px; align-items: center; }
+  .spin { width: 18px; height: 18px; flex: none; border-radius: 50%;
+          border: 2px solid rgba(169,130,28,.25); border-top-color: var(--gold); animation: rot 1s linear infinite; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+  .waitcard .t1 { font-size: 14px; color: var(--ink); }
+  .waitcard .t2 { font-size: 11px; color: var(--sub); margin-top: 4px; }
+
+  .iprow { display: flex; gap: 10px; margin-top: 16px; }
+  .field {
+    flex: 1; background: rgba(255,255,255,.55); border-radius: 14px; border: 0; outline: 0;
+    padding: 12px 14px; font-size: 14px; color: var(--ink); font-family: inherit; min-width: 0;
+  }
+  .field::placeholder { font-size: 13px; color: var(--sub); }
+  .field.port { flex: none; width: 76px; }
+  .gbtn {
+    display: flex; align-items: center; justify-content: center;
+    height: 46px; border-radius: 16px; margin-top: 10px;
+    font-size: 15px; font-weight: 400; letter-spacing: 3px; color: var(--on-black);
+  }
+
+  .statusrow { display: flex; align-items: center; gap: 6px; justify-content: flex-end; padding: 4px 2px 0; font-size: 11px; color: var(--sub); }
+  .led { width: 7px; height: 7px; border-radius: 50%; background: #bbb; }
+  .led.on { background: #3e9b4f; } .led.wait { background: var(--gold); }
+
+  /* toast */
+  .toast {
+    position: fixed; left: 24px; right: 24px; bottom: 120px;
+    display: none; justify-content: center; pointer-events: none; z-index: 30;
+  }
+  .toast.on { display: flex; }
+  .toast span { background: rgba(26,24,22,.88); color: #fff; font-size: 13px; padding: 12px 18px; border-radius: 14px; }
+
+  /* 断开确认 */
+  .mask { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+          background: rgba(26,24,22,.18); z-index: 40; }
+  .mask.on { display: flex; }
+  .dlg { width: 280px; padding: 20px; background: rgba(255,255,255,.92); }
+  .dlg .t { font-size: 15px; color: var(--ink); text-align: center; }
+  .dlg .row { display: flex; margin-top: 16px; }
+  .dlg button { flex: 1; background: none; border: 0; font-size: 15px; font-family: inherit; cursor: pointer; padding: 10px 0; }
+  .dlg .cancel { color: var(--sub); } .dlg .ok { color: var(--gold); font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+<div class="wrap">
+
+  <!-- ── 配对/连接页（未连时） ── -->
+  <div class="page on" id="page-pair">
+    <div class="statusrow"><span id="led-label">未连接</span><span class="led" id="led"></span></div>
+    <div class="glass paircard">
+      <div class="orb sleep" style="margin:0 auto;border-radius:18px"><div class="ball"></div></div>
+      <h1>电子声带遥控</h1>
+      <div class="sub" id="pair-sub">未连接 · 正在发现这台电脑的电子声带…</div>
+
+      <div class="glass waitcard" id="waitcard" style="display:none">
+        <div class="spin"></div>
+        <div>
+          <div class="t1">已连上，请在电脑屏幕上点击「允许」</div>
+          <div class="t2">PC 无人确认时，请求 10 秒后自动超时</div>
+        </div>
+      </div>
+
+      <div class="dlabel">本机（电子声带所在的电脑）</div>
+      <div class="dpc press" id="dpc">
+        <div class="n">本机电脑</div>
+        <div class="a" id="dpc-addr">…</div>
+      </div>
+
+      <div class="iprow">
+        <input class="field" id="ip" placeholder="IP 地址（如 192.168.1.5）">
+        <input class="field port" id="port" value="45271" inputmode="numeric">
+      </div>
+      <div class="gbtn fbk press" id="btn-connect">连接</div>
+    </div>
+  </div>
+
+  <!-- ── 主遥控页（已连） ── -->
+  <div class="page" id="page-main">
+    <div class="statusrow"><span id="led-label2">已连接</span><span class="led on" id="led2"></span></div>
+    <div class="toprow">
+      <div class="tile fbk press" id="logo-tile"><div class="orb" id="orb"><div class="ball"></div></div></div>
+      <div class="tile fbk press" id="mic-tile"><span class="gicon" id="mic-icon" style="--m:url('data:image/svg+xml;utf8,__MIC_ON__')"></span></div>
+      <div class="tile fbk press" id="playlast-tile"><span class="gicon" style="--m:url('data:image/svg+xml;utf8,__PLAY_LAST__')"></span></div>
+    </div>
+
+    <div class="list" id="list"></div>
+
+    <div class="bottombar glass">
+      <input id="msg" placeholder="发消息 或 输入文字">
+      <div class="send press" id="send"><span class="gicon sm" style="--m:url('data:image/svg+xml;utf8,__SEND__')"></span></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"><span id="toast-t"></span></div>
+
+<div class="mask" id="dlg">
+  <div class="glass dlg">
+    <div class="t">断开连接？</div>
+    <div class="row">
+      <button class="cancel" id="dlg-cancel">取消</button>
+      <button class="ok" id="dlg-ok">断开</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+// ── 常量与状态 ──
+var S = {
+  ws: null, phase: 'disconnected', token: null, host: null,
+  mic: false, playingId: null, synthesizing: false, favorites: [],
+  refSeq: 0, pending: {}, reconnectMs: 0, reconnectTimer: null,
+  userClosed: false, pairWaitTimer: null, everConnected: false,
+};
+var $ = function (id) { return document.getElementById(id); };
+var TOKEN_KEY = 'lan_remote_token';
+
+// ── 图标 mask（内联 SVG；mic_off 的斜杠挖空由遮罩叠加实现） ──
+var MIC_ON = "__MIC_ON__";
+var MIC_OFF = "__MIC_OFF__";
+
+// ── 工具 ──
+function toast(t) {
+  $('toast-t').textContent = t; $('toast').classList.add('on');
+  clearTimeout(toast._t); toast._t = setTimeout(function () { $('toast').classList.remove('on'); }, 2500);
+}
+function showPage(p) {
+  $('page-pair').classList.toggle('on', p === 'pair');
+  $('page-main').classList.toggle('on', p === 'main');
+}
+function setLed(state, label, labelId, ledId) {
+  var led = $(ledId); led.className = 'led' + (state === 'on' ? ' on' : state === 'wait' ? ' wait' : '');
+  $(labelId).textContent = label;
+}
+function deviceName() {
+  var ua = navigator.userAgent;
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua)) return 'iPad';
+  if (/Android/.test(ua)) return 'Android 手机';
+  return '浏览器';
+}
+
+// ── WS 连接（指数退避重连；token 自动 hello） ──
+function connect(host, port) {
+  clearTimeout(S.reconnectTimer);
+  var url = 'ws://' + host + ':' + (port || 45271);
+  setLed('wait', '连接中…', 'led-label', 'led');
+  try { S.ws = new WebSocket(url); } catch (e) { scheduleReconnect(); return; }
+  S.ws.onopen = function () {
+    S.host = host; S.reconnectMs = 0;
+    if (S.token) { send({ t: 'hello', token: S.token }); }
+    else { sendPairRequest(); }
+  };
+  S.ws.onmessage = function (ev) { try { onMessage(JSON.parse(ev.data)); } catch (_) {} };
+  S.ws.onclose = function () {
+    onDisconnected();
+    if (!S.userClosed) scheduleReconnect();
+  };
+  S.ws.onerror = function () {};
+}
+function scheduleReconnect() {
+  if (S.userClosed) return;
+  S.reconnectMs = S.reconnectMs ? Math.min(S.reconnectMs * 2, 30000) : 1000;
+  setLed('wait', S.reconnectMs / 1000 + ' 秒后重连…', 'led-label', 'led');
+  clearTimeout(S.reconnectTimer);
+  S.reconnectTimer = setTimeout(function () {
+    if (S.host) connect(S.host, location.port || 45271);
+  }, S.reconnectMs);
+}
+function onDisconnected() {
+  S.phase = 'disconnected';
+  clearTimeout(S.pairWaitTimer);
+  $('waitcard').style.display = 'none';
+  setLed('', '未连接', 'led-label', 'led');
+  if (S.everConnected) {
+    // 曾连上：留在主控页并提示重连，避免丢失使用上下文
+    setLed('wait', '连接已断开，重连中…', 'led-label2', 'led2');
+  } else {
+    showPage('pair');
+    $('pair-sub').textContent = '未连接 · 正在发现这台电脑的电子声带…';
+  }
+}
+function sendPairRequest() {
+  send({ t: 'pair_request', device: deviceName() });
+  $('waitcard').style.display = 'flex';
+  $('pair-sub').textContent = '已连上，等待鉴权';
+  setLed('wait', '等待 PC 确认…', 'led-label', 'led');
+  clearTimeout(S.pairWaitTimer);
+  S.pairWaitTimer = setTimeout(function () {
+    $('waitcard').style.display = 'none';
+  }, 10000);
+}
+
+// ── 协议消息 ──
+function send(m) { if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify(m)); }
+function command(t, extra, timeoutMs) {
+  if (!S.ws || S.ws.readyState !== 1 || S.phase !== 'connected') {
+    return Promise.reject(new Error('连接已断开'));
+  }
+  var ref = String(++S.refSeq);
+  send(Object.assign({ t: t, ref: ref }, extra || {}));
+  return new Promise(function (resolve, reject) {
+    S.pending[ref] = { resolve: resolve, reject: reject };
+    setTimeout(function () {
+      if (S.pending[ref]) { delete S.pending[ref]; reject(new Error('命令超时')); }
+    }, timeoutMs || 10000);
+  });
+}
+function onMessage(m) {
+  switch (m.t) {
+    case 'pair_ok':
+      S.token = m.token; try { localStorage.setItem(TOKEN_KEY, S.token); } catch (_) {}
+      onAuthed(); break;
+    case 'hello_ok':
+      onAuthed(); break;
+    case 'state':
+      if (m.state) { S.mic = !!m.state.mic_send; S.playingId = m.state.playing_id || null;
+        S.synthesizing = !!m.state.synthesizing; renderAll(); }
+      break;
+    case 'favorites':
+      S.favorites = m.items || []; renderList(); break;
+    case 'event':
+      if (m.event && m.event.type === 'favorites_changed') command('list_favorites', null, 15000);
+      break;
+    case 'ack':
+      var p = S.pending[m.ref];
+      if (p) { delete S.pending[m.ref]; m.ok ? p.resolve(m) : p.reject(new Error(m.err || '操作失败')); }
+      break;
+    case 'error':
+      if (S.phase !== 'connected') {
+        // 鉴权前错误：清 token 回到配对流程
+        S.token = null; try { localStorage.removeItem(TOKEN_KEY); } catch (_) {}
+        toast(m.err || '连接错误');
+        onDisconnected();
+      } else { toast(m.err || '操作失败'); }
+      break;
+    case 'pong': break;
+  }
+}
+function onAuthed() {
+  S.phase = 'connected'; S.everConnected = true;
+  clearTimeout(S.pairWaitTimer); $('waitcard').style.display = 'none';
+  showPage('main');
+  setLed('on', '已连接', 'led-label2', 'led2');
+  $('orb').classList.remove('sleep');
+  command('list_favorites', null, 15000).catch(function () {});
+  startPing();
+}
+var pingTimer = null;
+function startPing() {
+  clearInterval(pingTimer);
+  pingTimer = setInterval(function () { if (S.ws && S.ws.readyState === 1) send({ t: 'ping' }); }, 15000);
+}
+
+// ── 渲染 ──
+function renderAll() { renderMic(); renderList(); renderInput(); }
+function renderMic() {
+  // MIC_ON/MIC_OFF 已是 percent-encoded 裸串（服务端替换），不再二次编码
+  $('mic-icon').style.setProperty('--m', 'url("data:image/svg+xml,' +
+    (S.mic ? MIC_ON : MIC_OFF) + '")');
+}
+function renderInput() {
+  $('msg').placeholder = S.synthesizing ? '合成中…' : '发消息 或 输入文字';
+  $('send').classList.toggle('dim', S.synthesizing);
+}
+function renderList() {
+  var box = $('list');
+  if (!S.favorites.length) {
+    box.innerHTML = '<div class="glass empty"><div class="l1">PC 端暂无收藏</div>' +
+      '<div class="l2">在 PC 端右键消息即可收藏</div></div>';
+    return;
+  }
+  box.innerHTML = '';
+  S.favorites.forEach(function (f) {
+    var playing = S.playingId === f.id;
+    var el = document.createElement('div');
+    el.className = 'glass fav press' + (playing ? ' pulsing' : '');
+    el.innerHTML = '<div class="t"><div class="note"></div>' +
+      (f.hotkey ? '<div class="hk"></div>' : '') + '</div>' +
+      (playing ? '<div class="dot"></div>' : '');
+    el.querySelector('.note').textContent = f.note;
+    if (f.hotkey) el.querySelector('.hk').textContent = f.hotkey;
+    el.addEventListener('click', function () {
+      // 再点播放中收藏 = 停止（§4.2）
+      command(playing ? 'stop' : 'play_favorite', playing ? null : { id: f.id })
+        .catch(function (e) { toast(e.message || String(e)); });
+    });
+    box.appendChild(el);
+  });
+}
+
+// ── 交互 ──
+$('mic-tile').addEventListener('click', function () { command('toggle_mic').catch(function (e) { toast(e.message); }); });
+$('playlast-tile').addEventListener('click', function () { command('play_last').catch(function (e) { toast(e.message); }); });
+$('send').addEventListener('click', doSend);
+$('msg').addEventListener('keydown', function (e) { if (e.key === 'Enter') doSend(); });
+function doSend() {
+  if (S.synthesizing) return;
+  var v = $('msg').value.trim(); if (!v) return;
+  $('msg').value = '';
+  command('synthesize', { text: v }, 180000)
+    .then(function () { toast('PC 合成完成'); })
+    .catch(function (e) { toast(e.message || String(e)); renderInput(); });
+}
+$('logo-tile').addEventListener('click', function () { $('dlg').classList.add('on'); });
+$('dlg-cancel').addEventListener('click', function () { $('dlg').classList.remove('on'); });
+$('dlg-ok').addEventListener('click', function () {
+  $('dlg').classList.remove('on');
+  S.userClosed = true; S.token = null; try { localStorage.removeItem(TOKEN_KEY); } catch (_) {}
+  try { S.ws && S.ws.close(); } catch (_) {}
+  onDisconnected(); S.everConnected = false; S.userClosed = false;
+  showPage('pair');
+  $('pair-sub').textContent = '未连接 · 正在发现这台电脑的电子声带…';
+  $('dpc-addr').textContent = location.host;
+});
+
+// ── 配对页：默认连本页来源（同源 PC）；手动 IP 兜底 ──
+$('dpc').addEventListener('click', function () {
+  S.userClosed = false;
+  connect(location.hostname, location.port || 80);
+});
+$('btn-connect').addEventListener('click', function () {
+  var ip = $('ip').value.trim();
+  if (!ip) { toast('请输入 IP 地址'); return; }
+  S.userClosed = false;
+  connect(ip, parseInt($('port').value, 10) || 45271);
+});
+
+// ── 启动 ──
+S.token = (function () { try { return localStorage.getItem(TOKEN_KEY); } catch (_) { return null; } })();
+$('dpc-addr').textContent = location.host;
+renderMic(); renderInput(); renderList();
+// 打开页面即连本页来源的 PC（同源 = 同一台电脑），断线后自动重连
+S.userClosed = false;
+connect(location.hostname, location.port || 80);
+</script>
+</body>
+</html>

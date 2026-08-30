@@ -13,6 +13,7 @@ import {
   removeFavoriteHotkey,
 } from "../../services/invoke";
 import { HotkeyCapture } from "./HotkeyCapture";
+import { TexIcon } from "../icons/TexIcon";
 
 interface Props {
   favorites: Favorite[];
@@ -166,13 +167,14 @@ export function FavoriteList({ favorites, playingPath, onPlay, onChanged }: Prop
                 <button
                   onClick={() => onPlay(f.audio_path)}
                   className={[
-                    "rounded-lg px-2 py-1 text-xs transition-colors",
+                    "flex items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors",
                     playing
                       ? "text-[var(--amber-600)] is-playing font-medium"
                       : "text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-900)]",
                   ].join(" ")}
                 >
-                  {playing ? "♪ 播放中" : "▶ 播放"}
+                  <TexIcon name="play" size={12} />
+                  {playing ? "播放中" : "播放"}
                 </button>
               </div>
               {/* 快捷键录入（展开在该行下方） */}
@@ -209,9 +211,9 @@ export function FavoriteList({ favorites, playingPath, onPlay, onChanged }: Prop
                 setMenu(null);
                 onPlay(menuFavorite.audio_path);
               }}
-              className="block w-full px-4 py-2 text-left transition-colors hover:bg-[var(--amber-200)]/40 hover:text-[var(--ink-900)]"
+              className="flex w-full items-center gap-1.5 px-4 py-2 text-left transition-colors hover:bg-[var(--amber-200)]/40 hover:text-[var(--ink-900)]"
             >
-              ▶ 播放
+              <TexIcon name="play" size={13} /> 播放
             </button>
             <button
               onClick={() => {

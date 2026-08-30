@@ -12,6 +12,7 @@
 mod mdns_adv;
 mod pairing;
 mod server;
+mod web;
 
 use std::sync::OnceLock;
 use tokio::sync::mpsc;

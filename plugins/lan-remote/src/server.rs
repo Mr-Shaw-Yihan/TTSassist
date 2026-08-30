@@ -7,14 +7,98 @@
 // - 桥能力调用全部走 spawn_blocking（C ABI 阻塞调用，不堵 WS 事件循环）；
 // - 宿主事件（EVENT_RX）转发给已鉴权连接：先透传 event，再重查 state 推送。
 
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context as TaskContext, Poll};
 
 use futures_util::{SinkExt, StreamExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Notify};
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::pairing::Pairing;
+
+/// HTTP/WS 同端口分流：把已读首包作为前缀"塞回"流，
+/// 让 tungstenite 的握手从完整请求开始（TcpStream 不支持 unpeek）。
+struct PrefixedIo {
+    prefix: std::io::Cursor<Vec<u8>>,
+    inner: TcpStream,
+}
+
+impl PrefixedIo {
+    fn new(first: Vec<u8>, inner: TcpStream) -> Self {
+        Self { prefix: std::io::Cursor::new(first), inner }
+    }
+}
+
+impl AsyncRead for PrefixedIo {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        // 先耗尽前缀（首包），再透传底层流
+        let prefix_len = self.prefix.get_ref().len() as u64;
+        if self.prefix.position() < prefix_len {
+            let pos = self.prefix.position() as usize;
+            let remaining = &self.prefix.get_ref()[pos..];
+            let take = remaining.len().min(buf.remaining());
+            buf.put_slice(&remaining[..take]);
+            self.prefix.set_position((pos + take) as u64);
+            return Poll::Ready(Ok(()));
+        }
+        Pin::new(&mut self.inner).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for PrefixedIo {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+/// Web 遥控页面 HTTP 响应（单文件，随请求即答即关）
+async fn serve_http(stream: &mut TcpStream, first: &[u8]) -> Result<(), String> {
+    let text = String::from_utf8_lossy(first);
+    let path = text.split_whitespace().nth(1).unwrap_or("/");
+    let (status, ctype, body) = crate::web::http_response(path);
+    eprintln!("[lan-remote] Web 遥控页面请求: {path} → {status}");
+    let head = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    stream
+        .write_all(head.as_bytes())
+        .await
+        .map_err(|e| format!("写 HTTP 响应失败: {e}"))?;
+    stream
+        .write_all(&body)
+        .await
+        .map_err(|e| format!("写 HTTP 响应失败: {e}"))?;
+    stream
+        .flush()
+        .await
+        .map_err(|e| format!("刷 HTTP 响应失败: {e}"))?;
+    let _ = stream.shutdown().await;
+    Ok(())
+}
 
 /// WS 监听端口（协议契约：App 侧 mDNS 发现失败时手动填 ip:45271 兜底）
 pub const PORT: u16 = 45271;
@@ -106,13 +190,35 @@ pub async fn run(listener: TcpListener, shared: Arc<Shared>, mut event_rx: mpsc:
     }
 }
 
-/// 单连接处理：握手 → 鉴权/命令循环
-async fn handle_conn(stream: TcpStream, shared: Arc<Shared>) -> Result<(), String> {
+/// 单连接处理：读首包分流 → HTTP（Web 遥控页面）或 WS（遥控协议）
+async fn handle_conn(mut stream: TcpStream, shared: Arc<Shared>) -> Result<(), String> {
     let peer = stream
         .peer_addr()
         .map(|a| a.to_string())
         .unwrap_or_else(|_| "unknown".into());
-    let ws = tokio_tungstenite::accept_async(stream)
+    // 读首包（请求头一般 <8KB；WS upgrade 与普通 HTTP GET 都完整落在首包内）
+    let mut first = vec![0u8; 8192];
+    let n = stream
+        .read(&mut first)
+        .await
+        .map_err(|e| format!("读取首包失败（{peer}）: {e}"))?;
+    if n == 0 {
+        return Ok(());
+    }
+    first.truncate(n);
+    let is_ws = first
+        .windows(18)
+        .any(|w| w.eq_ignore_ascii_case(b"upgrade: websocket"));
+
+    if !is_ws {
+        // HTTP：Web 遥控页面（与 WS 同源，浏览器无 Mixed Content 限制）
+        serve_http(&mut stream, &first).await?;
+        return Ok(());
+    }
+
+    // WS：首包需要"塞回"流里交给 tungstenite 握手 → PrefixedIo 前缀包装
+    let prefixed = PrefixedIo::new(first, stream);
+    let ws = tokio_tungstenite::accept_async(prefixed)
         .await
         .map_err(|e| format!("WS 握手失败（{peer}）: {e}"))?;
     eprintln!("[lan-remote] WS 握手成功（{peer}）");

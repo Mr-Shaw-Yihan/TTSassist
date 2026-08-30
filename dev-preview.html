@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>dev-preview（浏览器视觉预览用，mock Tauri 桥）</title>
+  <script>
+    // 仅用于在纯浏览器里预览 UI：提供一个最小的 __TAURI_INTERNALS__ 桩，
+    // 返回假数据让界面渲染出来。正式运行请走 index.html（Tauri 环境）。
+    (function () {
+      var dark = location.hash.indexOf("dark") !== -1;
+      window.__TAURI_INTERNALS__ = {
+        metadata: {
+          currentWindow: { label: "main" },
+          currentWebview: { label: "main", windowLabel: "main" },
+        },
+        plugins: {},
+        convertFileSrc: function (p) { return p; },
+        invoke: function (cmd) {
+          if (cmd === "get_settings") {
+            return Promise.resolve({
+              theme: dark ? "dark" : "light",
+              mic_send_enabled: true,
+              mic_output_device: "CABLE Input",
+              playback_volume: 0.8,
+              playback_rate: 1.0,
+              tts_engine: "mimo",
+              plugin_voices: {},
+              update_ignored_version: "",
+            });
+          }
+          if (cmd === "list_messages") {
+            var now = Date.now();
+            return Promise.resolve({
+              messages: [
+                { id: "m1", content: "测试一下连通性", audio_path: "a1.mp3", created_at: new Date(now - 5400000).toISOString() },
+                { id: "m2", content: "测试一下本地语音，这次文本稍微长一点看看气泡的换行效果", audio_path: "a2.mp3", created_at: new Date(now - 3600000).toISOString() },
+                { id: "m3", content: "再测试一下球", audio_path: "a3.mp3", created_at: new Date(now - 600000).toISOString() },
+                { id: "m4", content: "测试", audio_path: "a4.mp3", created_at: new Date(now).toISOString() },
+              ],
+              has_more: false,
+            });
+          }
+          if (cmd === "list_favorites") return Promise.resolve([]);
+          if (cmd === "list_plugins") return Promise.resolve([]);
+          return Promise.reject(new Error("mock: " + cmd));
+        },
+      };
+    })();
+  </script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>

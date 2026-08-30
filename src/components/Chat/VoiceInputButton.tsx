@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { emit } from "@tauri-apps/api/event";
 import { AudioRecorder } from "../../utils/audioRecorder";
 import { VolumeMeter } from "./VolumeMeter";
-import { MicIcon } from "../icons/MicIcon";
+import { TexIcon } from "../icons/TexIcon";
 import { asrTranscribe, listAsrPlugins } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
 
@@ -121,12 +121,12 @@ export function VoiceInputButton({ onResult }: Props) {
       title={title}
       disabled={phase === "transcribing"}
       className={[
-        "relative flex shrink-0 items-center gap-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all",
+        "relative flex shrink-0 items-center gap-1 rounded-xl px-3 py-2.5 text-sm font-medium transition-all",
         phase === "recording"
-          ? "border-red-300 bg-red-50 text-red-600"
+          ? "border border-red-300 bg-red-50 text-red-600"
           : phase === "transcribing"
-            ? "cursor-wait border-[var(--ink-200)] bg-[var(--paper)] text-[var(--ink-300)]"
-            : "border-[var(--ink-200)] bg-[var(--paper)] text-[var(--ink-700)] hover:border-[var(--amber-500)] hover:text-[var(--amber-600)] active:scale-[0.97]",
+            ? "cursor-wait border border-[var(--ink-200)] bg-[var(--paper)] text-[var(--ink-300)]"
+            : "btn-tex active:scale-[0.97]",
       ].join(" ")}
     >
       {phase === "recording" && (
@@ -135,7 +135,7 @@ export function VoiceInputButton({ onResult }: Props) {
       {phase === "recording" && recorder && (
         <VolumeMeter recorder={recorder} className="h-1.5 w-9" barClassName="bg-red-500" />
       )}
-      <span className="flex items-center">{phase === "transcribing" ? "…" : <MicIcon size={14} />}</span>
+      <span className="flex items-center">{phase === "transcribing" ? "…" : <TexIcon name="mic" size={14} />}</span>
       <span className="text-xs">
         {phase === "recording" ? `${seconds}s` : phase === "transcribing" ? "识别中" : "说话"}
       </span>

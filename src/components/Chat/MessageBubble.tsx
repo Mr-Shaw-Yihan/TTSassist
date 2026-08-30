@@ -6,6 +6,7 @@ import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import type { Message } from "../../types";
 import { deleteMessage, addFavorite, revealAudio } from "../../services/invoke";
+import { TexIcon } from "../icons/TexIcon";
 
 interface Props {
   message: Message;
@@ -106,13 +107,21 @@ export function MessageBubble({ message, playingPath, onDeleted, onFavorited, on
           <button
             onClick={handlePlay}
             className={[
-              "rounded-md px-1.5 py-0.5 transition-colors",
+              "flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors",
               isPlaying
                 ? "text-[var(--amber-600)] is-playing font-medium"
                 : "text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
             ].join(" ")}
           >
-            {isPlaying ? "♪ 播放中" : "▶ 播放"}
+            {isPlaying ? (
+              <>
+                <TexIcon name="play" size={13} /> 播放中
+              </>
+            ) : (
+              <>
+                <TexIcon name="play" size={13} /> 播放
+              </>
+            )}
           </button>
           <span className="tabular-nums">{formatTime(message.created_at)}</span>
         </div>

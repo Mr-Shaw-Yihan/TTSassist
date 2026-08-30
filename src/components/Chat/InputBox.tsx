@@ -104,7 +104,7 @@ export function InputBox({ onSend }: Props) {
           }}
         />
         <button
-          className="rounded-xl bg-[var(--ink-900)] px-4 py-2.5 text-sm font-medium text-[var(--paper)] transition-all hover:bg-[var(--ink-700)] disabled:cursor-not-allowed disabled:bg-[var(--ink-200)] disabled:text-[var(--ink-300)] active:scale-[0.97]"
+          className="btn-tex rounded-xl px-4 py-2.5 text-sm font-medium transition-all disabled:cursor-not-allowed active:scale-[0.97]"
           disabled={!text.trim() || sending}
           onClick={send}
         >

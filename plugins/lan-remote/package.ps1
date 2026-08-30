@@ -15,7 +15,7 @@ $ErrorActionPreference = "Stop"
 
 $PluginId   = "lan-remote"
 $PluginName = "手机遥控（局域网）"
-$Version    = "0.1.0"
+$Version    = "0.2.0"
 $MinAppVer  = "1.7.9"
 $Desc       = "手机遥控 PC 端：局域网 WebSocket 服务 + mDNS 发现 + 配对码配对，需配合移动端 App 使用"
 

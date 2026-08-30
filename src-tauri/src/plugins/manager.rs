@@ -176,18 +176,34 @@ impl PluginManager {
         }
         zips.sort();
         zips.dedup();
-        eprintln!("[plugins] 内置插件引导：发现 {} 个内置 zip", zips.len());
-        for zip_path in zips {
-            let manifest = match super::install::peek_zip_manifest(&zip_path) {
-                Ok(m) => m,
-                Err(e) => {
-                    eprintln!(
-                        "[plugins] 内置 zip 无法解析，跳过: {}（{e}）",
-                        zip_path.display()
-                    );
-                    continue;
-                }
+        // 解析全部 zip 清单，并按 id 只保留**最高版本**：老用户升级安装后
+        // resources 里会残留旧版本 zip（NSIS 覆盖安装不清理），若新旧都装
+        // 会先装旧版占用 dll、新版进 pending，陷入每启动一次 pending 一次的循环
+        let mut best: Vec<(super::manifest::PluginManifest, PathBuf)> = Vec::new();
+        for zip_path in &zips {
+            let Ok(m) = super::install::peek_zip_manifest(zip_path) else {
+                eprintln!(
+                    "[plugins] 内置 zip 无法解析，跳过: {}",
+                    zip_path.display()
+                );
+                continue;
             };
+            match best.iter_mut().find(|(bm, _)| bm.id == m.id) {
+                Some((bm, path)) => {
+                    if super::manifest::version_less_than(&bm.version, &m.version) {
+                        *bm = m.clone();
+                        *path = zip_path.clone();
+                    }
+                }
+                None => best.push((m, zip_path.clone())),
+            }
+        }
+        eprintln!(
+            "[plugins] 内置插件引导：发现 {} 个内置 zip，{} 个插件",
+            zips.len(),
+            best.len()
+        );
+        for (manifest, zip_path) in best {
             let already = reg.plugins.iter().any(|e| {
                 e.id == manifest.id
                     && e.version == manifest.version

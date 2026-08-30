@@ -25,10 +25,27 @@
   --ink-100: #f0ece6;          /* 浅底 */
   --paper: #faf8f4;            /* 宣纸底色 */
   --paper-card: #fffefb;       /* 卡片白 */
-  --amber-600: #b87333;        /* 暖琥珀 - 唯一强调色 */
-  --amber-500: #d4914a;
-  --amber-200: #f0d9b5;
+  --amber-600: #c59a3f;        /* 哑金 - 浅色皮肤强调色（参照图一浓金黄的深端） */
+  --amber-500: #d9b352;
+  --amber-200: #f5ecc8;
   --seal: #a8513a;             /* 朱印 - 极少用，仅收藏星 */
+
+  /* 纹理图标与按钮（浅色 = 哑金磨砂）
+     --tx/--ln 供 TexIcon 的 <use> 影子树内联样式解析：
+     图标主体铺金磨砂纹理，轮廓为墨色断线 */
+  --tx: url(#goldTex);
+  --ln: #241a0c;
+  --lnw: 1.7;
+
+  /* 质感按钮（.btn-tex）：金渐变 + 深色细砂 + 亮砂点 */
+  --btn-tex-n1: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Cfilter id='d'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.55' numOctaves='3' seed='11'/%3E%3CfeColorMatrix values='0 0 0 0 0.30  0 0 0 0 0.19  0 0 0 0 0.04  0 0 0 0.75 0'/%3E%3C/filter%3E%3Crect width='80' height='80' filter='url(%23d)'/%3E%3C/svg%3E");
+  --btn-tex-n2: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72'%3E%3Cg fill='%23fff8e8'%3E%3Ccircle cx='10' cy='14' r='.9'/%3E%3Ccircle cx='30' cy='40' r='.7'/%3E%3Ccircle cx='52' cy='18' r='1'/%3E%3Ccircle cx='64' cy='52' r='.8'/%3E%3Ccircle cx='20' cy='60' r='.8'/%3E%3Ccircle cx='44' cy='66' r='.9'/%3E%3Ccircle cx='68' cy='34' r='.6'/%3E%3C/g%3E%3C/svg%3E");
+  --btn-tex-base: linear-gradient(180deg, #ecd684 0%, #e0bd54 100%);  /* 扁平弱渐变，金味稍浓 */
+  --btn-tex-blend: multiply, screen, normal;
+  --btn-tex-border: rgba(160, 124, 52, 0.25);  /* 扁平化：仅细边 */
+  --btn-tex-text: #33270f;     /* 按钮文字/图标色（金底墨字） */
+  --btn-tex-icon: #33270f;
+  --btn-tex-shadow: none;      /* 扁平化：无投影、无内高光 */
 
   /* 节奏 */
   --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -92,8 +109,8 @@ body {
 }
 
 @keyframes pulse-amber {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(184, 115, 51, 0); }
-  50%      { box-shadow: 0 0 0 3px rgba(184, 115, 51, 0.15); }
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50%      { box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber-600) 18%, transparent); }
 }
 
 .animate-rise {
@@ -132,10 +149,26 @@ body {
   --ink-100: #2f2e34;
   --paper: #1c1b1f;            /* 主背景 深炭灰带暖 */
   --paper-card: #252429;       /* 卡片 */
-  --amber-600: #d4914a;        /* 深色下琥珀稍亮一点 */
-  --amber-500: #e9a866;
-  --amber-200: #3a3942;
+  --amber-600: #9d7ed6;        /* 深色皮肤强调色 -> 紫水晶（偏暗） */
+  --amber-500: #a088cf;
+  --amber-200: #342a45;
   --seal: #e0725a;
+
+  /* 纹理图标与按钮（深色 = 紫水晶磨砂 + 星点）
+     图标主体铺深紫径向纹理（中心稍淡）+ 磨砂颗粒 + 白星点，轮廓为白色断线 */
+  --tx: url(#purpTex);
+  --ln: #f6f1fd;
+  --lnw: 1.6;
+
+  /* 质感按钮（.btn-tex）：磨砂暗紫颗粒 + 白星点 + 中心稍淡的径向深紫 */
+  --btn-tex-n1: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Cfilter id='d'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.55' numOctaves='3' seed='11'/%3E%3CfeColorMatrix values='0 0 0 0 0.16  0 0 0 0 0.10  0 0 0 0 0.28  0 0 0 0.75 0'/%3E%3C/filter%3E%3Crect width='80' height='80' filter='url(%23d)'/%3E%3C/svg%3E");
+  --btn-tex-n2: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='76' height='76'%3E%3Cg fill='%23ffffff'%3E%3Ccircle cx='9' cy='12' r='.6'/%3E%3Ccircle cx='24' cy='34' r='.45'/%3E%3Ccircle cx='43' cy='13' r='.65'/%3E%3Ccircle cx='58' cy='30' r='.5'/%3E%3Ccircle cx='66' cy='54' r='.6'/%3E%3Ccircle cx='16' cy='56' r='.55'/%3E%3Ccircle cx='36' cy='66' r='.45'/%3E%3Ccircle cx='53' cy='70' r='.6'/%3E%3Ccircle cx='70' cy='14' r='.45'/%3E%3Ccircle cx='6' cy='41' r='.5'/%3E%3Ccircle cx='31' cy='6' r='.55'/%3E%3Ccircle cx='48' cy='44' r='.4'/%3E%3Ccircle cx='62' cy='64' r='.45'/%3E%3Ccircle cx='13' cy='70' r='.4'/%3E%3Ccircle cx='40' cy='25' r='.35'/%3E%3Ccircle cx='59' cy='44' r='.55'/%3E%3C/g%3E%3C/svg%3E");
+  --btn-tex-base: radial-gradient(circle at 50% 40%, #a088cf 0%, #7c5bb0 48%, #523c85 100%);
+  --btn-tex-blend: multiply, screen, normal;
+  --btn-tex-border: rgba(150, 124, 200, 0.28);  /* 扁平化：仅细边 */
+  --btn-tex-text: #f7f3ff;     /* 按钮文字/图标色（紫底白字） */
+  --btn-tex-icon: #f6f1fd;
+  --btn-tex-shadow: none;      /* 扁平化：无投影、无内高光 */
 }
 
 [data-theme="dark"] body {
@@ -143,5 +176,32 @@ body {
 }
 
 [data-theme="dark"] ::selection {
-  background: rgba(212, 145, 74, 0.25);
+  background: rgba(150, 112, 220, 0.3);
+}
+
+/* ============================================================
+   纹理图标 + 质感按钮
+   ============================================================ */
+
+/* 图标：主体随 --tx 切换哑金/紫晶纹理（影子树内联 var），无需额外规则；
+   按钮内图标由 .btn-tex 覆盖 --tx/--ln，变为实心断线形态 */
+.btn-tex {
+  position: relative;
+  color: var(--btn-tex-text);
+  border: 1px solid var(--btn-tex-border);
+  background-image: var(--btn-tex-n1), var(--btn-tex-n2), var(--btn-tex-base);
+  background-blend-mode: var(--btn-tex-blend);
+  box-shadow: var(--btn-tex-shadow);
+}
+.btn-tex .tex-ic {
+  --tx: var(--btn-tex-icon);
+  --ln: var(--btn-tex-text);
+}
+.btn-tex:disabled {
+  filter: saturate(0.35) opacity(0.55);
+}
+/* 播放中高亮：纹理按钮里的"正在播放"态 */
+.tex-ic {
+  display: inline-block;
+  vertical-align: -0.125em;
 }
