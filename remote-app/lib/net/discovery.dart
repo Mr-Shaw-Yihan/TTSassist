@@ -8,7 +8,9 @@
 // 因此真机也周期扫描本机各网段的 45271 端口，作为与 mDNS 并行的发现通道。
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:nsd/nsd.dart' as nsd;
@@ -116,6 +118,12 @@ class Discovery {
       final bases = <String>{};
       final interfaces = await NetworkInterface.list();
       for (final itf in interfaces) {
+        // 跳过虚拟隧道接口（tun0/ppp/wg…）：VPN/代理 TUN 模式下其对任意地址的
+        // TCP connect 都会被代理栈假握手成功，产生「扫到了假 PC」的误报
+        final n = itf.name.toLowerCase();
+        if (n.startsWith('tun') || n.startsWith('ppp') || n.startsWith('wg')) {
+          continue;
+        }
         for (final addr in itf.addresses) {
           if (addr.type != InternetAddressType.IPv4) continue;
           if (addr.isLoopback || addr.isLinkLocal) continue;
@@ -135,8 +143,13 @@ class Discovery {
               45271,
               timeout: const Duration(milliseconds: 300),
             );
-            hits.add(DiscoveredPc(name: '局域网电脑', host: ip, port: 45271));
+            // 二次复核：端口通不等于电子声带在跑（VPN TUN 等会假握手），
+            // 发极简 HTTP 探测——WS 服务端会返回 HTTP 状态行，假命中不会
+            final isReal = await _verifyHttpService(s);
             s.destroy();
+            if (isReal) {
+              hits.add(DiscoveredPc(name: '局域网电脑', host: ip, port: 45271));
+            }
           } catch (_) {}
         });
       }));
@@ -154,6 +167,21 @@ class Discovery {
       // 网卡枚举失败：静默，下一轮再试
     } finally {
       _scanning = false;
+    }
+  }
+
+  /// HTTP 探测复核：对已 connect 的 socket 发极简 GET，
+  /// 收到 HTTP 状态行（WS 服务端对非升级请求回 400/426）才算真命中
+  Future<bool> _verifyHttpService(Socket s) async {
+    try {
+      s.add(ascii.encode('GET / HTTP/1.1\r\nHost: probe\r\nConnection: close\r\n\r\n'));
+      final data = await s.first
+          .timeout(const Duration(milliseconds: 600), onTimeout: () => Uint8List(0));
+      if (data.isEmpty) return false;
+      final head = String.fromCharCodes(data.take(32));
+      return head.startsWith('HTTP/1.1 ') || head.startsWith('HTTP/1.0 ');
+    } catch (_) {
+      return false;
     }
   }
 
