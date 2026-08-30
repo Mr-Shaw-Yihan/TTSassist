@@ -1,54 +1,64 @@
 {
-    "plugins":  [
-                    {
-                        "id":  "edge-tts",
-                        "name":  "Edge TTS（免费·微软）",
-                        "version":  "0.1.0",
-                        "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/edge-tts-0.1.0.zip",
-                        "mirror_url":  "https://gitee.com/yihwan/TTSassist/raw/dist/edge-tts-0.1.0.zip",
-                        "checksum":  "012c5b1702cb7358bb052e6b1baddc3de1ba28370e595920daad330ec3c197c9",
-                        "description":  "免费、无需 Key 的微软 Edge 语音（非官方接口，可能不稳定）",
-                        "plugin_type":  "tts_engine"
-                    },
-                    {
-                        "id":  "mimo-asr",
-                        "name":  "MiMo ASR（小米·云端）",
-                        "version":  "0.1.0",
-                        "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/mimo-asr-0.1.0.zip",
-                        "mirror_url":  "https://gitee.com/yihwan/TTSassist/raw/dist/mimo-asr-0.1.0.zip",
-                        "checksum":  "b35c69401bcf62e9ba21eea49a67e20faf48973599aebc0834677327f1b9ddb4",
-                        "description":  "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测",
-                        "plugin_type":  "asr_engine"
-                    },
-                    {
-                        "id":  "genie-tts",
-                        "name":  "Genie TTS（本地·离线）",
-                        "version":  "0.1.0",
-                        "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/genie-tts-0.1.0.zip",
-                        "mirror_url":  "https://gitee.com/yihwan/TTSassist/raw/dist/genie-tts-0.1.0.zip",
-                        "checksum":  "5aa6f96634938ab9c2fd9bdf7b5e27f16a7717ff733b449bacb09b2e8aae4e16",
-                        "description":  "GPT-SoVITS ONNX 本地推理引擎，CPU 离线合成，音色包可扩展（首次使用自动下载运行环境约 1.1GB，每个音色另约 320MB）",
-                        "plugin_type":  "tts_engine"
-                    },
-                    {
-                        "id":  "minimax-tts",
-                        "name":  "MiniMax TTS（国内版）",
-                        "version":  "0.2.0",
-                        "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-0.2.0.zip",
-                        "mirror_url":  "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-0.2.0.zip",
-                        "checksum":  "a27182e3343d5fed1f76cde3575787af61c5fc31c3786765f965e22a9fbb7e22",
-                        "description":  "MiniMax 云端语音合成（国内版），需 API Key，50+ 音色、40 种语言",
-                        "plugin_type":  "tts_engine"
-                    },
-                    {
-                        "id":  "minimax-tts-global",
-                        "name":  "MiniMax TTS（国际版）",
-                        "version":  "0.2.0",
-                        "download_url":  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-global-0.2.0.zip",
-                        "mirror_url":  "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-global-0.2.0.zip",
-                        "checksum":  "9dd4ed40f609db84a1cef4113fb0511c071d59e29923f041a64c6afec8c82a07",
-                        "description":  "MiniMax 云端语音合成（国际版），需 API Key，50+ 音色、40 种语言",
-                        "plugin_type":  "tts_engine"
-                    }
-                ]
+  "plugins": [
+    {
+      "id": "edge-tts",
+      "name": "Edge TTS（免费·微软）",
+      "version": "0.1.0",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/edge-tts-0.1.0.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/edge-tts-0.1.0.zip",
+      "checksum": "9b517c56862a95c5a5180b773904cde1782574275dfb0cf745acc3c34fcdbe4b",
+      "description": "免费、无需 Key 的微软 Edge 语音（非官方接口，可能不稳定）",
+      "plugin_type": "tts_engine"
+    },
+    {
+      "id": "mimo-asr",
+      "name": "MiMo ASR（小米·云端）",
+      "version": "0.1.0",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/mimo-asr-0.1.0.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/mimo-asr-0.1.0.zip",
+      "checksum": "e7dbd4c776e73a4eaa5fea843e97941b8573599a1b66c7d2ecb76232c2b8ca0e",
+      "description": "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测",
+      "plugin_type": "asr_engine"
+    },
+    {
+      "id": "genie-tts",
+      "name": "Genie TTS（本地·离线）",
+      "version": "0.1.0",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/genie-tts-0.1.0.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/genie-tts-0.1.0.zip",
+      "checksum": "2933987d7e59c31c8d503cfaccc56e63cdda22fa8c62c739ba50c2d21a67f520",
+      "description": "GPT-SoVITS ONNX 本地推理引擎，CPU 离线合成，音色包可扩展（首次使用自动下载运行环境约 1.1GB，每个音色另约 320MB）",
+      "plugin_type": "tts_engine"
+    },
+    {
+      "id": "minimax-tts",
+      "name": "MiniMax TTS（国内版）",
+      "version": "0.2.1",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-0.2.1.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-0.2.1.zip",
+      "checksum": "f0a273b3cf1c30734728052a9377b371658207f51c2c464b84df01e01ffa8216",
+      "description": "MiniMax 云端语音合成（国内版），需 API Key，50+ 音色、40 种语言",
+      "plugin_type": "tts_engine"
+    },
+    {
+      "id": "minimax-tts-global",
+      "name": "MiniMax TTS（国际版）",
+      "version": "0.2.1",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-global-0.2.1.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-global-0.2.1.zip",
+      "checksum": "860776263382cf43a7fbe945543629270f11fc87de7adbe9abf324661ad61ba8",
+      "description": "MiniMax 云端语音合成（国际版），需 API Key，50+ 音色、40 种语言",
+      "plugin_type": "tts_engine"
+    },
+    {
+      "id": "lan-remote",
+      "name": "手机遥控（局域网）",
+      "version": "0.1.0",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/lan-remote-0.1.0.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/lan-remote-0.1.0.zip",
+      "checksum": "7da99bb5ee39a996100ebbcdeb6239b8ac7537b981f61bae5a0bcdff1741fedc",
+      "description": "手机遥控 PC 端：局域网 WebSocket + 免码配对，需配合官方安卓 App（随本体 Release 分发）使用",
+      "plugin_type": "service"
+    }
+  ]
 }
