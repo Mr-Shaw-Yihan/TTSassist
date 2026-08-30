@@ -95,19 +95,23 @@ impl PluginManager {
         };
 
         let mut reg = registry::load_registry(&manager.plugins_root);
-        // 内置插件引导：安装包 resources/plugins/*.zip 随安装复制到 <exe>/resources/plugins/
-        // （Tauri resources 保持相对路径落盘），但 registry 只记录用户主动安装过的插件——
-        // 全新安装时 registry 为空，内置插件（如 lan-remote）会「包里有但检索不到」。
-        // 此处自动安装注册（必须在 sweep_orphan_dirs 之前：安装产生的插件目录由
-        // 本步注册保护，不被清掉）。
-        let bundled_dir = app.and_then(|a| {
-            tauri::Manager::path(a)
-                .resource_dir()
-                .ok()
-                .map(|d| d.join("plugins"))
-        });
+        // 内置 zip 的候选落盘目录：Tauri 在 Windows 把 resource_dir 解析为 exe 根，
+        // 而 resources 按源相对路径落盘为 <exe>/resources/plugins——两个层级都探测，
+        // 存在即用（避免依赖 resource_dir 的精确语义）。
+        let mut bundled_dirs: Vec<PathBuf> = Vec::new();
+        if let Some(a) = app {
+            if let Ok(rd) = tauri::Manager::path(a).resource_dir() {
+                bundled_dirs.push(rd.join("plugins"));
+                bundled_dirs.push(rd.join("resources").join("plugins"));
+            }
+        }
+        bundled_dirs.dedup();
+        let bundled_dirs: Vec<PathBuf> = bundled_dirs
+            .into_iter()
+            .filter(|d| d.is_dir())
+            .collect();
         let bootstrapped_loaded =
-            manager.bootstrap_bundled_zips(&mut reg, bundled_dir.as_deref());
+            manager.bootstrap_bundled_zips(&mut reg, &bundled_dirs);
         // 清理孤儿目录：不在注册表里的插件目录（来自"运行中卸载"的残留）
         sweep_orphan_dirs(&manager.plugins_root, &reg);
 
@@ -142,39 +146,37 @@ impl PluginManager {
         manager
     }
 
-    /// 内置插件引导：扫描 bundled_dir（<exe>/resources/plugins，Tauri resources 落盘处）
+    /// 内置插件引导：逐个扫描候选目录（<exe>/resources/plugins 与 resource_dir 层级）
     /// 顶层的 *.zip，registry 无同 id 同 version 条目（且无 pending）→ 经 install_zip
     /// 自动安装注册；version 更新则覆盖安装（老用户升级安装包同样生效）。
-    /// bundled_dir 为 None（测试/无 Tauri 环境）或不存在的目录则跳过。
-    /// 单个 zip 损坏/校验失败只记日志，不阻塞其余插件与启动。
+    /// 候选目录为空/不存在则跳过；单个 zip 损坏/校验失败只记日志，不阻塞启动。
     /// 返回本次经 install_zip 已加载的插件 id（调用方对其跳过重复 load）。
     fn bootstrap_bundled_zips(
         &self,
         reg: &mut registry::Registry,
-        bundled_dir: Option<&Path>,
+        bundled_dirs: &[PathBuf],
     ) -> std::collections::HashSet<String> {
         let mut loaded_ids = std::collections::HashSet::new();
-        let Some(bundled_dir) = bundled_dir else {
-            return loaded_ids;
-        };
-        let Ok(entries) = std::fs::read_dir(bundled_dir) else {
-            return loaded_ids;
-        };
-        let mut zips: Vec<PathBuf> = entries
-            .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| {
-                p.is_file() && p.extension().and_then(|s| s.to_str()) == Some("zip")
-            })
-            .collect();
-        zips.sort();
+        let mut zips: Vec<PathBuf> = Vec::new();
+        for dir in bundled_dirs {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                continue;
+            };
+            zips.extend(
+                entries
+                    .filter_map(|e| e.ok().map(|e| e.path()))
+                    .filter(|p| {
+                        p.is_file()
+                            && p.extension().and_then(|s| s.to_str()) == Some("zip")
+                    }),
+            );
+        }
         if zips.is_empty() {
             return loaded_ids;
         }
-        eprintln!(
-            "[plugins] 内置插件引导：扫描 {}（{} 个 zip）",
-            bundled_dir.display(),
-            zips.len()
-        );
+        zips.sort();
+        zips.dedup();
+        eprintln!("[plugins] 内置插件引导：发现 {} 个内置 zip", zips.len());
         for zip_path in zips {
             let manifest = match super::install::peek_zip_manifest(&zip_path) {
                 Ok(m) => m,
@@ -953,13 +955,13 @@ mod tests {
         // 全新安装（registry 为空）：zip 应被自动安装注册并加载
         let pm = PluginManager::load_all(&plugins_root, None);
         let mut reg = registry::load_registry(&plugins_root);
-        let loaded = pm.bootstrap_bundled_zips(&mut reg, Some(&bundled));
+        let loaded = pm.bootstrap_bundled_zips(&mut reg, &[bundled.clone()]);
         assert!(loaded.contains("test-plugin"), "内置 zip 应被自动安装");
         assert!(pm.is_installed("test-plugin"), "内置 zip 应被注册");
         assert!(pm.get("test-plugin").is_some(), "内置插件应已加载可用");
 
         // 幂等：再次引导不重装，registry 仍只有一条记录
-        let loaded2 = pm.bootstrap_bundled_zips(&mut reg, Some(&bundled));
+        let loaded2 = pm.bootstrap_bundled_zips(&mut reg, &[bundled]);
         assert!(loaded2.is_empty(), "同版本已注册时不应重复安装");
         let reg = registry::load_registry(&plugins_root);
         assert_eq!(
