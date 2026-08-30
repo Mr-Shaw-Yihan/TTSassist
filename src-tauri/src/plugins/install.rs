@@ -19,6 +19,37 @@ const MAX_FILE_SIZE: u64 = 150 * 1024 * 1024;
 /// 解压总量上限
 const MAX_TOTAL_SIZE: u64 = 300 * 1024 * 1024;
 
+/// 只读 zip 内的 manifest.json（不解压、不校验 dll）。
+/// 内置插件引导用：每次启动判断 id/version 是否已注册，避免全量解压校验。
+pub fn peek_zip_manifest(zip_path: &Path) -> Result<PluginManifest, PluginError> {
+    let file = std::fs::File::open(zip_path)
+        .map_err(|e| PluginError::Io(format!("打开 zip 失败: {e}")))?;
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|e| PluginError::Manifest(format!("zip 不是合法的压缩包: {e}")))?;
+    let mut raw: Option<Vec<u8>> = None;
+    for i in 0..archive.len() {
+        let mut entry = archive
+            .by_index(i)
+            .map_err(|e| PluginError::Manifest(format!("读取 zip 条目失败: {e}")))?;
+        if entry.is_dir() {
+            continue;
+        }
+        if entry.name() == "manifest.json" {
+            let mut buf = Vec::with_capacity(entry.size() as usize);
+            std::io::copy(&mut entry, &mut buf)
+                .map_err(|e| PluginError::Io(format!("读取 manifest.json 失败: {e}")))?;
+            raw = Some(buf);
+            break;
+        }
+    }
+    let raw =
+        raw.ok_or_else(|| PluginError::Manifest("zip 内缺少 manifest.json".into()))?;
+    let s = std::str::from_utf8(&raw)
+        .map_err(|_| PluginError::Manifest("manifest.json 不是有效的 UTF-8".into()))?;
+    serde_json::from_str(s.trim_start_matches('\u{FEFF}'))
+        .map_err(|e| PluginError::Manifest(format!("manifest.json 解析失败: {e}")))
+}
+
 /// 解压 + 校验完成的插件：临时目录（含 manifest.json 与 dll）+ 清单
 pub struct StagedPlugin {
     pub dir: tempfile::TempDir,

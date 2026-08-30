@@ -95,6 +95,11 @@ impl PluginManager {
         };
 
         let mut reg = registry::load_registry(&manager.plugins_root);
+        // 内置插件引导：安装包 resources/plugins/*.zip 随安装复制到 plugins_root 顶层，
+        // 但 registry 只记录用户主动安装过的插件——全新安装时 registry 为空，内置插件
+        // （如 lan-remote）会「包里有但检索不到」。此处自动安装注册（必须在
+        // sweep_orphan_dirs 之前：安装产生的插件目录由本步注册保护，不被清掉）。
+        let bootstrapped_loaded = manager.bootstrap_bundled_zips(&mut reg);
         // 清理孤儿目录：不在注册表里的插件目录（来自"运行中卸载"的残留）
         sweep_orphan_dirs(&manager.plugins_root, &reg);
 
@@ -121,9 +126,69 @@ impl PluginManager {
         }
 
         for entry in &reg.plugins {
-            manager.load_one(&entry.id);
+            // bootstrap 刚经 install_zip 安装并加载过的插件不重复 load（dll 二次加载）
+            if !bootstrapped_loaded.contains(&entry.id) {
+                manager.load_one(&entry.id);
+            }
         }
         manager
+    }
+
+    /// 内置插件引导：扫描 plugins_root 顶层的 *.zip（安装包 resources 随附），
+    /// registry 无同 id 同 version 条目（且无 pending）→ 经 install_zip 自动安装注册；
+    /// version 更新则覆盖安装（老用户升级安装包同样生效）。
+    /// 单个 zip 损坏/校验失败只记日志，不阻塞其余插件与启动。
+    /// 返回本次经 install_zip 已加载的插件 id（调用方对其跳过重复 load）。
+    fn bootstrap_bundled_zips(&self, reg: &mut registry::Registry) -> std::collections::HashSet<String> {
+        let mut loaded_ids = std::collections::HashSet::new();
+        let Ok(entries) = std::fs::read_dir(&self.plugins_root) else {
+            return loaded_ids;
+        };
+        let mut zips: Vec<PathBuf> = entries
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.is_file() && p.extension().and_then(|s| s.to_str()) == Some("zip")
+            })
+            .collect();
+        zips.sort();
+        for zip_path in zips {
+            let manifest = match super::install::peek_zip_manifest(&zip_path) {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!(
+                        "[plugins] 内置 zip 无法解析，跳过: {}（{e}）",
+                        zip_path.display()
+                    );
+                    continue;
+                }
+            };
+            let already = reg.plugins.iter().any(|e| {
+                e.id == manifest.id
+                    && e.version == manifest.version
+                    && e.pending_zip.is_none()
+            });
+            if already {
+                continue;
+            }
+            match self.install_zip(&zip_path, None) {
+                Ok((outcome, m)) => {
+                    eprintln!(
+                        "[plugins] 内置插件已自动安装: {} v{}（{outcome:?}）",
+                        m.id, m.version
+                    );
+                    loaded_ids.insert(m.id);
+                    // install_zip 内部已存盘，重读以同步后续流程
+                    *reg = registry::load_registry(&self.plugins_root);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[plugins] 内置 zip 安装失败，跳过: {}（{e}）",
+                        zip_path.display()
+                    );
+                }
+            }
+        }
+        loaded_ids
     }
 
     /// 插件根目录（<data_dir>/plugins）
@@ -848,6 +913,32 @@ mod tests {
         zip.start_file("plugin.dll", opts).unwrap();
         zip.write_all(&std::fs::read(&dll_src).unwrap()).unwrap();
         zip.finish().unwrap();
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn bootstrap_内置zip自动安装且幂等() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugins_root = dir.path().join("plugins");
+        std::fs::create_dir_all(&plugins_root).unwrap();
+        // 模拟安装包随附的内置插件 zip（位于 plugins_root 顶层）
+        let bundled = plugins_root.join("test-plugin-0.1.0.zip");
+        make_test_zip(&bundled, "test-plugin");
+
+        // 全新安装（registry 为空）：zip 应被自动安装注册并加载
+        let pm = PluginManager::load_all(&plugins_root, None);
+        assert!(pm.is_installed("test-plugin"), "内置 zip 应被自动安装注册");
+        assert!(pm.get("test-plugin").is_some(), "内置插件应已加载可用");
+
+        // 幂等：再次启动不重装，registry 仍只有一条记录
+        let pm2 = PluginManager::load_all(&plugins_root, None);
+        assert!(pm2.is_installed("test-plugin"));
+        let reg = registry::load_registry(&plugins_root);
+        assert_eq!(
+            reg.plugins.iter().filter(|e| e.id == "test-plugin").count(),
+            1,
+            "重复启动不应产生重复注册"
+        );
     }
 
     #[test]
