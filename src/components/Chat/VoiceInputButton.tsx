@@ -4,6 +4,7 @@
 // 单击开始/单击结束对运动控制要求最低。
 
 import { useEffect, useRef, useState } from "react";
+import { emit } from "@tauri-apps/api/event";
 import { AudioRecorder } from "../../utils/audioRecorder";
 import { VolumeMeter } from "./VolumeMeter";
 import { MicIcon } from "../icons/MicIcon";
@@ -74,6 +75,7 @@ export function VoiceInputButton({ onResult }: Props) {
         setRecorder(recorder);
         setPhase("recording");
         startTimer();
+        void emit("va:asr:start").catch(() => {});
       } catch (e) {
         window.alert(`${e}`);
       }
@@ -86,6 +88,7 @@ export function VoiceInputButton({ onResult }: Props) {
     recorderRef.current = null;
     setRecorder(null);
     setPhase("transcribing");
+    void emit("va:asr:end").catch(() => {});
     try {
       const wav = await (recorder?.stop() ?? Promise.reject(new Error("录音状态异常")));
       const target = await pickPlugin();

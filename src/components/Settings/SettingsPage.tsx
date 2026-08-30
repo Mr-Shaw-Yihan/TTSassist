@@ -15,7 +15,7 @@ import { MicSettings } from "./MicSettings";
 import { VoiceInputSettings } from "./VoiceInputSettings";
 import { PluginSetupPanel } from "../Plugins/PluginSetupPanel";
 import { PluginConfigPanel } from "./PluginConfigPanel";
-import { setFloatingBallEnabled } from "../../services/invoke";
+import { resetFloatingBallPos } from "../../services/invoke";
 import { ResourcePackLinks } from "../Plugins/ResourcePackLinks";
 import { VoiceManager } from "./VoiceManager";
 
@@ -1037,6 +1037,17 @@ export function SettingsPage() {
             </Section>
           )}
 
+          {/* 插件服务（service 类型插件，如手机遥控）：通用配置卡上屏（含 display 只读字段） */}
+          {plugins.some((p) => p.plugin_type === "service" && p.config) && (
+            <Section title="插件服务">
+              {plugins
+                .filter((p) => p.plugin_type === "service" && p.config)
+                .map((p) => (
+                  <PluginConfigPanel key={p.id} pluginId={p.id} pluginName={p.name} />
+                ))}
+            </Section>
+          )}
+
           {/* 快捷键：浮窗呼出 / 语音输入 / 播放最近一条消息 / 开关发送到麦克风 */}
           <Section title="快捷键">
             <div className="space-y-4">
@@ -1068,48 +1079,21 @@ export function SettingsPage() {
                 hint="按下切换「语音是否发送到虚拟麦克风」开关，无需鼠标操作。"
               />
 
-              {/* 悬浮球：不依赖快捷键的常驻启动方式（游戏内可用） */}
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="h-3.5 w-[3px] shrink-0 rounded-full bg-[var(--amber-500)]" aria-hidden />
-                    <h3 className="font-display text-sm font-semibold tracking-wide text-[var(--ink-900)]">悬浮球</h3>
-                  </div>
-                  <p className="mt-1 pl-[11px] text-[11px] leading-relaxed text-[var(--ink-300)]">
-                    常驻置顶小球，适合快捷键无法触发的游戏：单击展开输入浮窗，长按拖动位置，右键打开菜单。
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={settings?.floating_ball_enabled ?? false}
-                  onClick={() => {
-                    void setFloatingBallEnabled(!(settings?.floating_ball_enabled ?? false)).catch((e) => {
-                      window.alert(`切换悬浮球失败：${e}`);
-                    });
-                  }}
-                  className={[
-                    "relative mt-1 h-6 w-11 shrink-0 rounded-full transition-colors",
-                    (settings?.floating_ball_enabled ?? false)
-                      ? "bg-[var(--amber-500)]"
-                      : "bg-[var(--ink-200)]",
-                  ].join(" ")}
-                >
-                  <span
-                    className={[
-                      "absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all",
-                      (settings?.floating_ball_enabled ?? false) ? "left-[22px]" : "left-0.5",
-                    ].join(" ")}
-                  />
-                </button>
-              </div>
+            </div>
+          </Section>
 
-              {/* 悬浮球大小：三档固定大小（固定档位比滑块更不易出 bug）。
+          {/* 悬浮球：显隐由主窗标题栏 logo 接管；本栏管理大小/位置/（皮肤预留） */}
+          <Section title="悬浮球">
+            <div className="space-y-4">
+              <p className="text-[11px] leading-relaxed text-[var(--ink-300)]">
+                常驻置顶的角色球，适合快捷键无法触发的游戏。显隐点主窗标题栏左侧小球 logo 切换：
+                放出唤醒常驻、收回播放退场动画归位 logo。单击球展开输入浮窗，拖拽移动，右键开菜单。
+              </p>
+
+              {/* 球体大小：三档固定大小（固定档位比滑块更不易出 bug）。
                   标准 56 = 初始档位；小 44 / 大 72 为缩小、放大档，均在后端 40~96 安全范围内 */}
-              <div className="pl-[11px]">
-                <div className="flex items-center justify-between text-[11px] text-[var(--ink-300)]">
-                  <span>球体大小</span>
-                </div>
+              <div>
+                <div className="text-[11px] text-[var(--ink-300)]">球体大小</div>
                 <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-xl bg-[var(--ink-100)]/60 p-1">
                   {([
                     { label: "小", size: 44 },
@@ -1132,6 +1116,91 @@ export function SettingsPage() {
                         ].join(" ")}
                       >
                         {tier.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 性能策略：标准（跟随+波纹+全帧率）/ 性能（关跟随波纹、30fps 封顶） */}
+              <div>
+                <div className="text-[11px] text-[var(--ink-300)]">性能策略</div>
+                <div className="mt-1.5 grid grid-cols-2 gap-1 rounded-xl bg-[var(--ink-100)]/60 p-1">
+                  {([
+                    { id: "standard", label: "标准模式" },
+                    { id: "performance", label: "性能模式" },
+                  ] as const).map((m) => {
+                    const active = (settings?.floating_ball_perf_mode ?? "standard") === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => { void patch("floating_ball_perf_mode", m.id).catch(() => {}); }}
+                        aria-pressed={active}
+                        className={[
+                          "rounded-lg py-1.5 text-xs transition-colors",
+                          active
+                            ? "bg-[var(--paper-card)] font-semibold text-[var(--ink-900)] shadow-sm"
+                            : "text-[var(--ink-400)] hover:text-[var(--ink-700)]",
+                        ].join(" ")}
+                      >
+                        {m.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-1 text-[10px] leading-relaxed text-[var(--ink-300)]">
+                  标准模式：指针跟随 + 音频波纹 + 全帧率；性能模式：关闭指针跟随与波纹、动画 30fps 封顶，游戏内或低配机器推荐。
+                </p>
+              </div>
+
+              {/* 还原位置：球意外出屏/找不到时的恢复入口 */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-[var(--ink-700)]">还原悬浮球位置</div>
+                  <p className="mt-0.5 text-[11px] text-[var(--ink-300)]">球被拖出屏幕或找不到时，点击重置到屏幕中央。</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void resetFloatingBallPos().catch((e) => window.alert(`还原位置失败：${e}`));
+                  }}
+                  className="shrink-0 rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-1.5 text-xs text-[var(--ink-700)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)]"
+                >
+                  还原
+                </button>
+              </div>
+
+              {/* 角色皮肤：内置墨黑 / 素白两款 */}
+              <div>
+                <div className="text-[11px] text-[var(--ink-300)]">角色皮肤</div>
+                <div className="mt-1.5 grid grid-cols-2 gap-1 rounded-xl bg-[var(--ink-100)]/60 p-1">
+                  {([
+                    { id: "ink", label: "墨黑" },
+                    { id: "white", label: "素白" },
+                  ] as const).map((s) => {
+                    const active = (settings?.floating_ball_skin ?? "ink") === s.id;
+                    return (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => { void patch("floating_ball_skin", s.id).catch(() => {}); }}
+                        aria-pressed={active}
+                        className={[
+                          "flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs transition-colors",
+                          active
+                            ? "bg-[var(--paper-card)] font-semibold text-[var(--ink-900)] shadow-sm"
+                            : "text-[var(--ink-400)] hover:text-[var(--ink-700)]",
+                        ].join(" ")}
+                      >
+                        <span
+                          aria-hidden
+                          className={[
+                            "h-3 w-3 rounded-full",
+                            s.id === "ink" ? "bg-[#0a0a0a]" : "bg-[#f7f4ec] ring-1 ring-[var(--ink-200)]",
+                          ].join(" ")}
+                        />
+                        {s.label}
                       </button>
                     );
                   })}

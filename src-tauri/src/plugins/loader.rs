@@ -45,6 +45,8 @@ pub struct LoadedPlugin {
     f_voice_uninstall: Option<plugin_api::VaVoiceUninstallFn>,
     f_voice_preload: Option<plugin_api::VaVoicePreloadFn>,
     f_voice_import: Option<plugin_api::VaVoiceImportFn>,
+    /// 可选：宿主能力桥接入点（manifest 声明 requires_host_bridge 时由 manager 注入）
+    pub f_attach_host: Option<plugin_api::VaPluginAttachHostFn>,
 }
 
 // libloading::Library 是 Send+Sync，函数指针天然 Send+Sync
@@ -134,6 +136,10 @@ impl LoadedPlugin {
             )
         };
 
+        // 3.6 可选符号：宿主能力桥接入点（声明 requires_host_bridge 的插件才有）
+        let f_attach_host =
+            unsafe { try_get_sym::<plugin_api::VaPluginAttachHostFn>(&lib, plugin_api::SYM_PLUGIN_ATTACH_HOST) };
+
         // 5. dll 自报 id 必须与清单一致；dll 自报版本仅记录（清单为准）
         if dll_id != manifest.id {
             return Err(PluginError::Unsupported(format!(
@@ -165,6 +171,7 @@ impl LoadedPlugin {
             f_voice_uninstall,
             f_voice_preload,
             f_voice_import,
+            f_attach_host,
         }))
     }
 
@@ -538,6 +545,8 @@ pub struct LoadedAsrPlugin {
     _lib: Arc<libloading::Library>,
     f_transcribe: plugin_api::VaAsrTranscribeFn,
     f_free_cstr: plugin_api::VaFreeCstrFn,
+    /// 可选：宿主能力桥接入点（manifest 声明 requires_host_bridge 时由 manager 注入）
+    pub f_attach_host: Option<plugin_api::VaPluginAttachHostFn>,
 }
 
 unsafe impl Send for LoadedAsrPlugin {}
@@ -568,7 +577,7 @@ impl LoadedAsrPlugin {
         // 加载 dll 取 ASR 符号
         let lib = unsafe { libloading::Library::new(&dll_path) }
             .map_err(|e| PluginError::DlOpen(format!("加载 {} 失败: {e}", manifest.entry)))?;
-        let (f_transcribe, f_free_cstr, dll_id, languages_json) = unsafe {
+        let (f_transcribe, f_free_cstr, dll_id, languages_json, f_attach_host) = unsafe {
             let transcribe =
                 get_sym::<plugin_api::VaAsrTranscribeFn>(&lib, plugin_api::SYM_ASR_TRANSCRIBE)?;
             let free_cstr =
@@ -576,12 +585,17 @@ impl LoadedAsrPlugin {
             let f_id = get_sym::<plugin_api::VaStrFn>(&lib, plugin_api::SYM_PLUGIN_ID)?;
             let f_langs =
                 get_sym::<plugin_api::VaAsrLanguagesFn>(&lib, plugin_api::SYM_ASR_LANGUAGES)?;
+            let attach = try_get_sym::<plugin_api::VaPluginAttachHostFn>(
+                &lib,
+                plugin_api::SYM_PLUGIN_ATTACH_HOST,
+            );
 
             (
                 transcribe,
                 free_cstr,
                 read_cstr(f_id())?,
                 read_cstr(f_langs())?,
+                attach,
             )
         };
 
@@ -599,6 +613,7 @@ impl LoadedAsrPlugin {
             _lib: Arc::new(lib),
             f_transcribe,
             f_free_cstr,
+            f_attach_host,
         }))
     }
 
@@ -647,5 +662,96 @@ impl LoadedAsrPlugin {
             };
             Err(PluginError::Synthesize(msg))
         }
+    }
+}
+
+// ── 服务插件加载（type = service）─────────────────────────
+
+/// 一个已加载的服务插件（manifest.type = "service"）。
+///
+/// 服务插件不参与合成/识别，只通过宿主能力桥提供后台能力（如局域网遥控）。
+/// 必需符号仅 va_plugin_id（身份校验）；宿主能力桥接入点 va_plugin_attach_host
+/// 可选（manifest 声明 requires_host_bridge 时由 manager 注入）。
+pub struct LoadedServicePlugin {
+    /// 清单（含 id/name/version/description 等展示信息）
+    pub manifest: PluginManifest,
+    /// dll 自报的 id（加载时已校验与 manifest.id 一致）
+    pub dll_id: String,
+    /// 保持 dll 句柄存活
+    _lib: Arc<libloading::Library>,
+    /// 可选：宿主能力桥接入点
+    pub f_attach_host: Option<plugin_api::VaPluginAttachHostFn>,
+}
+
+unsafe impl Send for LoadedServicePlugin {}
+unsafe impl Sync for LoadedServicePlugin {}
+
+impl LoadedServicePlugin {
+    /// 加载一个服务插件目录（内含 manifest.json 与 dll）。
+    /// 校验链路与 TTS/ASR 相同：清单 → checksum → 符号 → id 一致。
+    pub fn load(plugin_dir: &Path, app_version: &str) -> Result<Arc<Self>, PluginError> {
+        // 1. 读清单 + 校验
+        let manifest = PluginManifest::load(plugin_dir)?;
+        if manifest.plugin_type != "service" {
+            return Err(PluginError::Unsupported(format!(
+                "服务插件加载器收到 type「{}」（应为 service）",
+                manifest.plugin_type
+            )));
+        }
+        manifest.validate(app_version)?;
+
+        // 2. 数据目录环境变量（与 TTS/ASR 插件同约定）
+        let data_dir = plugin_dir.join("data");
+        if let Err(e) = std::fs::create_dir_all(&data_dir) {
+            eprintln!("提示：插件「{}」数据目录创建失败: {e}", manifest.id);
+        }
+        let env_key = format!(
+            "VA_PLUGIN_DATA_DIR_{}",
+            manifest.id.to_ascii_uppercase().replace('-', "_")
+        );
+        std::env::set_var(&env_key, &data_dir);
+
+        // 3. SHA-256 校验 dll
+        let dll_path = plugin_dir.join(&manifest.entry);
+        if !dll_path.exists() {
+            return Err(PluginError::NotFound(format!(
+                "插件动态库不存在: {}",
+                dll_path.display()
+            )));
+        }
+        let actual = sha256_file(&dll_path)?;
+        if !actual.eq_ignore_ascii_case(manifest.checksum.trim()) {
+            return Err(PluginError::Checksum {
+                expected: manifest.checksum.clone(),
+                actual,
+            });
+        }
+
+        // 4. 加载 dll 取符号：id 必需，attach_host 可选
+        let lib = unsafe { libloading::Library::new(&dll_path) }
+            .map_err(|e| PluginError::DlOpen(format!("加载 {} 失败: {e}", manifest.entry)))?;
+        let (dll_id, f_attach_host) = unsafe {
+            let f_id = get_sym::<plugin_api::VaStrFn>(&lib, plugin_api::SYM_PLUGIN_ID)?;
+            let attach = try_get_sym::<plugin_api::VaPluginAttachHostFn>(
+                &lib,
+                plugin_api::SYM_PLUGIN_ATTACH_HOST,
+            );
+            (read_cstr(f_id())?, attach)
+        };
+
+        // 5. dll 自报 id 必须与清单一致（防换包）
+        if dll_id != manifest.id {
+            return Err(PluginError::Unsupported(format!(
+                "dll 自报 id「{dll_id}」与清单 id「{}」不一致，拒绝加载",
+                manifest.id
+            )));
+        }
+
+        Ok(Arc::new(Self {
+            manifest,
+            dll_id,
+            _lib: Arc::new(lib),
+            f_attach_host,
+        }))
     }
 }

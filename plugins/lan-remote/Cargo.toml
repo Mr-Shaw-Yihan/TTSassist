@@ -1,0 +1,22 @@
+[package]
+name = "lan-remote"
+version = "0.1.0"
+description = "手机遥控插件：局域网 WebSocket 服务 + mDNS 发现 + 配对（需宿主能力桥）"
+edition = "2021"
+
+[lib]
+# 插件必须是动态库（Windows 上产出 lan_remote.dll，打包时改名 plugin.dll）
+crate-type = ["cdylib"]
+
+[dependencies]
+plugin-api = { path = "../plugin-api" }
+# WS 服务器（明文 ws，局域网内使用）
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "sync", "time", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# mDNS 服务广播（纯 Rust 实现，Windows 可用）
+mdns-sd = "0.11"
+# 配对码 / token 随机数
+rand = "0.8"

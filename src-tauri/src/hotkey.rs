@@ -66,13 +66,25 @@ pub fn toggle_quick_input(app: &AppHandle) {
             // 浮窗已显示 → 收起浮窗（主窗保持隐藏）
             let _ = floating.hide();
         } else {
-            // 呼出浮窗，同时隐藏主窗（避免两窗同现）
-            let _ = floating.show();
-            let _ = floating.set_focus();
+            // 呼出浮窗，同时隐藏主窗（避免两窗同现）。
+            // 无激活呼出：不抢前台焦点（全屏/无边框游戏不被打断）；失败才回退普通 show()。
+            // 用户点击输入框后由前端调 focus_quick_input_content 建立键盘路由。
+            if !crate::win32::show_no_activate(&floating) {
+                let _ = floating.show();
+            }
             if let Some(main) = app.get_webview_window("main") {
                 let _ = main.hide();
             }
         }
+    }
+}
+
+/// 直播伴侣形态：把键盘焦点交给浮窗 webview 子窗口（不激活窗口、前台仍是游戏）。
+/// 前端点击输入框后调用，此后打字与 ESC 关闭可用。
+#[tauri::command]
+pub fn focus_quick_input_content(app: AppHandle) {
+    if let Some(qi) = app.get_webview_window("quick_input") {
+        crate::win32::focus_webview_child(&qi);
     }
 }
 

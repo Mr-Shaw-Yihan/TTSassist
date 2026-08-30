@@ -8,6 +8,7 @@
 //
 // 总体设计见 doc/插件系统规划.md，本阶段实现见 doc/开发记录.md 阶段 16。
 
+pub mod bridge;
 pub mod config;
 pub mod install;
 pub mod loader;
@@ -15,7 +16,8 @@ pub mod manager;
 pub mod manifest;
 pub mod registry;
 
-pub use loader::{LoadedAsrPlugin, LoadedPlugin, PluginEngine};
+pub use bridge::HostBridge;
+pub use loader::{LoadedAsrPlugin, LoadedPlugin, LoadedServicePlugin, PluginEngine};
 pub use manager::{InstallOutcome, PluginInfo, PluginManager};
 pub use manifest::PluginManifest;
 

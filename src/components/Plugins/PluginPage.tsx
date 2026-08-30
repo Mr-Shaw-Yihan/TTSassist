@@ -275,6 +275,9 @@ export function PluginPage() {
   const typeOf = (p: PluginInfo) => p.plugin_type ?? "tts_engine";
   const installedTts = plugins.filter((p) => typeOf(p) === "tts_engine");
   const installedAsr = plugins.filter((p) => typeOf(p) === "asr_engine");
+  // 服务插件（type=service）：不参与合成/识别的后台能力（如手机遥控），
+  // 只展示已装卡片（内置/在线索引暂不提供 service 候选）
+  const installedService = plugins.filter((p) => typeOf(p) === "service");
 
   // 在线条目类型：新索引自带 plugin_type；旧索引无此字段时回退到同 id 的内置条目，再无则按 TTS
   const typeOfOnline = (id: string): string => {
@@ -300,10 +303,11 @@ export function PluginPage() {
 
   // ── 卡片与条目渲染 ─────────────────────────────────────────────
 
-  /** 已安装引擎卡片（TTS/ASR 共用，按钮按类型差异化） */
+  /** 已安装引擎卡片（TTS/ASR/服务共用，按钮按类型差异化） */
   function PluginCard({ p }: { p: PluginInfo }) {
     const isAsr = typeOf(p) === "asr_engine";
-    const isCurrentEngine = !isAsr && settings?.tts_engine === p.id;
+    const isService = typeOf(p) === "service";
+    const isCurrentEngine = !isAsr && !isService && settings?.tts_engine === p.id;
     const isCurrentAsr =
       isAsr &&
       ((settings?.asr_plugin ? settings.asr_plugin === p.id : p.loaded) && p.loaded);
@@ -356,7 +360,7 @@ export function PluginPage() {
 
         {/* 操作行：引擎状态/更新在左，打开位置/卸载在右（独立一行，窄窗可换行） */}
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          {!isAsr &&
+          {!isAsr && !isService &&
             (isCurrentEngine ? (
               <span className="rounded-lg bg-[var(--amber-200)]/50 px-2 py-1 text-[11px] font-medium text-[var(--amber-600)]">
                 当前引擎
@@ -371,6 +375,11 @@ export function PluginPage() {
                 </button>
               )
             ))}
+          {isService && (
+            <span className="px-2 py-1 text-[11px] text-[var(--ink-300)]">
+              后台服务，配置在设置-插件服务中
+            </span>
+          )}
           {isAsr &&
             (isCurrentAsr ? (
               <span
@@ -736,6 +745,17 @@ export function PluginPage() {
               candidates={candidatesAsr}
               emptyHint="尚未安装语音输入引擎插件，安装后即可用快捷键说话转文字"
             />
+
+            {/* ── 服务插件（type=service，仅已装展示） ── */}
+            {installedService.length > 0 && (
+              <CategorySection
+                title="服务插件"
+                subtitle="不参与合成/识别的后台能力插件，配置见设置-插件服务"
+                installed={installedService}
+                candidates={[]}
+                emptyHint=""
+              />
+            )}
           </>
         )}
       </div>

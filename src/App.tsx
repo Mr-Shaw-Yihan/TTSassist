@@ -3,6 +3,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { emit } from "@tauri-apps/api/event";
 import { useTauriListen } from "./hooks/useTauriListen";
 import { useVoiceInputHotkey } from "./hooks/useVoiceInputHotkey";
 import { InputBox } from "./components/Chat/InputBox";
@@ -14,6 +15,7 @@ import { FavoriteList } from "./components/Favorites/FavoriteList";
 import { SettingsPage } from "./components/Settings/SettingsPage";
 import { QuickInput } from "./components/QuickInput/QuickInput";
 import { FloatingBall } from "./components/FloatingBall/FloatingBall";
+import { BallLogo } from "./components/FloatingBall/BallLogo";
 import { PluginPage } from "./components/Plugins/PluginPage";
 import { UpdateDialog } from "./components/Settings/UpdateDialog";
 import { useSettingsStore } from "./stores/settingsStore";
@@ -271,19 +273,33 @@ function App() {
     }
   }, [volume, playbackRate]);
 
+  // 停止当前播放（扬声器 + 虚拟麦克风）：手动再点停止与后端 playback:stop 事件共用。
+  // playback:stop 是通用播放控制（宿主能力桥 stop_playback 发出，非遥控特供）。
+  const stopPlayback = useCallback(() => {
+    const cur = playingRef.current;
+    if (cur && !cur.paused) {
+      cur.pause();
+    }
+    playingRef.current = null;
+    playingPathRef.current = null;
+    setPlayingPath(null);
+    // 虚拟麦克风侧可能正在播同一条，同步停止（未在播时无副作用）
+    stopMic().catch(() => {});
+    void emit("va:play:stop").catch(() => {});
+    void emit("playback:stopped").catch(() => {});
+  }, []);
+
   // 互斥播放：停旧 → 设新 → 播放；再次点击正在播的同一条 → 停止（扬声器 + 虚拟麦克风）。
   // 返回 true=开始播放 / false=停止，供 playAudioWithMic 判断是否还要发麦克风。
+  // 播放开始/结束同时发通用 playback:started/stopped 事件（后端聚合为播放态，
+  // 供能力桥订阅方（如手机遥控）感知，与 playback:play-last 同族命名）。
   const playAudio = useCallback(async (relPath: string): Promise<boolean> => {
     const cur = playingRef.current;
     if (playingPathRef.current === relPath && cur && !cur.paused) {
-      cur.pause();
-      playingRef.current = null;
-      playingPathRef.current = null;
-      setPlayingPath(null);
-      // 虚拟麦克风侧可能正在播同一条，同步停止（未在播时无副作用）
-      stopMic().catch(() => {});
+      stopPlayback();
       return false;
     }
+    const wasPlaying = !!cur && !cur.paused;
     playingRef.current?.pause();
     const url = await getAudioUrl(relPath);
     const a = new Audio(url);
@@ -295,13 +311,21 @@ function App() {
         playingPathRef.current = null;
         setPlayingPath(null);
       }
+      void emit("va:play:stop").catch(() => {});
+      void emit("playback:stopped").catch(() => {});
     });
     a.play().catch(() => { /* 用户首次播放可能被忽略 */ });
+    if (wasPlaying) {
+      void emit("va:play:stop").catch(() => {});
+      void emit("playback:stopped").catch(() => {});
+    }
+    void emit("va:play:start").catch(() => {});
+    void emit("playback:started", relPath).catch(() => {});
     playingRef.current = a;
     playingPathRef.current = relPath;
     setPlayingPath(relPath);
     return true;
-  }, [volume, playbackRate]);
+  }, [volume, playbackRate, stopPlayback]);
 
   // 手动播放（收藏/消息重播）：扬声器 + 若全局开关开启则同时发虚拟麦克风。
   // 与快捷键路径对齐（快捷键在后端 hotkey 回调里发麦克风）；
@@ -309,6 +333,12 @@ function App() {
   const micEnabled = settings?.mic_send_enabled ?? false;
   const micDevice = settings?.mic_output_device ?? "";
   const micVolume = settings?.mic_playback_volume ?? 1.0;
+
+  // 麦克风发送状态 → 悬浮球角色徽标事件（va:mic:on/off，右上角绿色小球）
+  const micOn = micEnabled && !!micDevice.trim();
+  useEffect(() => {
+    void emit(micOn ? "va:mic:on" : "va:mic:off").catch(() => {});
+  }, [micOn]);
   const playAudioWithMic = useCallback(async (relPath: string) => {
     const started = await playAudio(relPath);
     if (!started) return; // 再次点击停止：不再发麦克风
@@ -341,6 +371,16 @@ function App() {
     const last = messagesRef.current[messagesRef.current.length - 1];
     if (last) void playAudioWithMic(last.audio_path);
   }, [playAudioWithMic]);
+
+  // 通用播放控制（宿主能力桥发出，供桥接插件等外部触发方使用）：
+  // - playback:play{path}：播指定音频（扬声器；麦克风由后端已发，避免双份）
+  // - playback:stop：停止当前播放（扬声器 + 虚拟麦克风）
+  useTauriListen<string>("playback:play", (payload) => {
+    if (payload) void playAudio(payload);
+  }, [playAudio]);
+  useTauriListen("playback:stop", () => {
+    stopPlayback();
+  }, [stopPlayback]);
 
   // 监听 settings:changed，重读 settings 到 store（克隆命令在别处改 settings 时同步）
   useTauriListen("settings:changed", async () => {
@@ -409,7 +449,9 @@ function App() {
         data-tauri-drag-region
         className="flex h-11 shrink-0 items-center justify-between border-b border-[var(--ink-200)] bg-[var(--paper)] pl-4"
       >
-        <div data-tauri-drag-region className="flex min-w-0 flex-1 items-baseline gap-2">
+        <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center gap-2">
+          {/* 悬浮球 logo（休眠态占位）：点击放出/收回悬浮球 */}
+          <BallLogo />
           <span className="font-display text-sm text-[var(--ink-900)] tracking-tight">电子声带</span>
           <span className="text-[9px] text-[var(--ink-300)] tracking-[0.3em] uppercase">TTSassist</span>
           {/* 麦克风发送状态指示：开启发绿，未开启为灰色描边 */}

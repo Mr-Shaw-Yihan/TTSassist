@@ -78,6 +78,10 @@ export interface Settings {
   floating_ball_y: number;
   /** 悬浮球直径（逻辑像素），三档固定：44 / 56（初始）/ 72 */
   floating_ball_size: number;
+  /** 悬浮球性能策略：standard / performance */
+  floating_ball_perf_mode: string;
+  /** 悬浮球皮肤：ink（墨黑）/ white（素白） */
+  floating_ball_skin: string;
 }
 
 /** 通用插件配置：manifest 的 config 声明 */
@@ -89,7 +93,8 @@ export interface PluginConfigDecl {
 /** 通用插件配置：manifest 声明的单个配置字段 */
 export interface PluginConfigField {
   key: string;
-  type: "text" | "secret" | "select" | "number";
+  /** display 为只读展示字段（插件经宿主能力桥回写，如配对码），用户不可编辑 */
+  type: "text" | "secret" | "select" | "number" | "display";
   label: string;
   description: string;
   placeholder: string;

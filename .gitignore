@@ -26,6 +26,9 @@ plugins/minimax-tts/target/
 plugins/minimax-tts-global/target/
 plugins/minimax-tts-core/target/
 plugins/genie-tts/dist/
+plugins/lan-remote/target/
+plugins/lan-remote/dist/
+plugins/lan-remote/Cargo.lock
 
 # Editor directories and files
 .vscode/*

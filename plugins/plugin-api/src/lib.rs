@@ -14,7 +14,8 @@
 //   宿主拷贝后必须调 va_free_bytes(ptr, len) 归还。
 // - 失败时错误信息写入 out_err（CString），宿主读取后必须调 va_free_cstr 归还。
 
-use std::ffi::c_char;
+use std::ffi::{c_char, CStr, CString};
+use std::sync::OnceLock;
 
 /// va_tts_synthesize 返回码：成功
 pub const VA_OK: i32 = 0;
@@ -45,6 +46,87 @@ pub const SYM_VOICE_INSTALL: &[u8] = b"va_voice_install\0";
 pub const SYM_VOICE_UNINSTALL: &[u8] = b"va_voice_uninstall\0";
 pub const SYM_VOICE_PRELOAD: &[u8] = b"va_voice_preload\0";
 pub const SYM_VOICE_IMPORT: &[u8] = b"va_voice_import\0";
+
+// ── 宿主能力桥（host bridge）─────────────────────────────
+//
+// 现有符号全部是宿主→插件单向调用；能力桥补上插件→宿主反向调用：
+// 宿主加载插件时若发现可选导出符号 va_plugin_attach_host，则传入一张
+// 函数指针表（VaHostServices），插件此后通过它调用宿主能力。
+// manifest 声明 requires_host_bridge: true 的插件才会被注入（安全白名单），
+// 未声明或未导出该符号的插件完全不受影响（老插件无感）。
+
+/// 可选导出符号：宿主能力桥注入点
+pub const SYM_PLUGIN_ATTACH_HOST: &[u8] = b"va_plugin_attach_host\0";
+
+/// 能力表版本。宿主按此值构造表；插件发现不认识的主版本应拒绝使用。
+pub const VA_HOST_SERVICES_VERSION: u32 = 2;
+
+/// 宿主桥上下文：宿主私有不透明指针，插件调用能力函数时原样传回。
+pub type VaHostCtx = *mut std::os::raw::c_void;
+
+/// 事件回调（插件提供给 subscribe_events）：宿主在数据变化时于任意线程调用。
+/// event_json 为 NUL 结尾 UTF-8，仅在回调期间有效（插件需立即拷贝）；
+/// user_data 为订阅时插件传入的指针。
+pub type VaHostEventCallback =
+    unsafe extern "C" fn(user_data: *mut std::os::raw::c_void, event_json: *const c_char);
+
+/// 宿主能力表（宿主分配，进程存活期间长期有效；插件不得释放表本身）。
+/// 各能力统一约定：成功返回 VA_OK；带 out_json 的写 JSON 字符串（宿主分配），
+/// 带出 out_err 的失败时写中文错误消息——两者都用 free_string 归还。
+#[repr(C)]
+pub struct VaHostServices {
+    /// 能力表版本（VA_HOST_SERVICES_VERSION）
+    pub version: u32,
+    /// 宿主私有上下文，调用任何能力函数时原样传回
+    pub ctx: VaHostCtx,
+    /// 释放宿主分配的字符串（out_json / out_err）
+    pub free_string: unsafe extern "C" fn(ctx: VaHostCtx, ptr: *mut c_char),
+    /// 收藏元数据 JSON（不含音频）：
+    /// [{"id","note","created_at","hotkey"}]
+    pub list_favorites: unsafe extern "C" fn(ctx: VaHostCtx, out_json: *mut *mut c_char) -> i32,
+    /// 触发收藏播放（与收藏快捷键同逻辑：虚拟麦克风 + 扬声器）
+    pub play_favorite:
+        unsafe extern "C" fn(ctx: VaHostCtx, id: *const c_char, out_err: *mut *mut c_char) -> i32,
+    /// 停止当前播放（扬声器 + 虚拟麦克风）
+    pub stop_playback: unsafe extern "C" fn(ctx: VaHostCtx) -> i32,
+    /// 文字合成（走宿主现有合成管线：引擎分发 + 消息记录 + 麦克风/扬声器播放）。
+    /// 阻塞调用，可能耗时数秒，插件应放后台线程执行。
+    pub synthesize:
+        unsafe extern "C" fn(ctx: VaHostCtx, text: *const c_char, out_err: *mut *mut c_char) -> i32,
+    /// 切换「发送到麦克风」开关；out_json = {"mic_send":bool}（切换后的新状态）
+    pub toggle_mic_send: unsafe extern "C" fn(ctx: VaHostCtx, out_json: *mut *mut c_char) -> i32,
+    /// 播放最近一条消息（与「播放最近一条消息」快捷键同通道）
+    pub play_last: unsafe extern "C" fn(ctx: VaHostCtx) -> i32,
+    /// 状态查询：out_json = {"mic_send":bool,"playing_id":string|null,"synthesizing":bool}
+    pub get_state: unsafe extern "C" fn(ctx: VaHostCtx, out_json: *mut *mut c_char) -> i32,
+    /// 订阅宿主事件推送（收藏变化 / 设置变化 / 播放状态变化）。
+    /// 事件 JSON 形如 {"type":"favorites_changed"|"settings_changed"|"playback_changed"}。
+    /// 订阅在插件卸载前有效（dll 常驻，无需退订）。
+    pub subscribe_events: unsafe extern "C" fn(
+        ctx: VaHostCtx,
+        cb: VaHostEventCallback,
+        user_data: *mut std::os::raw::c_void,
+    ) -> i32,
+    /// 回写自身配置（仅 manifest 声明的 display 类型字段生效，用于上屏展示），
+    /// 写入后宿主会刷新设置面板。
+    pub set_own_config: unsafe extern "C" fn(
+        ctx: VaHostCtx,
+        key: *const c_char,
+        value: *const c_char,
+        out_err: *mut *mut c_char,
+    ) -> i32,
+    /// 通用用户确认弹窗（v2 新增）：宿主弹原生是/否对话框并阻塞等待用户选择。
+    /// 返回：1=允许，0=拒绝，负值=错误（超时/不可用）。阻塞调用，插件应放后台线程。
+    pub confirm_dialog: unsafe extern "C" fn(
+        ctx: VaHostCtx,
+        title: *const c_char,
+        body: *const c_char,
+    ) -> i32,
+}
+
+/// va_plugin_attach_host 签名：宿主加载插件后注入能力表。
+/// services 指向宿主内存中的表，进程存活期间有效。
+pub type VaPluginAttachHostFn = unsafe extern "C" fn(services: *const VaHostServices);
 
 // ── 函数类型别名（宿主侧 libloading::Symbol<T> 用）──────────────
 
@@ -729,6 +811,225 @@ macro_rules! va_tts_plugin_voices {
 }
 
 
+// ── 插件侧宿主桥安全包装 ──────────────────────────────
+//
+// va_host_bridge! 宏把宿主注入的能力表存进本 dll 内的静态槽，
+// host_bridge 模块在此之上提供带内存归属的 Rust 安全包装：
+// 字符串自动拷出并归还、回调闭包自动装配，插件无需手写 FFI。
+
+/// 宿主能力表静态槽（每个插件 dll 一份；宿主注入时经 va_host_bridge! 写入）
+static HOST_SERVICES: OnceLock<HostServicesCell> = OnceLock::new();
+
+struct HostServicesCell(*const VaHostServices);
+// 宿主保证能力表进程存活期间有效，跨线程共享调用是安全的
+unsafe impl Send for HostServicesCell {}
+unsafe impl Sync for HostServicesCell {}
+
+/// 宿主能力桥安全包装（插件侧使用，见 host_bridge 模块文档）
+pub mod host_bridge {
+    use super::*;
+
+    /// 宿主能力桥是否已注入（attach 发生之前为 false）。
+    pub fn available() -> bool {
+        HOST_SERVICES.get().is_some()
+    }
+
+    /// 当前能力表（未注入时 None）。高级用法直接拿表调用。
+    pub fn services() -> Option<&'static VaHostServices> {
+        HOST_SERVICES.get().map(|cell| unsafe { &*cell.0 })
+    }
+
+    fn host() -> Result<&'static VaHostServices, String> {
+        services().ok_or_else(|| "宿主能力桥未注入（宿主过旧或清单未声明 requires_host_bridge）".to_string())
+    }
+
+    /// 读宿主分配的 out JSON 字符串为 String 并归还内存
+    fn take_json(code: i32, ptr: *mut c_char, svc: &VaHostServices) -> Result<String, String> {
+        if code == VA_OK {
+            if ptr.is_null() {
+                return Ok(String::new());
+            }
+            let s = unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned();
+            unsafe { (svc.free_string)(svc.ctx, ptr) };
+            Ok(s)
+        } else {
+            let msg = if ptr.is_null() {
+                format!("宿主能力调用失败（错误码 {code}）")
+            } else {
+                let s = unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned();
+                unsafe { (svc.free_string)(svc.ctx, ptr) };
+                s
+            };
+            Err(msg)
+        }
+    }
+
+    fn take_err(code: i32, ptr: *mut c_char, svc: &VaHostServices) -> Result<(), String> {
+        if code == VA_OK {
+            if !ptr.is_null() {
+                unsafe { (svc.free_string)(svc.ctx, ptr) };
+            }
+            Ok(())
+        } else {
+            let msg = if ptr.is_null() {
+                format!("宿主能力调用失败（错误码 {code}）")
+            } else {
+                let s = unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned();
+                unsafe { (svc.free_string)(svc.ctx, ptr) };
+                s
+            };
+            Err(msg)
+        }
+    }
+
+    /// 收藏元数据 JSON：[{"id","note","created_at","hotkey"}]
+    pub fn list_favorites_json() -> Result<String, String> {
+        let svc = host()?;
+        let mut out: *mut c_char = std::ptr::null_mut();
+        let code = unsafe { (svc.list_favorites)(svc.ctx, &mut out) };
+        take_json(code, out, svc)
+    }
+
+    /// 触发收藏播放（与收藏快捷键同逻辑）
+    pub fn play_favorite(id: &str) -> Result<(), String> {
+        let svc = host()?;
+        let c_id = CString::new(id).map_err(|_| "收藏 id 含非法字符".to_string())?;
+        let mut out_err: *mut c_char = std::ptr::null_mut();
+        let code = unsafe { (svc.play_favorite)(svc.ctx, c_id.as_ptr(), &mut out_err) };
+        take_err(code, out_err, svc)
+    }
+
+    /// 停止当前播放（扬声器 + 虚拟麦克风）
+    pub fn stop_playback() -> Result<(), String> {
+        let svc = host()?;
+        let code = unsafe { (svc.stop_playback)(svc.ctx) };
+        if code == VA_OK { Ok(()) } else { Err(format!("停止播放失败（错误码 {code}）")) }
+    }
+
+    /// 文字合成（走宿主现有合成管线）。阻塞调用，请在后台线程执行。
+    pub fn synthesize(text: &str) -> Result<(), String> {
+        let svc = host()?;
+        let c_text = CString::new(text).map_err(|_| "文本含非法字符".to_string())?;
+        let mut out_err: *mut c_char = std::ptr::null_mut();
+        let code = unsafe { (svc.synthesize)(svc.ctx, c_text.as_ptr(), &mut out_err) };
+        take_err(code, out_err, svc)
+    }
+
+    /// 切换「发送到麦克风」开关，返回切换后的新状态
+    pub fn toggle_mic_send() -> Result<bool, String> {
+        let svc = host()?;
+        let mut out: *mut c_char = std::ptr::null_mut();
+        let code = unsafe { (svc.toggle_mic_send)(svc.ctx, &mut out) };
+        let json = take_json(code, out, svc)?;
+        serde_json::from_str::<serde_json::Value>(&json)
+            .ok()
+            .and_then(|v| v.get("mic_send").and_then(|b| b.as_bool()))
+            .ok_or_else(|| "宿主返回状态解析失败".to_string())
+    }
+
+    /// 播放最近一条消息
+    pub fn play_last() -> Result<(), String> {
+        let svc = host()?;
+        let code = unsafe { (svc.play_last)(svc.ctx) };
+        if code == VA_OK { Ok(()) } else { Err(format!("播放最近消息失败（错误码 {code}）")) }
+    }
+
+    /// 状态查询 JSON：{"mic_send","playing_id","synthesizing"}
+    pub fn get_state_json() -> Result<String, String> {
+        let svc = host()?;
+        let mut out: *mut c_char = std::ptr::null_mut();
+        let code = unsafe { (svc.get_state)(svc.ctx, &mut out) };
+        take_json(code, out, svc)
+    }
+
+    /// 订阅宿主事件推送（收藏/设置/播放状态变化）。
+    /// 回调可能在任意宿主线程触发，event 为 JSON 字符串（已拷贝，可自由使用）。
+    pub fn subscribe_events<F>(f: F) -> Result<(), String>
+    where
+        F: Fn(&str) + Send + Sync + 'static,
+    {
+        let svc = host()?;
+        // 闭包装箱成裸指针经 user_data 传回；订阅进程期内有效，不释放
+        let user_data = Box::into_raw(Box::new(f)) as *mut std::os::raw::c_void;
+        unsafe extern "C" fn trampoline<F>(user_data: *mut std::os::raw::c_void, event_json: *const c_char)
+        where
+            F: Fn(&str) + Send + Sync + 'static,
+        {
+            let f = &*(user_data as *const F);
+            if event_json.is_null() {
+                return;
+            }
+            let s = CStr::from_ptr(event_json).to_string_lossy();
+            f(&s);
+        }
+        let cb: VaHostEventCallback = trampoline::<F>;
+        let code = unsafe { (svc.subscribe_events)(svc.ctx, cb, user_data) };
+        if code == VA_OK { Ok(()) } else { Err(format!("订阅宿主事件失败（错误码 {code}）")) }
+    }
+
+    /// 回写自身配置（仅 display 类型字段生效）
+    pub fn set_own_config(key: &str, value: &str) -> Result<(), String> {
+        let svc = host()?;
+        let c_key = CString::new(key).map_err(|_| "key 含非法字符".to_string())?;
+        let c_val = CString::new(value).map_err(|_| "value 含非法字符".to_string())?;
+        let mut out_err: *mut c_char = std::ptr::null_mut();
+        let code = unsafe { (svc.set_own_config)(svc.ctx, c_key.as_ptr(), c_val.as_ptr(), &mut out_err) };
+        take_err(code, out_err, svc)
+    }
+
+    /// 通用用户确认弹窗（v2）：阻塞等待用户在宿主弹窗上点是/否。
+    /// Ok(true)=允许，Ok(false)=拒绝，Err=超时或能力不可用。
+    pub fn confirm_dialog(title: &str, body: &str) -> Result<bool, String> {
+        let svc = host()?;
+        let c_title = CString::new(title).map_err(|_| "标题含非法字符".to_string())?;
+        let c_body = CString::new(body).map_err(|_| "内容含非法字符".to_string())?;
+        let code = unsafe { (svc.confirm_dialog)(svc.ctx, c_title.as_ptr(), c_body.as_ptr()) };
+        match code {
+            1 => Ok(true),
+            0 => Ok(false),
+            _ => Err("确认弹窗超时或不可用".to_string()),
+        }
+    }
+
+    /// 宿主能力表存入静态槽（va_host_bridge! 宏内部使用，插件勿直接调用）
+    #[doc(hidden)]
+    pub fn __store_host_services(services: *const VaHostServices) {
+        let _ = HOST_SERVICES.set(HostServicesCell(services));
+    }
+}
+
+/// 插件侧可选导出：宿主能力桥接入点。宿主取到本符号即注入能力表。
+///
+/// 用法（插件 crate 的 lib.rs）：
+/// ```ignore
+/// plugin_api::va_host_bridge! {
+///     on_attach: my_init,   // fn(&plugin_api::VaHostServices)，可为占位 | _| {}
+/// }
+/// ```
+///
+/// - 宏导出 `va_plugin_attach_host`：存表 → 调 on_attach（catch_unwind 包裹，
+///   panic 不跨 FFI 边界）；
+/// - 之后插件任意线程用 `plugin_api::host_bridge::*` 安全包装调用宿主能力；
+/// - 未被宿主注入时 host_bridge 调用返回 Err，插件应优雅降级。
+#[macro_export]
+macro_rules! va_host_bridge {
+    (on_attach: $on_attach:expr $(,)?) => {
+        #[no_mangle]
+        pub unsafe extern "C" fn va_plugin_attach_host(services: *const $crate::VaHostServices) {
+            if services.is_null() {
+                return;
+            }
+            if unsafe { &*services }.version < $crate::VA_HOST_SERVICES_VERSION {
+                return; // 宿主能力表版本过低，不接入（保持未注入状态）
+            }
+            $crate::host_bridge::__store_host_services(services);
+            let f: fn(&$crate::VaHostServices) = $on_attach;
+            let svc = unsafe { &*services };
+            let _ = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| f(svc)));
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -746,5 +1047,28 @@ mod tests {
         let list: Vec<VoiceItem> = serde_json::from_str(json).unwrap();
         assert_eq!(list.len(), 2);
         assert_eq!(list[1].id, "y");
+    }
+
+    #[test]
+    fn 能力表为空指针安全包装返回错误() {
+        // 未注入时（本测试进程从未 attach），安全包装应返回 Err 而非 panic
+        assert!(!host_bridge::available());
+        assert!(host_bridge::get_state_json().is_err());
+        assert!(host_bridge::list_favorites_json().is_err());
+        assert!(host_bridge::set_own_config("k", "v").is_err());
+    }
+
+    #[test]
+    fn 能力表字段布局_c_abi_约定() {
+        // 宿主与插件各自编译本 crate，repr(C) 布局必须一致：
+        // 校验关键字段偏移符合预期（u32 version 前置 + 指针对齐填充）
+        assert_eq!(std::mem::offset_of!(VaHostServices, version), 0);
+        assert_eq!(
+            std::mem::offset_of!(VaHostServices, ctx),
+            std::mem::size_of::<usize>(),
+            "ctx 应紧跟 version 之后的指针对齐位置"
+        );
+        // 12 个成员：version(+填充) + ctx + 10 个函数指针
+        assert_eq!(std::mem::size_of::<VaHostServices>(), (2 + 10) * std::mem::size_of::<usize>());
     }
 }

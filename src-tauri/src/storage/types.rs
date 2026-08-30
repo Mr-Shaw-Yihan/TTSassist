@@ -131,6 +131,12 @@ pub struct Settings {
     /// 悬浮球直径（逻辑像素），安全范围 FLOATING_BALL_MIN..=FLOATING_BALL_MAX
     #[serde(default = "default_ball_size")]
     pub floating_ball_size: i32,
+    /// 悬浮球性能策略：standard（指针跟随+波纹+全帧率）/ performance（关跟随波纹、30fps 封顶）
+    #[serde(default = "default_perf_mode")]
+    pub floating_ball_perf_mode: String,
+    /// 悬浮球皮肤：ink（墨黑）/ white（素白）
+    #[serde(default = "default_ball_skin")]
+    pub floating_ball_skin: String,
 }
 
 impl Default for Settings {
@@ -172,6 +178,8 @@ impl Default for Settings {
             floating_ball_x: default_ball_pos(),
             floating_ball_y: default_ball_pos(),
             floating_ball_size: default_ball_size(),
+            floating_ball_perf_mode: default_perf_mode(),
+            floating_ball_skin: default_ball_skin(),
         }
     }
 }
@@ -208,6 +216,14 @@ pub const FLOATING_BALL_TIERS: [i32; 3] = [44, 56, 72];
 
 fn default_ball_size() -> i32 {
     56
+}
+
+fn default_perf_mode() -> String {
+    "standard".to_string()
+}
+
+fn default_ball_skin() -> String {
+    "ink".to_string()
 }
 
 /// 把任意直径归一到最近的固定档位（先钳进安全范围）。

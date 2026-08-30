@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>磨砂金按钮 · 文字样式候选</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+    background: #2b2925; color: #d8d4cc;
+    display: flex; justify-content: center; padding: 32px 24px 60px;
+  }
+  .wrap { width: 560px; }
+  h1 { font-size: 18px; color: #f0ede6; }
+  .note { font-size: 12px; color: #8f8a80; margin: 6px 0 26px; line-height: 1.6; }
+  h2 { font-size: 13px; color: #b5b0a6; letter-spacing: .12em; margin: 30px 0 12px;
+       border-bottom: 1px solid #454138; padding-bottom: 8px; }
+
+  /* ── 与 index.html 同源的磨砂金/毛玻璃 ── */
+  .fgold {
+    position: relative; overflow: hidden;
+    background: linear-gradient(180deg, #E6C25C, #C69A2E);
+    border-radius: 16px;
+  }
+  .fgold::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: url("../assets/icons/gold_texture.png") repeat;
+  }
+  .fgold > * { position: relative; z-index: 1; }
+  .glass {
+    background: rgba(255,255,255,.62);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    border: 1px solid rgba(255,255,255,.35);
+    border-radius: 16px;
+  }
+
+  .cand { margin-bottom: 20px; }
+  .meta { display: flex; justify-content: space-between; align-items: baseline;
+          font-size: 12px; margin-bottom: 8px; }
+  .meta .nm { color: #e8e4dc; font-weight: 600; }
+  .meta .spec { color: #8f8a80; font-size: 11px; }
+  .meta .ratio { color: #6f6a60; font-size: 10px; }
+
+  .btn { height: 46px; display: flex; align-items: center; justify-content: center;
+         font-size: 15px; cursor: default; }
+
+  /* ── 候选 A：现状 ── */
+  .tA { color: #1A1816; font-weight: 600; }
+  /* ── 候选 B：暖褐压印 ── */
+  .tB { color: #43350F; font-weight: 600; letter-spacing: 3px; text-indent: 3px;
+        text-shadow: 0 1px 0 rgba(255,248,230,.30); }
+  /* ── 候选 C：米白反白 ── */
+  .tC { color: #FFF8E6; font-weight: 600; letter-spacing: 3px; text-indent: 3px;
+        text-shadow: 0 -1px 0 rgba(90,66,8,.35); }
+  /* ── 候选 D：古铜宽距 ── */
+  .tD { color: #6B4E0E; font-weight: 700; letter-spacing: 6px; text-indent: 6px; }
+  /* ── 候选 E：衬线墨黑 ── */
+  .tE { color: #1A1816; font-weight: 600; letter-spacing: 2px; text-indent: 2px;
+        font-family: Georgia, "Times New Roman", "SimSun", serif; }
+
+  /* ── 设备条目 ── */
+  .dpc { height: 46px; padding: 0 14px; display: flex; align-items: center; gap: 8px; }
+  .dpc .n { flex: 1; font-size: 14px; }
+  .dpc .a { font-size: 11px; }
+  .e1 .n { color: #1A1816; font-weight: 600; }
+  .e1 .a { color: rgba(26,24,22,.62); }
+  .e2 .n { color: #43350F; font-weight: 600; letter-spacing: .5px; }
+  .e2 .a { color: rgba(67,53,15,.62); }
+  .e3 .n { color: #FFF8E6; font-weight: 600; letter-spacing: .5px; }
+  .e3 .a { color: rgba(255,248,230,.75); }
+
+  /* ── 次级玻璃按钮 ── */
+  .sbtn { height: 44px; display: flex; align-items: center; justify-content: center;
+          font-size: 13px; }
+  .s1 { color: #6B675F; }
+  .s2 { color: #A9821C; font-weight: 600; letter-spacing: 1px; }
+  .s3 { color: #1A1816; font-weight: 500; }
+
+  /* ── 推荐组合整卡预览 ── */
+  .mock { background: #F6F5F3; border-radius: 24px; padding: 22px;
+          box-shadow: 0 14px 40px rgba(0,0,0,.35); }
+  .mock .label { font-size: 11px; color: #6B675F; margin-bottom: 10px; }
+  .mock .dpc { margin-bottom: 10px; }
+  .mock .glass.sbtn { margin-bottom: 14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>磨砂金按钮 · 文字样式候选</h1>
+  <div class="note">同一块磨砂金底（渐变 #E6C25C→#C69A2E + gold_texture 噪点），仅文字处理不同。对比度为文字色对金底深色端 #C69A2E 的近似 WCAG 值，仅供参考；点击无响应，纯样式稿。</div>
+
+  <h2>一、主按钮（连接 / 配对）</h2>
+
+  <div class="cand">
+    <div class="meta"><span class="nm">A · 现状基线</span><span class="spec">墨黑 #1A1816 · w600 · 字距 0</span><span class="ratio">对比度 ≈6.8:1</span></div>
+    <div class="fgold btn"><span class="tA">配对</span></div>
+  </div>
+
+  <div class="cand">
+    <div class="meta"><span class="nm">B · 暖褐压印（推荐）</span><span class="spec">#43350F · w600 · 字距 3px · 1px 米白底光</span><span class="ratio">≈4.6:1 · 大字号加粗达标</span></div>
+    <div class="fgold btn"><span class="tB">配对</span></div>
+  </div>
+
+  <div class="cand">
+    <div class="meta"><span class="nm">C · 米白反白</span><span class="spec">#FFF8E6 · w600 · 字距 3px · 上缘暗影</span><span class="ratio">≈2.5:1 · 奢华感强 / 可读性弱</span></div>
+    <div class="fgold btn"><span class="tC">配对</span></div>
+  </div>
+
+  <div class="cand">
+    <div class="meta"><span class="nm">D · 古铜宽距</span><span class="spec">#6B4E0E · w700 · 字距 6px</span><span class="ratio">≈3.0:1 · 同族调性 / 偏弱</span></div>
+    <div class="fgold btn"><span class="tD">配对</span></div>
+  </div>
+
+  <div class="cand">
+    <div class="meta"><span class="nm">E · 衬线墨黑</span><span class="spec">Georgia/宋体 · #1A1816 · w600 · 字距 2px</span><span class="ratio">≈6.8:1</span></div>
+    <div class="fgold btn"><span class="tE">配对</span></div>
+  </div>
+
+  <h2>二、设备条目（发现的电脑）</h2>
+
+  <div class="cand">
+    <div class="meta"><span class="nm">1 · 现状基线</span><span class="spec">名称墨黑 + 地址 62% 墨黑</span><span class="ratio"></span></div>
+    <div class="fgold dpc e1"><span class="n">本机电脑（模拟器桥接）</span><span class="a">127.0.0.1:45271</span></div>
+  </div>
+
+  <div class="cand">
+    <div class="meta"><span class="nm">2 · 褐族同源（推荐）</span><span class="spec">名称 #43350F + 地址 62% 褐</span><span class="ratio"></span></div>
+    <div class="fgold dpc e2"><span class="n">本机电脑（模拟器桥接）</span><span class="a">127.0.0.1:45271</span></div>
+  </div>
+
+  <div class="cand">
+    <div class="meta"><span class="nm">3 · 米白反白</span><span class="spec">名称 #FFF8E6 + 地址 75% 米白</span><span class="ratio"></span></div>
+    <div class="fgold dpc e3"><span class="n">本机电脑（模拟器桥接）</span><span class="a">127.0.0.1:45271</span></div>
+  </div>
+
+  <h2>三、次级毛玻璃按钮（手动输入 / 刷新）</h2>
+
+  <div class="cand">
+    <div class="meta"><span class="nm">1 · 现状基线</span><span class="spec">灰褐 #6B675F</span><span class="ratio"></span></div>
+    <div class="glass sbtn s1">手动输入地址 / 配对码</div>
+  </div>
+
+  <div class="cand">
+    <div class="meta"><span class="nm">2 · 哑金强调（推荐）</span><span class="spec">#A9821C · w600 · 字距 1px</span><span class="ratio"></span></div>
+    <div class="glass sbtn s2">手动输入地址 / 配对码</div>
+  </div>
+
+  <div class="cand">
+    <div class="meta"><span class="nm">3 · 墨黑</span><span class="spec">#1A1816 · w500</span><span class="ratio"></span></div>
+    <div class="glass sbtn s3">手动输入地址 / 配对码</div>
+  </div>
+
+  <h2>四、推荐组合 · 整卡效果（B + 条目2 + 次级2）</h2>
+
+  <div class="mock">
+    <div class="label">发现的电脑</div>
+    <div class="fgold dpc e2"><span class="n">本机电脑（模拟器桥接）</span><span class="a">127.0.0.1:45271</span></div>
+    <div class="glass sbtn s2">手动输入地址 / 配对码</div>
+    <div class="fgold btn"><span class="tB">连接</span></div>
+  </div>
+</div>
+</body>
+</html>

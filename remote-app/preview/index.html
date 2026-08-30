@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>电子声带遥控 · 前端预览（黄蓝弥散 · 黑金风格稿）</title>
+<style>
+  /* ═══ 设计令牌：v2 大改稿（图一黄蓝弥散 + 纯黑按钮；图二金衬线条目文字） ═══ */
+  :root {
+    --bg: #F8F4EA;               /* 暖米白底 */
+    --ink: #1A1816;
+    --sub: #6B675F;
+    --gold: #A9821C;             /* 哑金强调（次级/状态用） */
+    --gold-text: #8A7414;        /* 图二式条目金 */
+    --gold-text-dim: rgba(138, 116, 20, .55);
+    --btn-black: #17150F;        /* 图一式纯黑按钮 */
+    --on-black: #F7F3EA;
+    --blob-yellow: 237, 217, 164;
+    --blob-blue: 185, 199, 220;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    font-family: "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+    background: #2b2925;
+    display: flex; align-items: center; justify-content: center;
+    gap: 28px; padding: 24px; overflow: auto;
+  }
+
+  /* ═══ 左侧演示控制面板 ═══ */
+  .panel { color: #d8d4cc; width: 240px; font-size: 13px; line-height: 1.5; }
+  .panel h1 { font-size: 15px; color: #f0ede6; margin-bottom: 4px; }
+  .panel .note { font-size: 11px; color: #8f8a80; margin-bottom: 14px; }
+  .panel section { margin-bottom: 14px; }
+  .panel .cap { font-size: 11px; color: #8f8a80; letter-spacing: .08em; margin-bottom: 6px; }
+  .panel label { display: flex; align-items: center; gap: 8px; padding: 5px 0; cursor: pointer; }
+  .panel input[type=checkbox] { accent-color: #C69A2E; width: 15px; height: 15px; }
+  .panel button {
+    display: block; width: 100%; margin: 6px 0; padding: 9px 0;
+    background: #3a3733; color: #e8e4dc; border: 1px solid #55504a;
+    border-radius: 10px; font-size: 13px; cursor: pointer; font-family: inherit;
+  }
+  .panel button:hover { background: #454138; }
+  .panel .seg { display: flex; gap: 6px; }
+  .panel .seg button { flex: 1; margin: 0; }
+  .panel .seg button.on { background: #C69A2E; border-color: #C69A2E; color: #1A1816; font-weight: 600; }
+
+  /* ═══ 手机壳 ═══ */
+  .phone {
+    width: 390px; height: 844px; flex: none;
+    border-radius: 44px; background: #0c0b0a; padding: 10px;
+    box-shadow: 0 24px 70px rgba(0,0,0,.5), inset 0 0 0 2px #2e2c29;
+  }
+  .screen {
+    position: relative; width: 100%; height: 100%;
+    border-radius: 34px; overflow: hidden; background: var(--bg);
+  }
+
+  /* ═══ 弥散背景 v2：黄蓝弥散（图一风格） ═══ */
+  .bg { position: absolute; inset: 0; background: var(--bg); }
+  .blob { position: absolute; border-radius: 50%; filter: blur(90px); }
+  .blob.b1 { width: 470px; height: 470px; left: -130px; top: -60px;
+             background: rgba(var(--blob-yellow), .55); }
+  .blob.b2 { width: 420px; height: 420px; left: 170px; top: 470px;
+             background: rgba(var(--blob-blue), .55); }
+  .blob.b3 { width: 300px; height: 300px; left: -110px; top: 600px;
+             background: rgba(var(--blob-yellow), .35); }
+
+  .page { position: absolute; inset: 0; display: none; }
+  .page.on { display: flex; flex-direction: column; }
+
+  /* ═══ 毛玻璃卡片 v2：更透 + 更柔（图一/图二卡片） ═══ */
+  .glass {
+    background: rgba(255,255,255,.52);
+    backdrop-filter: blur(22px); -webkit-backdrop-filter: blur(22px);
+    border: 1px solid rgba(255,255,255,.4);
+    border-radius: 22px;
+    box-shadow: 0 10px 28px rgba(26,24,22,.06);
+  }
+
+  /* ═══ 纯黑按钮面（图一）：平色近黑，无噪点 ═══ */
+  .fbk { background: var(--btn-black); }
+
+  /* ═══ 哑金磨砂实心图标：金渐变 + 噪点，SVG 形状做蒙版 ═══ */
+  .gicon {
+    display: inline-block; position: relative;
+    -webkit-mask-image: var(--m); -webkit-mask-repeat: no-repeat;
+    -webkit-mask-position: center; -webkit-mask-size: contain;
+    mask-image: var(--m); mask-repeat: no-repeat;
+    mask-position: center; mask-size: contain;
+    background: linear-gradient(180deg, #E9CA6B, #C69A2E);
+  }
+  .gicon::after {
+    content: ""; position: absolute; inset: 0;
+    /* 双层稀疏噪斑（暗斑 + 亮斑，细粒低覆盖）+ 官方噪点瓦片：颗粒可见且不吞形状 */
+    background:
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='d'><feTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='2' seed='7' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  2.6 0 0 0 -1.6'/></filter><rect width='160' height='160' filter='url(%23d)'/></svg>") repeat,
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='l'><feTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='2' seed='23' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 0.94  0 0 0 0 0.72  2.6 0 0 0 -1.6'/></filter><rect width='160' height='160' filter='url(%23l)'/></svg>") repeat,
+      url("../assets/icons/gold_texture.png") repeat;
+    background-size: 160px, 160px, 64px;
+  }
+
+  /* 按压 0.96：PressScale */
+  .press { transition: transform .12s ease; cursor: pointer; user-select: none; }
+  .press:active { transform: scale(.96); }
+
+  /* 播放态金色脉动：PulseGlow */
+  @keyframes pulse {
+    from { box-shadow: 0 0 12px 1px rgba(169,130,28,.22); }
+    to   { box-shadow: 0 0 20px 1px rgba(169,130,28,.44); }
+  }
+  .pulsing { animation: pulse .9s ease-in-out infinite alternate; border-radius: 18px; }
+
+  /* v3：全局无衬线极简瘦体（字重 300，细字距微调） */
+
+  /* ═══ 主遥控页 ═══ */
+  .statusbar {
+    height: 28px; flex: none; display: flex; align-items: flex-end;
+    justify-content: space-between; padding: 0 26px 2px;
+    font-size: 12px; font-weight: 400; color: var(--ink);
+  }
+  .toprow { display: flex; gap: 10px; padding: 8px 16px 0; flex: none; }
+  .toprow .tile {
+    flex: 1; aspect-ratio: 1; border-radius: 18px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .toprow .gicon { width: 46px; height: 46px; }
+
+  .favlist { flex: 1; overflow-y: auto; padding: 12px 16px 10px; scrollbar-width: none; }
+  .favlist::-webkit-scrollbar { display: none; }
+  .fav {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 16px; border-radius: 18px; margin-bottom: 10px;
+  }
+  .fav .t { flex: 1; min-width: 0; }
+  .fav .note {
+    font-size: 15px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    font-weight: 300; color: var(--gold-text); line-height: 1.5; letter-spacing: .5px;
+  }
+  .fav .hk { font-size: 11px; color: var(--gold-text-dim); margin-top: 4px; }
+  .fav .dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--gold); }
+
+  .empty { margin: auto 28px; padding: 28px; text-align: center; }
+  .empty img { width: 56px; height: 56px; }
+  .empty .l1 { font-size: 14px; color: var(--ink); margin-top: 12px; font-weight: 300; }
+  .empty .l2 { font-size: 12px; color: var(--sub); margin-top: 6px; }
+
+  .jump { position: absolute; right: 14px; bottom: 130px; display: none; flex-direction: column; gap: 10px; }
+  .jump.on { display: flex; }
+  .jump .jbtn {
+    width: 48px; height: 48px; border-radius: 16px; opacity: .8;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .jump .gicon { width: 22px; height: 22px; }
+
+  .bottombar { flex: none; padding: 0 16px 10px; }
+  .bottombar .bar {
+    border-radius: 28px; padding: 6px 8px 6px 18px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .bottombar input {
+    flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
+    font-size: 14px; color: var(--ink); font-family: inherit;
+  }
+  .bottombar input::placeholder { font-size: 13px; color: var(--sub); }
+  .bottombar .send { padding: 10px; display: flex; }
+  .bottombar .send .gicon { width: 24px; height: 24px; }
+  .bottombar .send.dim { opacity: .4; pointer-events: none; }
+
+  /* ═══ 配对页 ═══ */
+  .pairwrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; overflow-y: auto; scrollbar-width: none; }
+  .pairwrap::-webkit-scrollbar { display: none; }
+  .paircard { width: 100%; max-width: 380px; padding: 22px; display: flex; flex-direction: column; }
+  .paircard .grokbox { width: 56px; height: 56px; margin: 0 auto; border-radius: 18px; overflow: hidden; }
+  .paircard h2 {
+    font-size: 22px; margin-top: 12px; text-align: left;
+    font-weight: 300; color: var(--gold-text); letter-spacing: 2px;
+  }
+  .paircard .subtitle { font-size: 12px; color: var(--sub); margin-top: 6px; }
+  .waitcard { margin-top: 14px; border-radius: 16px; padding: 16px; display: flex; gap: 12px; align-items: center; }
+  .spin { width: 18px; height: 18px; flex: none; border-radius: 50%;
+          border: 2px solid rgba(169,130,28,.25); border-top-color: var(--gold);
+          animation: rot 1s linear infinite; }
+  @keyframes rot { to { transform: rotate(360deg); } }
+  .waitcard .t1 { font-size: 14px; color: var(--ink); }
+  .waitcard .t2 { font-size: 11px; color: var(--sub); margin-top: 4px; }
+  .dlabel { font-size: 11px; color: var(--sub); margin-top: 16px; }
+  .dpc { margin-top: 6px; height: 48px; border-radius: 16px; padding: 0 14px;
+         display: flex; align-items: center; gap: 8px; }
+  .dpc .n {
+    flex: 1; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 300; color: var(--gold-text); letter-spacing: .5px;
+  }
+  .dpc .a { font-size: 11px; color: var(--gold-text-dim); }
+  .manual-toggle { margin-top: 10px; height: 44px; border-radius: 16px;
+                   display: flex; align-items: center; justify-content: center;
+                   font-size: 13px; color: var(--gold); font-weight: 400; letter-spacing: 1px; }
+  .iprow { display: flex; gap: 10px; margin-top: 16px; }
+  .field {
+    flex: 1; background: rgba(255,255,255,.55); border-radius: 14px;
+    padding: 12px 14px; border: 0; outline: 0; font-size: 14px;
+    color: var(--ink); font-family: inherit; min-width: 0;
+  }
+  .field::placeholder { font-size: 13px; color: var(--sub); }
+  .field.port { flex: none; width: 74px; }
+  .gbtn {
+    display: flex; align-items: center; justify-content: center;
+    height: 46px; border-radius: 16px; margin-top: 10px;
+    font-size: 15px; font-weight: 400; color: var(--on-black);
+    letter-spacing: 3px; text-indent: 3px;
+  }
+  .ordiv { font-size: 10px; color: var(--sub); text-align: center; margin: 18px 0 8px; }
+  .codef {
+    background: rgba(255,255,255,.4); border: 1px solid rgba(169,130,28,.5); border-radius: 14px;
+    padding: 12px 16px; text-align: center; font-size: 18px; letter-spacing: 6px;
+    color: var(--ink); outline: 0; font-family: inherit; width: 100%;
+  }
+  .codef:focus { border-color: var(--gold); }
+  .coderow { display: flex; gap: 10px; margin-top: 10px; align-items: stretch; }
+  .coderow .gbtn { flex: 1; margin-top: 0; }
+  .refresh { width: 46px; flex: none; border-radius: 16px; opacity: .75;
+             display: flex; align-items: center; justify-content: center; }
+  .refresh .gicon { width: 20px; height: 20px; }
+  .foot { font-size: 10px; color: var(--sub); text-align: center; margin-top: 6px; }
+
+  /* ═══ toast ═══ */
+  .toast {
+    position: absolute; left: 24px; right: 24px; bottom: 120px;
+    display: none; justify-content: center; pointer-events: none; z-index: 30;
+  }
+  .toast.on { display: flex; }
+  .toast span {
+    background: rgba(26,24,22,.88); color: #fff; font-size: 13px;
+    padding: 12px 18px; border-radius: 14px;
+  }
+
+  /* ═══ 断开确认弹窗 ═══ */
+  .dlgmask { position: absolute; inset: 0; display: none; align-items: center;
+             justify-content: center; background: rgba(26,24,22,.18); z-index: 40; }
+  .dlgmask.on { display: flex; }
+  .dlg { width: 280px; padding: 20px; background: rgba(255,255,255,.92); }
+  .dlg .t { font-size: 15px; color: var(--ink); text-align: center; }
+  .dlg .row { display: flex; margin-top: 16px; }
+  .dlg button { flex: 1; background: none; border: 0; font-size: 15px;
+                font-family: inherit; cursor: pointer; padding: 10px 0; }
+  .dlg .cancel { color: var(--sub); }
+  .dlg .ok { color: var(--gold); font-weight: 500; }
+
+  .grokbox { border-radius: 18px; overflow: hidden; }
+  .grokbox svg { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+
+<div class="panel">
+  <h1>电子声带遥控 · 前端预览 <span style="color:#C69A2E">v2 大改稿</span></h1>
+  <div class="note">黄蓝弥散背景（图一）· 毛玻璃条目 + 金衬线文字（图二）· 纯黑按钮 + 哑金磨砂实心图标。仅供设计评审，非 APK 产物；数据为演示假数据。</div>
+
+  <section>
+    <div class="cap">页面</div>
+    <div class="seg">
+      <button id="tab-pair" class="on">配对页</button>
+      <button id="tab-main">主遥控页</button>
+    </div>
+  </section>
+
+  <section>
+    <div class="cap">主遥控页状态</div>
+    <label><input type="checkbox" id="ck-mic" checked> 麦克风开（mic_send）</label>
+    <label><input type="checkbox" id="ck-synth"> 合成中（禁用发送）</label>
+    <label><input type="checkbox" id="ck-empty"> 空收藏态</label>
+    <div class="note" style="margin:4px 0 0">点收藏卡 = 播放（金脉动）/ 再点 = 停止；列表滚动后浮现跳转钮。</div>
+  </section>
+
+  <section>
+    <div class="cap">配对页状态</div>
+    <label><input type="checkbox" id="ck-found" checked> 发现列表（模拟器桥接）</label>
+    <label><input type="checkbox" id="ck-wait"> 已连上·等 PC 确认</label>
+  </section>
+
+  <section>
+    <div class="cap">全局</div>
+    <button id="btn-dlg">预览「断开连接？」弹窗（点 logo）</button>
+    <button id="btn-toast">预览 toast 提示</button>
+    <button id="btn-send">模拟发送一条消息</button>
+  </section>
+</div>
+
+<div class="phone"><div class="screen" id="screen">
+  <div class="bg"><div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div></div>
+
+  <!-- ══ 配对页 ══ -->
+  <div class="page on" id="page-pair">
+    <div class="statusbar"><span>12:30</span><span>▲ ▾ 🔋</span></div>
+    <div class="pairwrap"><div class="glass paircard">
+      <div class="grokbox fbk" id="logo-pair"><svg id="grok-pair"></svg></div>
+      <h2>电子声带遥控</h2>
+      <div class="subtitle" id="pair-sub">未连接 · 选择发现的 PC 或手动输入</div>
+
+      <div class="glass waitcard" id="waitcard" style="display:none">
+        <div class="spin"></div>
+        <div>
+          <div class="t1">已连上，请在电脑屏幕上点击「允许」</div>
+          <div class="t2">PC 无人确认时，请求 10 秒后自动超时</div>
+        </div>
+      </div>
+
+      <div id="found">
+        <div class="dlabel">发现的电脑</div>
+        <div class="glass dpc press" id="dpc">
+          <div class="n">本机电脑（模拟器桥接）</div>
+          <div class="a">127.0.0.1:45271</div>
+        </div>
+        <div class="glass manual-toggle press" id="manual-toggle">手动输入地址</div>
+      </div>
+
+      <div id="manual" style="display:none">
+      <div class="iprow">
+        <input class="field" placeholder="IP 地址（如 192.168.1.5）">
+        <input class="field port" value="45271" inputmode="numeric">
+      </div>
+      <div class="gbtn fbk press">连接</div>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- ══ 主遥控页 ══ -->
+  <div class="page" id="page-main">
+    <div class="statusbar"><span>12:30</span><span>▲ ▾ 🔋</span></div>
+    <div class="toprow">
+      <div class="tile fbk press" id="logo-tile">
+        <div class="grokbox" style="width:64px;height:64px" id="logo-main"><svg id="grok-main"></svg></div>
+      </div>
+      <div class="tile fbk press" id="mic-tile"><span class="gicon" id="mic-icon" style="--m:url('icons/mic_on_f.svg')"></span></div>
+      <div class="tile fbk press" id="playlast-tile"><span class="gicon" style="--m:url('icons/play_last_f.svg')"></span></div>
+    </div>
+
+    <div class="favlist" id="favlist"></div>
+
+    <div class="jump" id="jump">
+      <div class="glass jbtn press" id="jump-top"><span class="gicon" style="--m:url('icons/jump_top_f.svg')"></span></div>
+      <div class="glass jbtn press" id="jump-bottom"><span class="gicon" style="--m:url('icons/jump_bottom_f.svg')"></span></div>
+    </div>
+
+    <div class="bottombar"><div class="glass bar">
+      <input id="msg" placeholder="发消息 或 输入文字">
+      <div class="send press" id="send"><span class="gicon" style="--m:url('icons/send_f.svg')"></span></div>
+    </div></div>
+  </div>
+
+  <div class="toast" id="toast"><span id="toast-t"></span></div>
+
+  <div class="dlgmask" id="dlg">
+    <div class="glass dlg">
+      <div class="t">断开连接？</div>
+      <div class="row">
+        <button class="cancel" id="dlg-cancel">取消</button>
+        <button class="ok" id="dlg-ok">断开</button>
+      </div>
+    </div>
+  </div>
+</div></div>
+
+<!-- grok 引擎：与 assets/grok/grok_logo.html 同源同序加载 -->
+<script src="../assets/grok/geometry-data.js"></script>
+<script src="../assets/grok/math.js"></script>
+<script src="../assets/grok/tables.js"></script>
+<script src="../assets/grok/pose.js"></script>
+<script src="../assets/grok/tricks.js"></script>
+<script src="../assets/grok/fx.js"></script>
+<script src="../assets/grok/eyes.js"></script>
+<script src="../assets/grok/character.js"></script>
+
+<script>
+'use strict';
+// ── 演示数据/状态 ──
+const FAVS = [
+  { note: '进攻信号', hotkey: 'Alt+1' },
+  { note: '全体撤退', hotkey: 'Alt+2' },
+  { note: '哈哈哈哈哈哈', hotkey: null },
+  { note: '干得漂亮！', hotkey: 'Alt+3' },
+  { note: '稳住，我们能赢', hotkey: null },
+  { note: '集合打龙', hotkey: 'Alt+4' },
+  { note: '中路miss，小心草丛', hotkey: 'Alt+5' },
+];
+const S = { page: 'pair', mic: true, synth: false, empty: false, playing: null };
+const $ = id => document.getElementById(id);
+
+// ── grok logo：黑底金墨（构造参数与 grok_logo.dart 同源，仅 setInk 换金色） ──
+const groks = [];
+function makeGrok(svgId, state) {
+  try {
+    const c = new window.GrokCharacter($(svgId), {
+      shape: 'blob', color: 'black', scheme: 'light', mode: 'live',
+      loginWrap: false, followPointer: false, state,
+    });
+    if (c.setFpsCap) c.setFpsCap(30);
+    if (c.setInk) c.setInk('#D9B44A'); // 黑底 → 金墨
+    groks.push(c);
+    return c;
+  } catch (e) { console.error('grok init failed', e); return null; }
+}
+makeGrok('grok-pair', 'sleeping');
+makeGrok('grok-main', 'suspicious');
+function setGrok(state) { groks.forEach(c => { try { c.setState(state); } catch (_) {} }); }
+
+// ── toast ──
+let toastTimer = null;
+function toast(t) {
+  $('toast-t').textContent = t;
+  $('toast').classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $('toast').classList.remove('on'), 2500);
+}
+
+// ── 收藏列表渲染 ──
+function renderList() {
+  const box = $('favlist');
+  if (S.empty) {
+    box.innerHTML =
+      '<div class="glass empty">' +
+      '<img src="../assets/icons/empty_fav.svg" alt="">' +
+      '<div class="l1">PC 端暂无收藏</div>' +
+      '<div class="l2">在 PC 端右键消息即可收藏</div></div>';
+    return;
+  }
+  box.innerHTML = FAVS.map((f, i) =>
+    '<div class="glass fav press' + (S.playing === i ? ' pulsing' : '') + '" data-i="' + i + '">' +
+    '<div class="t"><div class="note">' + f.note + '</div>' +
+    (f.hotkey ? '<div class="hk">' + f.hotkey + '</div>' : '') + '</div>' +
+    (S.playing === i ? '<div class="dot"></div>' : '') +
+    '</div>').join('');
+  box.querySelectorAll('.fav').forEach(el => {
+    el.addEventListener('click', () => {
+      const i = +el.dataset.i;
+      S.playing = S.playing === i ? null : i;   // 再点播放中收藏 = 停止
+      renderList();
+    });
+  });
+}
+
+// ── 页面切换 ──
+function showPage(p) {
+  S.page = p;
+  $('page-pair').classList.toggle('on', p === 'pair');
+  $('page-main').classList.toggle('on', p === 'main');
+  $('tab-pair').classList.toggle('on', p === 'pair');
+  $('tab-main').classList.toggle('on', p === 'main');
+  setGrok(p === 'main' ? 'suspicious' : 'sleeping');
+}
+$('tab-pair').addEventListener('click', () => showPage('pair'));
+$('tab-main').addEventListener('click', () => showPage('main'));
+
+// ── 主页交互 ──
+function renderMic() {
+  $('mic-icon').style.setProperty('--m',
+    'url("icons/' + (S.mic ? 'mic_on_f' : 'mic_off_f') + '.svg")');
+}
+$('mic-tile').addEventListener('click', () => {
+  S.mic = !S.mic;
+  $('ck-mic').checked = S.mic;
+  renderMic();
+});
+$('ck-mic').addEventListener('change', e => { S.mic = e.target.checked; renderMic(); });
+$('ck-empty').addEventListener('change', e => { S.empty = e.target.checked; renderList(); });
+$('ck-synth').addEventListener('change', e => setSynth(e.target.checked));
+function setSynth(v) {
+  S.synth = v;
+  $('send').classList.toggle('dim', v);
+  $('msg').placeholder = v ? '合成中…' : '发消息 或 输入文字';
+  $('msg').style.opacity = v ? .5 : 1;
+}
+$('playlast-tile').addEventListener('click', () => toast('已发送 play_last（演示）'));
+$('send').addEventListener('click', () => {
+  const v = $('msg').value.trim();
+  if (!v || S.synth) return;
+  $('msg').value = '';
+  setSynth(true);
+  $('ck-synth').checked = true;
+  setTimeout(() => { setSynth(false); $('ck-synth').checked = false; toast('PC 合成完成（演示）'); }, 2200);
+});
+$('btn-send').addEventListener('click', () => $('send').click());
+
+// 跳转顶/底：滚动后浮现
+$('favlist').addEventListener('scroll', () => {
+  $('jump').classList.toggle('on', $('favlist').scrollTop > 60);
+});
+$('jump-top').addEventListener('click', () => $('favlist').scrollTo({ top: 0, behavior: 'smooth' }));
+$('jump-bottom').addEventListener('click', () =>
+  $('favlist').scrollTo({ top: $('favlist').scrollHeight, behavior: 'smooth' }));
+
+// ── 断开确认弹窗 ──
+$('logo-tile').addEventListener('click', () => $('dlg').classList.add('on'));
+$('btn-dlg').addEventListener('click', () => $('dlg').classList.add('on'));
+$('dlg-cancel').addEventListener('click', () => $('dlg').classList.remove('on'));
+$('dlg-ok').addEventListener('click', () => {
+  $('dlg').classList.remove('on');
+  S.playing = null;
+  showPage('pair');
+  toast('已断开（演示）');
+});
+
+// ── 配对页交互 ──
+let manualOpen = false;
+function renderPair() {
+  const hasDevice = $('ck-found').checked;
+  $('found').style.display = hasDevice ? '' : 'none';
+  // 有设备：只显示设备条目 + 手动输入按钮；无设备：直接显示手动界面
+  $('manual').style.display = (!hasDevice || manualOpen) ? '' : 'none';
+  $('manual-toggle').textContent = manualOpen ? '收起手动输入' : '手动输入地址';
+}
+$('manual-toggle').addEventListener('click', () => { manualOpen = !manualOpen; renderPair(); });
+$('ck-found').addEventListener('change', () => { manualOpen = false; renderPair(); });
+$('dpc').addEventListener('click', () => toast('已发起连接，等待 PC 确认（演示）'));
+$('ck-wait').addEventListener('change', e => {
+  $('waitcard').style.display = e.target.checked ? '' : 'none';
+  $('pair-sub').textContent = e.target.checked ? '已连上，等待鉴权' : '未连接 · 选择发现的 PC 或手动输入';
+});
+$('btn-toast').addEventListener('click', () => toast('操作失败：连接已断开（演示）'));
+
+renderList();
+renderPair();
+renderMic();
+</script>
+</body>
+</html>

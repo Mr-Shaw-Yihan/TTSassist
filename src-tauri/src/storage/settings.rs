@@ -71,6 +71,8 @@ pub fn load_settings(data_dir: &Path) -> Settings {
             floating_ball_x: v.get("floating_ball_x").and_then(|x| x.as_i64()).map(|x| x as i32).unwrap_or(default.floating_ball_x),
             floating_ball_y: v.get("floating_ball_y").and_then(|x| x.as_i64()).map(|x| x as i32).unwrap_or(default.floating_ball_y),
             floating_ball_size: v.get("floating_ball_size").and_then(|x| x.as_i64()).map(|x| super::types::clamp_ball_size(x as i32)).unwrap_or(default.floating_ball_size),
+            floating_ball_perf_mode: v.get("floating_ball_perf_mode").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.floating_ball_perf_mode),
+            floating_ball_skin: v.get("floating_ball_skin").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.floating_ball_skin),
         },
         Err(_) => default,
     };
@@ -167,6 +169,8 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "floating_ball_x" => if let Some(v) = value.as_i64() { s.floating_ball_x = v as i32 },
         "floating_ball_y" => if let Some(v) = value.as_i64() { s.floating_ball_y = v as i32 },
         "floating_ball_size" => if let Some(v) = value.as_i64() { s.floating_ball_size = super::types::clamp_ball_size(v as i32) },
+        "floating_ball_perf_mode" => if let Some(v) = value.as_str() { s.floating_ball_perf_mode = v.to_string() },
+        "floating_ball_skin" => if let Some(v) = value.as_str() { s.floating_ball_skin = v.to_string() },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;

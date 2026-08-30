@@ -102,6 +102,7 @@ mod tests {
             timeout_secs: 60,
             requirements: None,
             config: None,
+            requires_host_bridge: false,
         };
         m.config = Some(super::super::manifest::PluginConfigDecl {
             help_url: None,

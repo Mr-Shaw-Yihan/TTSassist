@@ -2,12 +2,21 @@
 // 后端每个 #[tauri::command] 对应一个函数，参数名与后端 fn 参数 snake_case 一致。
 
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry, BundledPluginInfo, UpdateInfo, AsrPluginInfo, PluginConfigInfo } from "../types";
 
 // ── TTS ──────────────────────────────────────────
 
 export async function generateTTS(text: string): Promise<Message> {
-  return invoke<Message>("generate_tts", { text });
+  // 悬浮球角色业务态事件（va:* 词表）：成功转一圈 / 失败 alerting（合成中不加状态）
+  try {
+    const msg = await invoke<Message>("generate_tts", { text });
+    void emit("va:tts:done").catch(() => {});
+    return msg;
+  } catch (e) {
+    void emit("va:tts:error").catch(() => {});
+    throw e;
+  }
 }
 
 // ── 插件 ─────────────────────────────────────────
@@ -451,6 +460,37 @@ export async function startOutsideClickWatch(width: number, height: number): Pro
 /** 菜单收起 / 窗口销毁：停止窗口外点击监视 */
 export async function stopOutsideClickWatch(): Promise<void> {
   return invoke<void>("stop_outside_click_watch");
+}
+
+/** 还原悬浮球位置：重置到主显示器屏幕中央（球出屏/找不到时的恢复入口） */
+export async function resetFloatingBallPos(): Promise<void> {
+  return invoke<void>("reset_floating_ball_pos");
+}
+
+/** 后端初始化是否完成（boot 控制器查询，防 dev 慢加载丢 va:boot:ready 事件） */
+export async function isBootReady(): Promise<boolean> {
+  return invoke<boolean>("is_boot_ready");
+}
+
+/** 指针跟随：启动全局光标轮询（~30Hz）；emitCursor=true 时广播 floating_ball:cursor。
+ *  轮询线程同时负责光标穿透判定（交互区域外点击落到下层窗口） */
+export async function startCursorWatch(emitCursor: boolean): Promise<void> {
+  return invoke<void>("start_cursor_watch", { emitCursor });
+}
+
+/** 指针跟随：停止光标轮询（并恢复窗口接受点击） */
+export async function stopCursorWatch(): Promise<void> {
+  return invoke<void>("stop_cursor_watch");
+}
+
+/** 同步球窗交互区域（屏幕物理坐标；区域外光标穿透） */
+export async function updateBallHitRect(x: number, y: number, w: number, h: number): Promise<void> {
+  return invoke<void>("update_ball_hit_rect", { x, y, w, h });
+}
+
+/** 拖拽期间强制接受点击（防穿透态抢走指针事件） */
+export async function setBallPassthroughOverride(on: boolean): Promise<void> {
+  return invoke<void>("set_ball_passthrough_override", { on });
 }
 
 // ── VB-CABLE 驱动下载与安装 ───────────────────

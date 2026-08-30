@@ -6,11 +6,13 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
+use super::bridge::HostBridge;
 use super::config;
-use super::loader::{LoadedAsrPlugin, LoadedPlugin, PluginEngine};
+use super::loader::{LoadedAsrPlugin, LoadedPlugin, LoadedServicePlugin, PluginEngine};
 use super::manifest::{PluginConfigDecl, PluginManifest};
 use super::registry;
 use super::PluginError;
+use tauri::Manager;
 
 /// 当前宿主版本号（编译期注入），用于 min_app_version 校验
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -63,14 +65,21 @@ pub struct PluginManager {
     loaded: RwLock<HashMap<String, Arc<LoadedPlugin>>>,
     /// ASR 插件（与 TTS 分开存储）
     loaded_asr: RwLock<HashMap<String, Arc<LoadedAsrPlugin>>>,
+    /// 服务插件（type = service，不参与合成/识别）
+    loaded_service: RwLock<HashMap<String, Arc<LoadedServicePlugin>>>,
     /// id → 失败原因
     failed: RwLock<HashMap<String, String>>,
+    /// 宿主能力桥注入用的 AppHandle（测试/无 Tauri 环境为 None，不注入）
+    bridge_app: Option<tauri::AppHandle>,
+    /// load_all 期间（manager 自身尚未 manage）收集的待注入桥——manage 之后统一补注入
+    pending_bridges: RwLock<Vec<(String, plugin_api::VaPluginAttachHostFn)>>,
 }
 
 impl PluginManager {
     /// 启动时加载全部已安装插件（registry.json 为准）。
     /// `plugins_root`：插件安装根目录（阶段 22 起为 exe 同级 plugins/，不再位于 APPDATA）。
-    pub fn load_all(plugins_root: &Path) -> Self {
+    /// `app`：宿主 AppHandle，用于注入宿主能力桥（声明 requires_host_bridge 的插件）。
+    pub fn load_all(plugins_root: &Path, app: Option<&tauri::AppHandle>) -> Self {
         // 目录不存在就建（首次启动）；建不了也不致命
         let _ = std::fs::create_dir_all(plugins_root);
         let plugins_root = plugins_root.to_path_buf();
@@ -79,7 +88,10 @@ impl PluginManager {
             plugins_root,
             loaded: RwLock::new(HashMap::new()),
             loaded_asr: RwLock::new(HashMap::new()),
+            loaded_service: RwLock::new(HashMap::new()),
             failed: RwLock::new(HashMap::new()),
+            bridge_app: app.cloned(),
+            pending_bridges: RwLock::new(Vec::new()),
         };
 
         let mut reg = registry::load_registry(&manager.plugins_root);
@@ -119,7 +131,7 @@ impl PluginManager {
         &self.plugins_root
     }
 
-    /// 插件是否已加载可用（TTS / ASR 两个注册表都要查）
+    /// 插件是否已加载可用（TTS / ASR / 服务三个注册表都要查）
     pub fn is_loaded(&self, id: &str) -> bool {
         let tts = self
             .loaded
@@ -131,7 +143,12 @@ impl PluginManager {
             .read()
             .map(|map| map.contains_key(id))
             .unwrap_or(false);
-        tts || asr
+        let service = self
+            .loaded_service
+            .read()
+            .map(|map| map.contains_key(id))
+            .unwrap_or(false);
+        tts || asr || service
     }
 
     /// 插件是否已安装（注册表中有记录，含加载失败的）
@@ -142,7 +159,7 @@ impl PluginManager {
             .any(|e| e.id == id)
     }
 
-    /// 加载单个插件（id 即目录名）；结果记入 loaded/loaded_asr 或 failed。
+    /// 加载单个插件（id 即目录名）；结果记入 loaded/loaded_asr/loaded_service 或 failed。
     /// pub：安装新插件后立即加载用。
     pub fn load_one(&self, id: &str) {
         let dir = self.plugins_root.join(id);
@@ -158,41 +175,121 @@ impl PluginManager {
             }
         };
 
-        if manifest.plugin_type == "asr_engine" {
-            if self.reject_env_conflict(id, &manifest) {
-                return;
+        match manifest.plugin_type.as_str() {
+            "asr_engine" => {
+                if self.reject_env_conflict(id, &manifest) {
+                    return;
+                }
+                match LoadedAsrPlugin::load(&dir, APP_VERSION) {
+                    Ok(plugin) => {
+                        eprintln!("ASR 插件已加载: {id} v{}", plugin.manifest.version);
+                        if plugin.manifest.requires_host_bridge {
+                            match plugin.f_attach_host {
+                                Some(attach) => self.attach_host_bridge(id, attach),
+                                None => eprintln!(
+                                    "提示：插件「{id}」声明 requires_host_bridge 但未导出 va_plugin_attach_host，桥未注入"
+                                ),
+                            }
+                        }
+                        if let Ok(mut map) = self.loaded_asr.write() {
+                            map.insert(id.to_string(), plugin);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("ASR 插件加载失败 [{id}]: {e}");
+                        if let Ok(mut map) = self.failed.write() {
+                            map.insert(id.to_string(), e.to_string());
+                        }
+                    }
+                }
             }
-            match LoadedAsrPlugin::load(&dir, APP_VERSION) {
-                Ok(plugin) => {
-                    eprintln!("ASR 插件已加载: {id} v{}", plugin.manifest.version);
-                    if let Ok(mut map) = self.loaded_asr.write() {
-                        map.insert(id.to_string(), plugin);
-                    }
+            "service" => {
+                if self.reject_env_conflict(id, &manifest) {
+                    return;
                 }
-                Err(e) => {
-                    eprintln!("ASR 插件加载失败 [{id}]: {e}");
-                    if let Ok(mut map) = self.failed.write() {
-                        map.insert(id.to_string(), e.to_string());
+                match LoadedServicePlugin::load(&dir, APP_VERSION) {
+                    Ok(plugin) => {
+                        eprintln!("服务插件已加载: {id} v{}", plugin.manifest.version);
+                        if plugin.manifest.requires_host_bridge {
+                            match plugin.f_attach_host {
+                                Some(attach) => self.attach_host_bridge(id, attach),
+                                None => eprintln!(
+                                    "提示：插件「{id}」声明 requires_host_bridge 但未导出 va_plugin_attach_host，桥未注入"
+                                ),
+                            }
+                        }
+                        if let Ok(mut map) = self.loaded_service.write() {
+                            map.insert(id.to_string(), plugin);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("服务插件加载失败 [{id}]: {e}");
+                        if let Ok(mut map) = self.failed.write() {
+                            map.insert(id.to_string(), e.to_string());
+                        }
                     }
                 }
             }
-        } else {
-            if self.reject_env_conflict(id, &manifest) {
-                return;
+            _ => {
+                if self.reject_env_conflict(id, &manifest) {
+                    return;
+                }
+                match LoadedPlugin::load(&dir, APP_VERSION) {
+                    Ok(plugin) => {
+                        eprintln!("插件已加载: {id} v{}", plugin.manifest.version);
+                        if plugin.manifest.requires_host_bridge {
+                            match plugin.f_attach_host {
+                                Some(attach) => self.attach_host_bridge(id, attach),
+                                None => eprintln!(
+                                    "提示：插件「{id}」声明 requires_host_bridge 但未导出 va_plugin_attach_host，桥未注入"
+                                ),
+                            }
+                        }
+                        if let Ok(mut map) = self.loaded.write() {
+                            map.insert(id.to_string(), plugin);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("插件加载失败 [{id}]: {e}");
+                        if let Ok(mut map) = self.failed.write() {
+                            map.insert(id.to_string(), e.to_string());
+                        }
+                    }
+                }
             }
-            match LoadedPlugin::load(&dir, APP_VERSION) {
-                Ok(plugin) => {
-                    eprintln!("插件已加载: {id} v{}", plugin.manifest.version);
-                    if let Ok(mut map) = self.loaded.write() {
-                        map.insert(id.to_string(), plugin);
-                    }
-                }
-                Err(e) => {
-                    eprintln!("插件加载失败 [{id}]: {e}");
-                    if let Ok(mut map) = self.failed.write() {
-                        map.insert(id.to_string(), e.to_string());
-                    }
-                }
+        }
+    }
+
+    /// 注入宿主能力桥：manifest 声明 requires_host_bridge 且 dll 导出了
+    /// va_plugin_attach_host 时调用（加载成功后）。
+    /// load_all 期间本 manager 尚未 manage（插件 attach 回调里取不到自己），
+    /// 此时挂入 pending，等 lib.rs 在 manage 之后调 attach_pending_bridges 补注入。
+    fn attach_host_bridge(&self, id: &str, attach: plugin_api::VaPluginAttachHostFn) {
+        let Some(app) = self.bridge_app.as_ref() else {
+            eprintln!("提示：插件「{id}」声明 requires_host_bridge，但当前环境无宿主桥（测试运行），跳过注入");
+            return;
+        };
+        let Some(bridge) = app.try_state::<HostBridge>() else {
+            eprintln!("警告：插件「{id}」声明 requires_host_bridge，但宿主桥未初始化，未注入");
+            return;
+        };
+        if app.try_state::<PluginManager>().is_some() {
+            bridge.attach_plugin(app, id, attach);
+        } else if let Ok(mut pending) = self.pending_bridges.write() {
+            pending.push((id.to_string(), attach));
+        }
+    }
+
+    /// 补注入 load_all 期间挂起的桥（lib.rs 在 manage(plugin_manager) 之后调用）
+    pub fn attach_pending_bridges(&self) {
+        let Some(app) = self.bridge_app.as_ref() else { return };
+        let pending = {
+            let mut guard = self.pending_bridges.write().unwrap_or_else(|e| e.into_inner());
+            std::mem::take(&mut *guard)
+        };
+        for (id, attach) in pending {
+            if let Some(bridge) = app.try_state::<HostBridge>() {
+                bridge.attach_plugin(app, &id, attach);
             }
         }
     }
@@ -214,7 +311,7 @@ impl PluginManager {
         true
     }
 
-    /// 收集全部已加载插件（TTS + ASR）的 (id, manifest)，供 env 冲突检测
+    /// 收集全部已加载插件（TTS + ASR + 服务）的 (id, manifest)，供 env 冲突检测与配置注入
     fn loaded_manifests(&self) -> Vec<(String, PluginManifest)> {
         let mut out = Vec::new();
         if let Ok(map) = self.loaded.read() {
@@ -227,6 +324,11 @@ impl PluginManager {
                 out.push((id.clone(), p.manifest.clone()));
             }
         }
+        if let Ok(map) = self.loaded_service.read() {
+            for (id, p) in map.iter() {
+                out.push((id.clone(), p.manifest.clone()));
+            }
+        }
         out
     }
 
@@ -234,13 +336,16 @@ impl PluginManager {
         config::find_required_env_conflict(&self.loaded_manifests(), &manifest.id, manifest)
     }
 
-    /// 取插件 manifest：优先已加载的（TTS/ASR 两个注册表），否则读磁盘（含加载失败的）。
+    /// 取插件 manifest：优先已加载的（TTS/ASR/服务三个注册表），否则读磁盘（含加载失败的）。
     /// 通用配置命令用——设置面板对已安装插件都可展示声明。
     pub fn manifest_of(&self, id: &str) -> Option<PluginManifest> {
         if let Some(p) = self.get(id) {
             return Some(p.manifest.clone());
         }
         if let Some(p) = self.get_asr(id) {
+            return Some(p.manifest.clone());
+        }
+        if let Some(p) = self.get_service(id) {
             return Some(p.manifest.clone());
         }
         PluginManifest::load(&self.plugins_root.join(id)).ok()
@@ -264,6 +369,11 @@ impl PluginManager {
         self.loaded_asr.read().ok()?.get(id).cloned()
     }
 
+    /// 取已加载的服务插件（type = service）
+    pub fn get_service(&self, id: &str) -> Option<Arc<LoadedServicePlugin>> {
+        self.loaded_service.read().ok()?.get(id).cloned()
+    }
+
     /// 把插件包装成 TTS 引擎；插件未加载返回 None
     pub fn build_engine(&self, id: &str, data_dir: &Path) -> Option<PluginEngine> {
         self.get(id).map(|p| PluginEngine::new(p, data_dir.to_path_buf()))
@@ -280,8 +390,9 @@ impl PluginManager {
             let manifest = PluginManifest::load(&dir).ok();
 
             let loaded_plugin = self.get(&entry.id);
-            // ASR 插件存在单独的 loaded_asr 注册表，加载状态两边都要查
+            // ASR / 服务插件存在单独的注册表，加载状态三边都要查
             let loaded_asr = self.get_asr(&entry.id);
+            let loaded_service = self.get_service(&entry.id);
             let error = self
                 .failed
                 .read()
@@ -334,7 +445,7 @@ impl PluginManager {
                 name,
                 version,
                 description,
-                loaded: loaded_plugin.is_some() || loaded_asr.is_some(),
+                loaded: loaded_plugin.is_some() || loaded_asr.is_some() || loaded_service.is_some(),
                 error,
                 voices,
                 audio_format,
@@ -440,8 +551,8 @@ impl PluginManager {
         registry::save_registry(&self.plugins_root, &reg)?;
 
         self.load_one(&id);
-        // ASR 插件加载后进 loaded_asr，两个注册表都要查（只查 loaded 会误报失败）
-        if self.get(&id).is_none() && self.get_asr(&id).is_none() {
+        // ASR / 服务插件加载后进各自注册表，三个注册表都要查（只查 loaded 会误报失败）
+        if self.get(&id).is_none() && self.get_asr(&id).is_none() && self.get_service(&id).is_none() {
             let reason = self
                 .failed
                 .read()
@@ -594,7 +705,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         install_test_plugin(dir.path(), None);
 
-        let pm = PluginManager::load_all(&dir.path().join("plugins"));
+        let pm = PluginManager::load_all(&dir.path().join("plugins"), None);
         let plugin = pm.get("test-plugin").expect("测试插件应加载成功");
 
         // 元信息
@@ -621,7 +732,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         install_test_plugin(dir.path(), Some("0000000000000000000000000000000000000000000000000000000000000000".into()));
 
-        let pm = PluginManager::load_all(&dir.path().join("plugins"));
+        let pm = PluginManager::load_all(&dir.path().join("plugins"), None);
         assert!(pm.get("test-plugin").is_none(), "校验和不符不得加载");
 
         // 失败原因可在 list 中看到
@@ -634,7 +745,7 @@ mod tests {
     #[test]
     fn 空插件目录加载为空() {
         let dir = tempfile::tempdir().unwrap();
-        let pm = PluginManager::load_all(&dir.path().join("plugins"));
+        let pm = PluginManager::load_all(&dir.path().join("plugins"), None);
         assert!(pm.get("不存在").is_none());
         assert!(pm.list().is_empty());
     }
@@ -745,7 +856,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let plugins_root = dir.path().join("plugins");
         std::fs::create_dir_all(&plugins_root).unwrap();
-        let pm = PluginManager::load_all(&plugins_root);
+        let pm = PluginManager::load_all(&plugins_root, None);
 
         // dll 自报 id 固定为 test-plugin，清单 id 必须一致才能通过加载校验
         let zip = dir.path().join("fresh.zip");
@@ -769,7 +880,7 @@ mod tests {
 
         // 阶段一：运行中安装 → pending（用作用域包裹，退出时卸载 dll）
         {
-            let pm = PluginManager::load_all(&dir.path().join("plugins"));
+            let pm = PluginManager::load_all(&dir.path().join("plugins"), None);
             assert!(pm.get("test-plugin").is_some());
 
             let zip = dir.path().join("update.zip");
@@ -780,7 +891,7 @@ mod tests {
         } // pm 在此 drop → dll 卸载，模拟进程退出
 
         // 阶段二：重新 load_all（模拟重启）→ pending 被应用，版本变 0.2.0，pending 清除
-        let pm2 = PluginManager::load_all(&dir.path().join("plugins"));
+        let pm2 = PluginManager::load_all(&dir.path().join("plugins"), None);
         let plugin = pm2.get("test-plugin").expect("重启后应加载新版");
         assert_eq!(plugin.manifest.version, "0.2.0", "pending 更新应已应用");
         assert!(
@@ -796,7 +907,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let plugins_root = dir.path().join("plugins");
         std::fs::create_dir_all(&plugins_root).unwrap();
-        let pm = PluginManager::load_all(&plugins_root);
+        let pm = PluginManager::load_all(&plugins_root, None);
 
         // 随便造个 zip，传错误的 zip checksum
         let zip = dir.path().join("bad.zip");
@@ -815,7 +926,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         install_test_plugin(dir.path(), None);
 
-        let pm = PluginManager::load_all(&dir.path().join("plugins"));
+        let pm = PluginManager::load_all(&dir.path().join("plugins"), None);
         let engine = pm.build_engine("test-plugin", dir.path()).expect("引擎构建");
 
         let rel = engine

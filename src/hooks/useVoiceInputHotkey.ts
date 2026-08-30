@@ -5,7 +5,7 @@
 // 避免两个窗口同时抢麦克风。
 
 import { useEffect, useRef } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { listen, emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AudioRecorder } from "../utils/audioRecorder";
 import { asrTranscribe, listAsrPlugins } from "../services/invoke";
@@ -77,6 +77,7 @@ export function useVoiceInputHotkey() {
         }
         recorderRef.current = recorder;
         store.getState().set({ phase: "recording", recorder, seconds: 0, error: null });
+        void emit("va:asr:start").catch(() => {});
         timerRef.current = window.setInterval(() => {
           store.getState().set({ seconds: store.getState().seconds + 1 });
         }, 1000);
@@ -101,6 +102,7 @@ export function useVoiceInputHotkey() {
       const recorder = recorderRef.current;
       recorderRef.current = null;
       store.getState().set({ phase: "transcribing", recorder: null });
+      void emit("va:asr:end").catch(() => {});
       playEndChime();
       try {
         const wav = await (recorder?.stop() ?? Promise.reject(new Error("录音状态异常")));

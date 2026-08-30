@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<style>
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  svg { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<!-- 空 SVG 容器由引擎自填（与 PC 端 BallLogo 同源用法） -->
+<svg id="g"></svg>
+<script src="geometry-data.js"></script>
+<script src="math.js"></script>
+<script src="tables.js"></script>
+<script src="pose.js"></script>
+<script src="tricks.js"></script>
+<script src="fx.js"></script>
+<script src="eyes.js"></script>
+<script src="character.js"></script>
+<script>
+  // suspicious 动态（设计文档 §4.2 logo 规格）；30fps 封顶省电
+  var c = new window.GrokCharacter(document.getElementById('g'), {
+    shape: 'blob',
+    color: 'black',
+    scheme: 'light',
+    mode: 'live',
+    loginWrap: false,
+    followPointer: false,
+    state: 'suspicious'
+  });
+  if (c.setFpsCap) c.setFpsCap(30);
+  // v3：黑色按钮面上的金墨体（部分 webview 不支持 light-dark()，保持平色）
+  if (c.setInk) c.setInk('#D9B44A');
+  // 供 Flutter 侧切换姿态：suspicious（连接）/ sleeping（断开）
+  window.setGrokState = function (s) { c.setState(s); };
+</script>
+</body>
+</html>

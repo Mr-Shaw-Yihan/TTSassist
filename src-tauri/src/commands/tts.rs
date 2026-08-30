@@ -2,7 +2,7 @@
 // 支持多引擎分发：settings.tts_engine = "mimo" | "moss" | 插件 id（如 "edge-tts"）
 
 use std::path::Path;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager};
 use crate::commands::AppState;
 use crate::plugins::PluginManager;
 use crate::storage::types::{Message, gen_id, now_iso};
@@ -87,13 +87,30 @@ async fn generate_mimo(
 }
 
 #[tauri::command]
-pub async fn generate_tts(
-    text: String,
-    app: AppHandle,
-    state: State<'_, AppState>,
-    mic: State<'_, crate::commands::mic::MicPlayback>,
-    plugins: State<'_, PluginManager>,
-) -> Result<Message, String> {
+pub async fn generate_tts(text: String, app: AppHandle) -> Result<Message, String> {
+    generate_tts_impl(&app, &text).await
+}
+
+/// 合成中的标志守卫：进入合成置位，任何路径退出（含错误）自动复位。
+/// 状态供宿主能力桥 get_state 查询（手机遥控等订阅方据此显示「合成中…」）。
+struct SynthesizingFlag(AppHandle);
+impl Drop for SynthesizingFlag {
+    fn drop(&mut self) {
+        crate::plugins::bridge::set_synthesizing(&self.0, false);
+    }
+}
+
+/// generate_tts 核心实现（Tauri 命令与宿主能力桥共用）：
+/// 读设置 → 引擎分发合成 → 写消息记录 → 广播 → 开关开启时发虚拟麦克风。
+/// 扬声器播放由调用方负责（前端命令路径自行播放；桥路径经 playback:play 事件触发）。
+pub async fn generate_tts_impl(app: &AppHandle, text: &str) -> Result<Message, String> {
+    let state = app.state::<AppState>();
+    let mic = app.state::<crate::commands::mic::MicPlayback>();
+    let plugins = app.state::<PluginManager>();
+
+    let _synth_flag = SynthesizingFlag(app.clone());
+    crate::plugins::bridge::set_synthesizing(app, true);
+
     let data_dir = state.data_dir.clone();
 
     // 1. 读设置
@@ -161,7 +178,7 @@ pub async fn generate_tts(
     // 3. 保存消息记录
     let message = Message {
         id: gen_id("m"),
-        content: text,
+        content: text.to_string(),
         audio_path,
         created_at: now_iso(),
     };

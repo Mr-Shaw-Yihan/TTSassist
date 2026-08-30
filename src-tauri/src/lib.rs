@@ -9,6 +9,7 @@ pub mod storage;
 pub mod sync;
 pub mod tray;
 pub mod tts;
+pub mod win32;
 
 use std::sync::Mutex;
 use tauri::Manager;
@@ -108,16 +109,30 @@ pub fn run() {
                 std::env::set_var("MIMO_API_KEY", &settings.mimo_api_key);
             }
 
+            // 宿主能力桥：先于插件加载 manage——插件 attach 期间即可调用
+            // get_state / subscribe_events（桥的播放态聚合监听也在此注册）
+            let host_bridge = plugins::HostBridge::new();
+            host_bridge.setup_playback_listeners(app.handle());
+            app.manage(host_bridge);
+
+            // AppState / MicPlayback 提前 manage：能力桥包装的合成、收藏播放、
+            // 停止播放等能力依赖二者，插件 attach 时必须已就绪
+            app.manage(AppState::new(data_dir.clone(), settings.clone()));
+            app.manage(crate::commands::mic::MicPlayback::spawn());
+
             // 阶段 22：插件根目录改为 exe 同级 plugins/（脱离 APPDATA 系统盘）
             let plugins_root = resolve_plugins_root();
             migrate_plugins_if_needed(&data_dir, &plugins_root);
 
-            // 插件系统：加载已安装插件（单个插件失败只记日志，不影响主流程）
-            let plugin_manager = plugins::PluginManager::load_all(&plugins_root);
+            // 插件系统：加载已安装插件（单个插件失败只记日志，不影响主流程）；
+            // 传入 AppHandle 供宿主能力桥注入（声明 requires_host_bridge 的插件）
+            let plugin_manager = plugins::PluginManager::load_all(&plugins_root, Some(app.handle()));
             // 通用插件配置注入：按各插件 manifest 的 config 声明把
             // settings.plugin_config 注入环境变量（替代旧 minimax 硬编码注入）
             plugin_manager.inject_config_env(&settings.plugin_config);
             app.manage(plugin_manager);
+            // 补注入 load_all 期间挂起的能力桥（attach 回调需取到已 manage 的 PluginManager）
+            app.state::<plugins::PluginManager>().attach_pending_bridges();
 
             // 浮窗呼出快捷键：读设置 → 注册（失败只记日志，不影响主功能）
             let accel = settings.hotkey_show_window.clone();
@@ -186,33 +201,59 @@ pub fn run() {
             // 加载收藏用于注册收藏快捷键（data_dir 随后移入 AppState）
             let favorites = storage::favorites::load_favorites(&data_dir);
 
-            // 悬浮球：设置开启时显示（有保存位置用保存值，否则放主显示器右下角）。
-            // 必须在 AppState::new 之前读 settings（那边会 move）
-            if settings.floating_ball_enabled {
-                if let Some(ball) = app.get_webview_window("floating_ball") {
-                    let ball_px = storage::types::clamp_ball_size(settings.floating_ball_size);
-                    let (mut x, mut y) = (settings.floating_ball_x, settings.floating_ball_y);
-                    if x < 0 || y < 0 {
-                        if let Ok(Some(mon)) = app.primary_monitor() {
-                            let size = mon.size();
-                            let scale = mon.scale_factor();
-                            // 右下角留边：右侧 24px，底部多留 80px 避开任务栏
-                            x = size.width as i32 - (((ball_px as f64) * scale) as i32 + 24);
-                            y = size.height as i32 - (((ball_px as f64) * scale) as i32 + 80);
-                        }
+            // 悬浮球启动序列：球窗先出播 progress（主窗 visible=false 延迟到 va:boot:done）。
+            // 位置：有保存值用保存值，否则主显示器居中；窗口尺寸 = 球径×1.5 画布。
+            // 启动后是否收球由前端按 floating_ball_enabled 决定（见 FloatingBall.tsx boot 控制器）
+            if let Some(ball) = app.get_webview_window("floating_ball") {
+                let ball_px = storage::types::clamp_ball_size(settings.floating_ball_size);
+                let scale = app
+                    .primary_monitor()
+                    .ok()
+                    .flatten()
+                    .map(|m| m.scale_factor())
+                    .unwrap_or(1.0);
+                let canvas_phys = ((ball_px as f64) * 1.5 * scale) as i32;
+                let (mut x, mut y) = (settings.floating_ball_x, settings.floating_ball_y);
+                if x < 0 || y < 0 {
+                    if let Ok(Some(mon)) = app.primary_monitor() {
+                        let size = mon.size();
+                        x = (size.width as i32 - canvas_phys) / 2;
+                        y = (size.height as i32 - canvas_phys) / 2;
                     }
-                    if x >= 0 && y >= 0 {
-                        let _ = ball.set_position(tauri::PhysicalPosition::new(x, y));
-                    }
-                    // 窗口尺寸跟随用户设置（tauri.conf.json 里的 56x56 只是初始值）
-                    let _ = ball.set_size(tauri::LogicalSize::new(ball_px, ball_px));
-                    let _ = ball.show();
                 }
+                if x >= 0 && y >= 0 {
+                    let _ = ball.set_position(tauri::PhysicalPosition::new(x, y));
+                }
+                let canvas_log = (ball_px as f64 * 1.5) as u32;
+                let _ = ball.set_size(tauri::LogicalSize::new(canvas_log, canvas_log));
+                // 悬浮球点击不激活窗口、不抢游戏焦点（config 的 focus:false 只管创建时机，不够）
+                crate::win32::set_no_activate(&ball, true);
+                let _ = ball.show();
             }
 
-            app.manage(AppState::new(data_dir, settings));
-            // 虚拟麦克风播放控制（专用音频线程）
-            app.manage(crate::commands::mic::MicPlayback::spawn());
+            // 焦点诊断：记录 quick_input 焦点变化与当时的前台窗口（排查游戏内浮窗自动消失）
+            if let Some(qi) = app.get_webview_window("quick_input") {
+                // 直播伴侣形态：浮窗永久挂 WS_EX_NOACTIVATE——点击只送达鼠标消息、
+                // 不激活窗口，前台永远是游戏；打字靠 SetFocus webview 子窗口建立键盘路由。
+                crate::win32::set_no_activate(&qi, true);
+                let log_dir = data_dir.clone(); // data_dir 之后还要移入 AppState，先克隆
+                qi.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Focused(focused) = event {
+                        let (hwnd, title) = crate::win32::foreground_info();
+                        let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                        let line = format!("[{ts}] quick_input focused={focused}，当时前台窗口: \"{title}\" (hwnd=0x{hwnd:X})");
+                        eprintln!("{line}");
+                        use std::io::Write;
+                        let path = log_dir.join("focus_debug.log");
+                        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+                            let _ = writeln!(f, "{line}");
+                        }
+                    }
+                });
+            }
+
+            // AppState / MicPlayback 已在插件加载前 manage（宿主能力桥依赖），此处不再注册
+
             // 注册收藏快捷键（需在 AppState/MicPlayback manage 之后）
             if let Err(e) = hotkey::refresh_favorite_hotkeys(app.handle(), &favorites) {
                 eprintln!("注册收藏快捷键失败: {e}");
@@ -220,6 +261,12 @@ pub fn run() {
             // 系统托盘
             tray::setup(app)?;
             tray::install_close_to_tray(app.handle());
+            // 后端初始化完成 → 通知球窗前端（boot 控制器等 max(ready, 800ms) 后收球开主窗）
+            {
+                crate::commands::floating_ball::mark_boot_ready();
+                use tauri::Emitter;
+                let _ = app.handle().emit("va:boot:ready", ());
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -273,12 +320,19 @@ pub fn run() {
             crate::hotkey::set_voice_input_hotkey,
             crate::hotkey::set_play_last_hotkey,
             crate::hotkey::set_mic_toggle_hotkey,
-            crate::commands::floating_ball::toggle_quick_input,
+                        crate::commands::floating_ball::toggle_quick_input,
+            crate::hotkey::focus_quick_input_content,
             crate::commands::floating_ball::toggle_mic_send,
             crate::commands::floating_ball::set_floating_ball_enabled,
             crate::commands::floating_ball::save_floating_ball_pos,
             crate::commands::floating_ball::start_outside_click_watch,
             crate::commands::floating_ball::stop_outside_click_watch,
+            crate::commands::floating_ball::reset_floating_ball_pos,
+            crate::commands::floating_ball::is_boot_ready,
+            crate::commands::floating_ball::start_cursor_watch,
+            crate::commands::floating_ball::stop_cursor_watch,
+            crate::commands::floating_ball::update_ball_hit_rect,
+            crate::commands::floating_ball::set_ball_passthrough_override,
             crate::show_main_window,
         ])
         .run(tauri::generate_context!())

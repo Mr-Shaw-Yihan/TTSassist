@@ -41,6 +41,23 @@ extern "system" {
     fn GetCursorPos(lp_point: *mut WinPoint) -> i32;
 }
 
+// ── 启动就绪查询（boot 控制器用） ────────────────────────────
+//
+// dev 慢加载时前端挂载可能晚于 va:boot:ready 事件，事件会丢；
+// 用 AtomicBool 记录就绪态，前端挂载后主动查询兜底。
+static BOOT_READY: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+pub fn mark_boot_ready() {
+    BOOT_READY.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// 后端初始化是否完成（球窗前端 boot 控制器查询用）
+#[tauri::command]
+pub fn is_boot_ready() -> bool {
+    BOOT_READY.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// 单击悬浮球：切换快速输入浮窗（与「呼出浮窗」快捷键完全同一条逻辑）
 #[tauri::command]
 pub fn toggle_quick_input(app: AppHandle) {
@@ -71,7 +88,23 @@ pub fn set_floating_ball_enabled(
         s.floating_ball_enabled = enabled;
     }
     if let Some(ball) = app.get_webview_window("floating_ball") {
-        let _ = if enabled { ball.show() } else { ball.hide() };
+        if enabled {
+            let _ = ball.show();
+        } else if ball.is_visible().unwrap_or(false) {
+            // 收回：先演后隐——通知前端播退场动画，前端播完自隐；
+            // 后端 1s 兜底强隐（前端无响应时不留残窗）
+            use tauri::Emitter;
+            let _ = app.emit("floating_ball:despawn", ());
+            let app2 = app.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+                if let Some(b) = app2.get_webview_window("floating_ball") {
+                    if b.is_visible().unwrap_or(false) {
+                        let _ = b.hide();
+                    }
+                }
+            });
+        }
     }
     notify_changed(&app, EVENT_SETTINGS_CHANGED);
     Ok(())
@@ -149,4 +182,119 @@ pub fn start_outside_click_watch(app: AppHandle, width: f64, height: f64) {
 #[tauri::command]
 pub fn stop_outside_click_watch() {
     OUTSIDE_WATCH_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+// ── 指针跟随：全局光标位置轮询 ───────────────────────────────
+//
+// 球窗是免焦点小窗，webview 只能感知窗内指针；全局跟随由后端轮询
+// GetCursorPos（~30Hz，仅查询不装钩子）广播屏幕物理坐标，前端换算成
+// 客户区坐标喂给引擎 setGazeTarget。性能模式下不启动。
+static CURSOR_WATCH_RUNNING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+// ── 光标穿透：只有球体（及展开菜单）区域接受点击，其余透明画布穿透到下层窗口/桌面 ──
+// override=true（拖拽中）强制接受，防止 OS 穿透抢走指针事件
+static PASSTHROUGH_OVERRIDE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+/// 交互区域（屏幕物理坐标 [x, y, w, h]），前端随位置/菜单/尺寸同步
+static HIT_RECT: std::sync::Mutex<[i32; 4]> = std::sync::Mutex::new([0, 0, 0, 0]);
+
+/// 前端同步交互区域（球体方块；菜单展开时为球+菜单区域）
+#[tauri::command]
+pub fn update_ball_hit_rect(x: i32, y: i32, w: i32, h: i32) {
+    *HIT_RECT.lock().unwrap() = [x, y, w, h];
+}
+
+/// 强制接受点击（拖拽期间调用，避免穿透态抢走指针事件）
+#[tauri::command]
+pub fn set_ball_passthrough_override(on: bool) {
+    PASSTHROUGH_OVERRIDE.store(on, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[tauri::command]
+pub fn start_cursor_watch(app: AppHandle, emit_cursor: bool) {
+    use std::sync::atomic::Ordering;
+    if CURSOR_WATCH_RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let mut last_ignore = false;
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(33));
+            if !CURSOR_WATCH_RUNNING.load(Ordering::SeqCst) {
+                return;
+            }
+            let mut pt = WinPoint { x: 0, y: 0 };
+            if unsafe { GetCursorPos(&mut pt) } == 0 {
+                continue;
+            }
+            // 穿透判定：光标在交互区域外 → 窗口忽略光标（点击落到下层）
+            let [rx, ry, rw, rh] = *HIT_RECT.lock().unwrap();
+            let inside = PASSTHROUGH_OVERRIDE.load(Ordering::SeqCst)
+                || (pt.x >= rx && pt.x < rx + rw && pt.y >= ry && pt.y < ry + rh);
+            let ignore_now = !inside;
+            if ignore_now != last_ignore {
+                if let Some(ball) = app.get_webview_window("floating_ball") {
+                    if ball.set_ignore_cursor_events(ignore_now).is_ok() {
+                        last_ignore = ignore_now;
+                    }
+                }
+            }
+            if emit_cursor {
+                use tauri::Emitter;
+                let _ = app.emit("floating_ball:cursor", (pt.x, pt.y));
+            }
+        }
+    });
+}
+
+#[tauri::command]
+pub fn stop_cursor_watch(app: AppHandle) {
+    CURSOR_WATCH_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+    // 停止后恢复接受点击，避免下次显示时残留忽略态
+    if let Some(ball) = app.get_webview_window("floating_ball") {
+        let _ = ball.set_ignore_cursor_events(false);
+    }
+}
+
+/// 还原悬浮球位置：重置到主显示器屏幕中央（球意外出屏/找不到时的恢复入口）。
+/// 存的是窗口（画布）角坐标，与 save_floating_ball_pos 口径一致。
+#[tauri::command]
+pub fn reset_floating_ball_pos(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let mon = app
+        .primary_monitor()
+        .map_err(|e| format!("获取显示器失败: {e}"))?
+        .ok_or_else(|| "无可用显示器".to_string())?;
+    let size = mon.size();
+    let scale = mon.scale_factor();
+    let ball_px = state
+        .settings
+        .read()
+        .map(|s| crate::storage::types::clamp_ball_size(s.floating_ball_size))
+        .map_err(|e| format!("读取设置失败: {e}"))?;
+    // 画布 = 球径 × 1.5（与前端 CANVAS_SCALE 一致），居中放画布
+    let canvas_phys = ((ball_px as f64) * 1.5 * scale) as i32;
+    let x = (size.width as i32 - canvas_phys) / 2;
+    let y = (size.height as i32 - canvas_phys) / 2;
+    for (key, val) in [("floating_ball_x", x), ("floating_ball_y", y)] {
+        crate::storage::settings::update_setting(&state.data_dir, key, serde_json::json!(val))
+            .map_err(|e| format!("保存悬浮球位置失败: {e}"))?;
+    }
+    if let Ok(mut s) = state.settings.write() {
+        s.floating_ball_x = x;
+        s.floating_ball_y = y;
+    }
+    if let Some(ball) = app.get_webview_window("floating_ball") {
+        let _ = ball.set_position(tauri::PhysicalPosition::new(x, y));
+    }
+    // 广播设置变化（store 同步）+ 专用 reset 事件（球窗清除贴边状态）
+    notify_changed(&app, EVENT_SETTINGS_CHANGED);
+    {
+        use tauri::Emitter;
+        let _ = app.emit("floating_ball:reset", ());
+    }
+    Ok(())
 }

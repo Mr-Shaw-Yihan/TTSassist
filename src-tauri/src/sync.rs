@@ -10,7 +10,9 @@ pub const EVENT_SETTINGS_CHANGED: &str = "settings:changed";
 
 /// 向所有窗口广播事件（空 payload，仅通知"数据变了"）。
 /// 各窗口收到后应重新读取对应数据文件。
+/// 收藏/设置变化同时转发宿主能力桥（订阅了事件的插件由此感知，通用机制）。
 pub fn notify_changed(app: &tauri::AppHandle, event: &str) {
     use tauri::Emitter;
     let _ = app.emit(event, ());
+    crate::plugins::bridge::HostBridge::notify_data_changed(app, event);
 }

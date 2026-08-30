@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getAudioUrl, getSettings } from "../../services/invoke";
+import { getAudioUrl, getSettings, generateTTS } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useTauriListen } from "../../hooks/useTauriListen";
 import { useVoiceInputHotkey } from "../../hooks/useVoiceInputHotkey";
@@ -24,6 +24,10 @@ export function QuickInput() {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
+  // 直播伴侣形态：窗口永久挂 WS_EX_NOACTIVATE（永不激活、游戏保前台），
+  // 键盘路由靠点击输入框后后端 SetFocus webview 子窗口建立。
+  // typing = 键盘路由已建立（驱动 placeholder 文案）。
+  const [typing, setTyping] = useState(false);
   const inpRef = useRef<HTMLInputElement | null>(null);
   const setSettings = useSettingsStore((s) => s.setSettings);
   // 麦克风发送状态指示（标题栏图标）：开关开启且已配置设备 = 生效中（绿色）
@@ -46,6 +50,7 @@ export function QuickInput() {
       const t = (e as CustomEvent<string>).detail;
       setText((prev) => (prev ? prev + t : t));
       inpRef.current?.focus();
+      takeKeyboardFocus(); // 识别完回到打字态：重建键盘路由
     };
     window.addEventListener("voice-input:result", onResult);
     return () => window.removeEventListener("voice-input:result", onResult);
@@ -81,26 +86,41 @@ export function QuickInput() {
     } catch { /* ignore */ }
   }, [setSettings]);
 
-  // 失去焦点时隐藏浮窗（点击外部自动关闭）；录音中不隐藏，避免会话被打断
+  // 建立键盘路由：后端 SetFocus webview 子窗口（不激活窗口、前台仍是游戏）。
+  // 点击输入框时调用；焦点会被游戏内其它点击夺走，再点输入框即重建。
+  function takeKeyboardFocus() {
+    void invoke("focus_quick_input_content").catch(() => {});
+    setTyping(true);
+  }
+
+  // ESC 关闭浮窗：键盘路由建立后生效；未点击浮窗时用快捷键/悬浮球收起。
+  // 失焦隐藏已废弃（窗口永不激活、没有焦点事件），关闭只走 ESC/快捷键/悬浮球。
   useEffect(() => {
-    const win = getCurrentWindow();
-    let unlisten: (() => void) | null = null;
-    (async () => {
-      const u = await win.onFocusChanged(({ payload: focused }) => {
-        if (focused) return;
-        const phase = useVoiceInputStore.getState().phase;
-        if (phase !== "idle") return;
-        void win.hide();
-      });
-      unlisten = u;
-    })();
-    return () => { unlisten?.(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") void getCurrentWindow().hide();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // 每次显示时自动聚焦输入框
+  // 每次显示时自动聚焦输入框（挂载时一次）
   useEffect(() => {
     const t = setTimeout(() => inpRef.current?.focus(), 80);
     return () => clearTimeout(t);
+  }, []);
+
+  // 窗口常驻挂载（隐藏不销毁）；NOACTIVATE 形态下焦点事件不再发生，
+  // 此监听仅作兼容保留（意外获焦时补聚焦输入框）
+  useEffect(() => {
+    const win = getCurrentWindow();
+    let un: (() => void) | null = null;
+    (async () => {
+      un = await win.onFocusChanged(({ payload }) => {
+        if (!payload) return;
+        window.setTimeout(() => inpRef.current?.focus(), 50);
+      });
+    })();
+    return () => { un?.(); };
   }, []);
 
   async function send() {
@@ -111,7 +131,7 @@ export function QuickInput() {
     setSending(true);
     setStatus({ kind: "converting" });
     try {
-      const msg: { audio_path: string } = await invoke("generate_tts", { text: t });
+      const msg = await generateTTS(t);
       // 播放语音（麦克风由后端 generate_tts 按全局开关自动处理）
       try {
         const s: { playback_volume?: number; playback_rate?: number } = await invoke("get_settings");
@@ -119,6 +139,13 @@ export function QuickInput() {
         const a = new Audio(url);
         a.volume = s.playback_volume ?? 0.8;
         a.playbackRate = s.playback_rate ?? 1.0;
+        a.addEventListener("ended", () => {
+          void emit("va:play:stop").catch(() => {});
+          void emit("playback:stopped").catch(() => {});
+        });
+        void emit("va:play:start").catch(() => {});
+        // 播放态上报（后端聚合为通用播放状态，供宿主能力桥订阅方感知）
+        void emit("playback:started", msg.audio_path).catch(() => {});
         void a.play();
       } catch { /* 播放失败不影响发送 */ }
       setStatus({ kind: "success" });
@@ -150,14 +177,17 @@ export function QuickInput() {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden rounded-2xl bg-[var(--paper)] text-[var(--ink-900)] shadow-[0_20px_60px_rgba(26,24,22,0.25)]">
+    <div
+      className="flex h-screen flex-col overflow-hidden rounded-2xl bg-[var(--paper)] text-[var(--ink-900)] shadow-[0_20px_60px_rgba(26,24,22,0.25)]"
+    >
       {/* 顶部条：拖拽区 + 语音输入 + 打开主界面（发送到麦克风开关在主界面「其他」面板） */}
       <div className="flex select-none items-center px-3 pt-2 pb-1">
-        {/* 拖拽区（⠿ + 标题 + 空白）：按住左键拖动移动浮窗 */}
+        {/* 拖拽区（⠿ + 标题 + 空白）：按住左键拖动移动浮窗。
+            只用手动 startDragging 单一拖拽源（data-tauri-drag-region 与之叠加会冲突） */}
         <div
-          data-tauri-drag-region
           onMouseDown={(e) => {
-            if (e.button === 0) void getCurrentWindow().startDragging();
+            if (e.button !== 0) return;
+            void getCurrentWindow().startDragging().catch(() => {});
           }}
           className="flex flex-1 cursor-move items-center gap-2"
         >
@@ -210,8 +240,9 @@ export function QuickInput() {
         <input
           ref={inpRef}
           className="flex-1 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm text-[var(--ink-900)] outline-none transition-colors placeholder:text-[var(--ink-300)] focus:border-[var(--amber-500)]"
-          placeholder="输入文字，回车发送…"
+          placeholder={typing ? "输入文字，回车发送…" : "点击输入框开始输入…"}
           value={text}
+          onPointerDown={takeKeyboardFocus}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {

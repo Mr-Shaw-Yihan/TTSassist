@@ -47,6 +47,11 @@ pub struct PluginManifest {
     /// 缺省 = 无配置项，老插件零影响。设计见 doc/通用插件配置机制设计.md。
     #[serde(default)]
     pub config: Option<PluginConfigDecl>,
+    /// 宿主能力桥白名单（可选）：true 时宿主加载该插件会尝试注入
+    /// VaHostServices 能力表（dll 须导出 va_plugin_attach_host）。
+    /// 未声明 = 不注入，反向调用不可用。设计见 doc/移动端遥控器设计.md §二。
+    #[serde(default)]
+    pub requires_host_bridge: bool,
 }
 
 /// 插件配置声明（manifest.config）
@@ -129,9 +134,12 @@ impl PluginManifest {
                 self.id
             )));
         }
-        if self.plugin_type != "tts_engine" && self.plugin_type != "asr_engine" {
+        if self.plugin_type != "tts_engine"
+            && self.plugin_type != "asr_engine"
+            && self.plugin_type != "service"
+        {
             return Err(PluginError::Unsupported(format!(
-                "不支持的插件类型「{}」（当前支持 tts_engine / asr_engine）",
+                "不支持的插件类型「{}」（当前支持 tts_engine / asr_engine / service）",
                 self.plugin_type
             )));
         }
@@ -182,10 +190,18 @@ impl PluginManifest {
                     self.id, f.key
                 )));
             }
-            if !matches!(f.r#type.as_str(), "text" | "secret" | "select" | "number") {
+            if !matches!(f.r#type.as_str(), "text" | "secret" | "select" | "number" | "display") {
                 return Err(PluginError::Unsupported(format!(
-                    "插件「{}」配置字段「{}」类型「{}」不受支持（text/secret/select/number）",
+                    "插件「{}」配置字段「{}」类型「{}」不受支持（text/secret/select/number/display）",
                     self.id, f.key, f.r#type
+                )));
+            }
+            // display 是插件经能力桥回写的只读展示字段，不能声明必填
+            //（必填语义是「用户需填写」，display 用户填不了）
+            if f.r#type == "display" && f.required {
+                return Err(PluginError::Unsupported(format!(
+                    "插件「{}」display 字段「{}」不能声明 required（display 由插件回写，只读展示）",
+                    self.id, f.key
                 )));
             }
             if f.r#type == "select" && f.options.as_deref().map_or(true, |o| o.is_empty()) {
@@ -235,6 +251,7 @@ mod tests {
             timeout_secs: default_timeout_secs(),
             requirements: None,
             config: None,
+            requires_host_bridge: false,
         }
     }
 
@@ -436,5 +453,62 @@ mod tests {
         std::fs::write(dir.path().join("manifest.json"), json).unwrap();
         let m = PluginManifest::load(dir.path()).expect("带 BOM 应能解析");
         assert!(m.config.unwrap().fields.len() == 1);
+    }
+
+    #[test]
+    fn display字段解析通过() {
+        let dir = tempfile::tempdir().unwrap();
+        let json = manifest_json_with_config(serde_json::json!({
+            "fields": [
+                { "key": "pair_code", "type": "display", "label": "配对码",
+                  "env": "FOO_PAIR_CODE", "description": "手机 App 输入此码配对" }
+            ]
+        }));
+        std::fs::write(dir.path().join("manifest.json"), json).unwrap();
+        let m = PluginManifest::load(dir.path()).unwrap();
+        assert_eq!(m.config.as_ref().unwrap().fields[0].r#type, "display");
+        assert!(m.validate("1.4.0").is_ok());
+    }
+
+    #[test]
+    fn display字段声明required拒绝() {
+        let dir = tempfile::tempdir().unwrap();
+        let json = manifest_json_with_config(serde_json::json!({
+            "fields": [ { "key": "k", "type": "display", "label": "x", "env": "FOO_K", "required": true } ]
+        }));
+        std::fs::write(dir.path().join("manifest.json"), json).unwrap();
+        let err = PluginManifest::load(dir.path()).unwrap().validate("1.4.0").unwrap_err();
+        assert!(err.to_string().contains("display"), "实际: {err}");
+    }
+
+    #[test]
+    fn service类型与bridge白名单解析() {
+        let dir = tempfile::tempdir().unwrap();
+        let json = serde_json::json!({
+            "id": "lan-remote",
+            "name": "手机遥控",
+            "version": "0.1.0",
+            "type": "service",
+            "platform": ["windows"],
+            "entry": "plugin.dll",
+            "min_app_version": "1.0.0",
+            "checksum": "abc",
+            "requires_host_bridge": true,
+            "config": {
+                "fields": [ { "key": "pair_code", "type": "display", "label": "配对码", "env": "LAN_REMOTE_PAIR_CODE" } ]
+            }
+        });
+        std::fs::write(dir.path().join("manifest.json"), json.to_string()).unwrap();
+        let m = PluginManifest::load(dir.path()).unwrap();
+        assert_eq!(m.plugin_type, "service");
+        assert!(m.requires_host_bridge, "requires_host_bridge 应解析为 true");
+        assert!(m.validate("1.4.0").is_ok());
+    }
+
+    #[test]
+    fn requires_host_bridge缺省为false() {
+        // 老清单无此字段 → false（不注入，向后兼容）
+        let m = sample();
+        assert!(!m.requires_host_bridge);
     }
 }
