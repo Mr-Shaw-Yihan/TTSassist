@@ -53,13 +53,7 @@ class RemoteSession {
     return _host != null;
   }
 
-  /// 连接上次记住的 PC（init 后调用）
-  Future<void> connectSaved() async {
-    final h = _host;
-    if (h != null) await _connect(h, _port);
-  }
-
-  /// 手动输入 IP:端口（配对页入口）
+  /// 连接手动输入 IP:端口（配对页入口）
   Future<void> connectManual(String host, {int port = 45271}) async {
     final p = await SharedPreferences.getInstance();
     await p.setString(_kHost, host);

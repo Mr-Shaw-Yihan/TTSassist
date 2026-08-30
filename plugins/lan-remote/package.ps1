@@ -60,13 +60,6 @@ $Manifest = [ordered]@{
     config               = @{
         fields = @(
             @{
-                key         = "pair_code"
-                type        = "display"
-                label       = "配对码"
-                env         = "LAN_REMOTE_PAIR_CODE"
-                description = "手机 App 输入此 6 位码完成配对；配对成功或刷新后自动更换"
-            }
-            @{
                 key         = "host_addr"
                 type        = "display"
                 label       = "遥控地址"

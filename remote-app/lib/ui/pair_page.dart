@@ -154,25 +154,31 @@ class _PairPageState extends State<PairPage> {
                             padding: const EdgeInsets.only(bottom: 8),
                             child: PressScale(
                               onTap: () => app.connectDiscovered(pc),
-                              child: GlassCard(
+                              // 磨砂哑金按钮样式：金渐变 + 噪点（区别于白色毛玻璃
+                              // 与黑色主按钮），金底文字用深墨保证可读
+                              child: FrostedGoldTile(
                                 radius: 16,
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 14, vertical: 13),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(pc.name,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: RT.thin.copyWith(
-                                              fontSize: 14,
-                                              color: RT.goldText)),
-                                    ),
-                                    Text('${pc.host}:${pc.port}',
-                                        style: const TextStyle(
-                                            fontSize: 11,
-                                            color: RT.goldTextDim)),
-                                  ],
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 13),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(pc.name,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w600,
+                                                color: RT.ink)),
+                                      ),
+                                      Text('${pc.host}:${pc.port}',
+                                          style: TextStyle(
+                                              fontSize: 11,
+                                              color: RT.ink
+                                                  .withValues(alpha: 0.62))),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),

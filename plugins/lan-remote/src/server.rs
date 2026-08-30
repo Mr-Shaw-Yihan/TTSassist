@@ -2,7 +2,8 @@
 //
 // 模型：
 // - 一对一：同一时刻只有一个已鉴权连接，新配对/新 hello 顶替旧会话；
-// - 未鉴权连接只允许 pair / hello / refresh_code / ping，其余回 error 并断开；
+// - 未鉴权连接只允许 pair_request / hello / ping，其余回 error 并断开
+//   （配对码路径 pair / refresh_code 已随 1.8.x 移除，收到即回错误并断开）；
 // - 桥能力调用全部走 spawn_blocking（C ABI 阻塞调用，不堵 WS 事件循环）；
 // - 宿主事件（EVENT_RX）转发给已鉴权连接：先透传 event，再重查 state 推送。
 
@@ -200,33 +201,10 @@ async fn handle_message(
 
     match t {
         // ── 鉴权前允许 ──
-        "pair" => {
-            let code = msg.get("code").and_then(|v| v.as_str()).unwrap_or("");
-            // 锁在块内释放（跨 await 持 std Mutex 会让 future 不满足 Send）
-            let result = {
-                let mut pairing = shared.pairing.lock().unwrap_or_else(|e| e.into_inner());
-                pairing.pair(code)
-            };
-            match result {
-                Ok(token) => {
-                    // 配对码已消费：把新码上屏（PC 面板展示下一轮配对码）
-                    push_pair_code(shared);
-                    let state = current_state().await;
-                    let resp = serde_json::json!({
-                        "t": "pair_ok",
-                        "token": token,
-                        "state": state,
-                    });
-                    let _ = out.send(resp.to_string());
-                    *authenticated = true;
-                    shared.take_over(out.clone(), Arc::clone(kill));
-                    eprintln!("[lan-remote] 配对成功");
-                }
-                Err(e) => {
-                    let _ = out.send(err_msg(&e));
-                    return Action::CloseNow;
-                }
-            }
+        // 配对码路径（pair / refresh_code）已随 1.8.x 移除：收到即回错误并断开
+        "pair" | "refresh_code" => {
+            let _ = out.send(err_msg("配对码已停用，请在 App 使用自动发现或手动连接后弹窗配对"));
+            return Action::CloseNow;
         }
         "hello" => {
             let token = msg.get("token").and_then(|v| v.as_str()).unwrap_or("");
@@ -273,7 +251,6 @@ async fn handle_message(
                         let mut pairing = shared.pairing.lock().unwrap_or_else(|e| e.into_inner());
                         pairing.approve()
                     };
-                    push_pair_code(shared);
                     let state = current_state().await;
                     let _ = out.send(
                         serde_json::json!({ "t": "pair_ok", "token": token, "state": state })
@@ -293,26 +270,13 @@ async fn handle_message(
                 }
             }
         }
-        "refresh_code" => {
-            // 无需鉴权但有冷却（新码只在 PC 面板可见，回执不带码）
-            let refreshed = {
-                let mut pairing = shared.pairing.lock().unwrap_or_else(|e| e.into_inner());
-                pairing.refresh_code().is_some()
-            };
-            if refreshed {
-                push_pair_code(shared);
-                let _ = out.send(serde_json::json!({ "t": "code_refreshed" }).to_string());
-            } else {
-                let _ = out.send(err_msg("刷新太频繁，请稍后再试"));
-            }
-        }
         "ping" => {
             let _ = out.send(serde_json::json!({ "t": "pong" }).to_string());
         }
 
         // ── 以下需要鉴权 ──
         _ if !*authenticated => {
-            let _ = out.send(err_msg("未配对：请先发送 pair 或 hello"));
+            let _ = out.send(err_msg("未配对：请先发送 pair_request 或 hello"));
             return Action::CloseNow;
         }
         "list_favorites" => {
@@ -434,20 +398,4 @@ async fn current_state_opt() -> Option<serde_json::Value> {
         .ok()
         .flatten()?;
     serde_json::from_str(&json).ok()
-}
-
-/// 把当前配对码经能力桥写入 display 字段上屏（PC 设置面板）
-fn push_pair_code(shared: &Arc<Shared>) {
-    let code = shared
-        .pairing
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .code()
-        .to_string();
-    // set_own_config 是阻塞 FFI（写 settings.json + 广播），放独立线程避免堵事件循环
-    std::thread::spawn(move || {
-        if let Err(e) = plugin_api::host_bridge::set_own_config("pair_code", &code) {
-            eprintln!("[lan-remote] 配对码上屏失败: {e}");
-        }
-    });
 }

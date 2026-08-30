@@ -21,14 +21,9 @@ class AppState extends ChangeNotifier {
       needsPairing = true;
       notifyListeners();
     };
+    // 1.8.2 起去除自动连接：发现列表仅更新 UI，连接由用户手动点击设备条目
     discovery.onChange = (list) {
       discovered = list;
-      // 小白体验：发现 PC 且当前未连接 → 自动连第一台（手动断开后不再自动连）
-      if (_autoConnect &&
-          phase == ConnPhase.disconnected &&
-          list.isNotEmpty) {
-        connectDiscovered(list.first);
-      }
       notifyListeners();
     };
   }
@@ -44,7 +39,6 @@ class AppState extends ChangeNotifier {
   bool needsPairing = false;
   /// 已发 pair_request，等 PC 弹窗确认中（超时/被拒回退配对码 UI）
   bool waitingConfirm = false;
-  bool _autoConnect = true;
   Timer? _confirmTimer;
   String deviceName = '移动设备';
   String? toast;
@@ -63,14 +57,12 @@ class AppState extends ChangeNotifier {
       deviceName = '${info.brand} ${info.model}'.trim();
       if (deviceName.isEmpty) deviceName = '移动设备';
     } catch (_) {}
-    final hasSaved = await session.init();
+    // 1.8.2 起去除启动自动连接：每次都进配对页，由用户在发现列表手动点设备连接
+    // （已配对 token 仍保留：点击上次连接的 PC 走 hello 免弹窗直达）
+    await session.init();
     await discovery.start();
-    if (hasSaved) {
-      await session.connectSaved();
-    } else {
-      needsPairing = true;
-      notifyListeners();
-    }
+    needsPairing = true;
+    notifyListeners();
     // 应用内更新：静默检查（失败不打扰）；有新版本时通知 UI 显示更新条
     checkForUpdate().then((info) {
       if (info != null) {
@@ -218,9 +210,8 @@ class AppState extends ChangeNotifier {
     await session.connectManual(pc.host, port: pc.port);
   }
 
-  /// 连接管理：主动断开回配对页（停止自动连接，避免马上又连回去）
+  /// 连接管理：主动断开回配对页，重新开始发现
   Future<void> disconnect() async {
-    _autoConnect = false;
     await session.disconnectByUser();
     needsPairing = true;
     await discovery.start();

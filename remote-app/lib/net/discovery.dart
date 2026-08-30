@@ -10,9 +10,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:nsd/nsd.dart' as nsd;
 
 /// 发现的 PC（name=计算机名，host/port 为 WS 连接目标）
@@ -108,8 +108,9 @@ class Discovery {
   }
 
   /// 子网扫描兜底：对本机每个非环回 IPv4 所在 /24 并发探测 45271。
-  /// 一轮 256 个 connect、单发 300ms 超时，约 1~2 秒完成；5 秒一轮成本可接受。
-  /// 排除本机自身 IP（adb reverse 等工具会在手机端开监听端口造成自命中）。
+  /// 超时 700ms（VPN TUN/代理环境握手延迟大，300ms 会误杀真 PC）。
+  /// 排除本机自身 IP 与虚拟隧道接口（adb reverse / VPN TUN 自命中等）。
+  /// 命中后发极简 HTTP 探测复核：WS 服务端回 HTTP 状态行才算真命中。
   Future<void> _subnetScan() async {
     if (_scanning) return;
     _scanning = true;
@@ -117,13 +118,18 @@ class Discovery {
       final selfIps = <String>{};
       final bases = <String>{};
       final interfaces = await NetworkInterface.list();
+      final ifLog = <String>[];
       for (final itf in interfaces) {
         // 跳过虚拟隧道接口（tun0/ppp/wg…）：VPN/代理 TUN 模式下其对任意地址的
         // TCP connect 都会被代理栈假握手成功，产生「扫到了假 PC」的误报
         final n = itf.name.toLowerCase();
-        if (n.startsWith('tun') || n.startsWith('ppp') || n.startsWith('wg')) {
-          continue;
-        }
+        final skipped = n.startsWith('tun') || n.startsWith('ppp') || n.startsWith('wg');
+        final v4 = itf.addresses
+            .where((a) => a.type == InternetAddressType.IPv4)
+            .map((a) => a.address)
+            .join(',');
+        ifLog.add('${itf.name}=$v4${skipped ? '[跳过:虚拟隧道]' : ''}');
+        if (skipped) continue;
         for (final addr in itf.addresses) {
           if (addr.type != InternetAddressType.IPv4) continue;
           if (addr.isLoopback || addr.isLinkLocal) continue;
@@ -133,26 +139,54 @@ class Discovery {
           bases.add('${o[0]}.${o[1]}.${o[2]}.');
         }
       }
+      debugPrint('[discovery] 接口: ${ifLog.join(' | ')}');
+      final probeIps = <String>[];
+      for (final base in bases) {
+        probeIps.addAll(List.generate(255, (i) => '$base${i + 1}'));
+      }
+      debugPrint(
+          '[discovery] 扫描 ${bases.length} 个网段 / ${probeIps.length - selfIps.length} 个地址');
       final hits = <DiscoveredPc>[];
-      await Future.wait(bases.expand((base) {
-        return List.generate(255, (i) => '$base${i + 1}').map((ip) async {
+      // 分批并发：508 个同时 connect 会淹 WiFi 栈（ARP/SYN 大量丢失），
+      // 每批 64 个、批间 60ms，总时长仍 <2s
+      const batch = 64;
+      for (var i = 0; i < probeIps.length; i += batch) {
+        final slice = probeIps.skip(i).take(batch).toList();
+        await Future.wait(slice.map((ip) async {
           if (selfIps.contains(ip)) return;
           try {
             final s = await Socket.connect(
               ip,
               45271,
-              timeout: const Duration(milliseconds: 300),
+              timeout: const Duration(milliseconds: 700),
             );
-            // 二次复核：端口通不等于电子声带在跑（VPN TUN 等会假握手），
-            // 发极简 HTTP 探测——WS 服务端会返回 HTTP 状态行，假命中不会
-            final isReal = await _verifyHttpService(s);
+            // 二次复核：端口通不等于电子声带在跑（VPN TUN 等会假握手、
+            // 其他设备也可能开着 45271）。发 WebSocket 升级握手——
+            // 电子声带的 WS 服务端必然回 101 Switching Protocols，其余不会
+            final isReal = await _verifyWsService(s);
             s.destroy();
+            debugPrint(
+                '[discovery] 端口命中 $ip → HTTP复核: ${isReal ? "通过" : "未通过(剔除)"}');
             if (isReal) {
               hits.add(DiscoveredPc(name: '局域网电脑', host: ip, port: 45271));
             }
-          } catch (_) {}
-        });
-      }));
+          } catch (e) {
+            // 非「目标不可达/超时」类异常打出来（定位真机 connect 失败原因）
+            final msg = '$e';
+            if (!msg.contains('timed out') &&
+                !msg.contains('Connection refused') &&
+                !msg.contains('No route to host') &&
+                !msg.contains('Network is unreachable') &&
+                !msg.contains('Connection timed out')) {
+              debugPrint('[discovery] connect $ip 异常: $msg');
+            }
+          }
+        }));
+        if (i + batch < probeIps.length) {
+          await Future<void>.delayed(const Duration(milliseconds: 60));
+        }
+      }
+      debugPrint('[discovery] 本轮命中: ${hits.map((h) => h.host).join(", ")}');
       // 稳定排序：IP 升序，避免每轮列表顺序抖动
       hits.sort((a, b) => a.host.compareTo(b.host));
       final list = hits.isEmpty ? null : hits;
@@ -170,16 +204,20 @@ class Discovery {
     }
   }
 
-  /// HTTP 探测复核：对已 connect 的 socket 发极简 GET，
-  /// 收到 HTTP 状态行（WS 服务端对非升级请求回 400/426）才算真命中
-  Future<bool> _verifyHttpService(Socket s) async {
+  /// WebSocket 升级握手复核：发合法 upgrade 请求，
+  /// 电子声带（tokio-tungstenite）必然回 `HTTP/1.1 101`，才算真命中。
+  /// （裸 GET 复核已废弃：tungstenite 对非 upgrade 请求不回可读响应，会误杀真 PC）
+  Future<bool> _verifyWsService(Socket s) async {
     try {
-      s.add(ascii.encode('GET / HTTP/1.1\r\nHost: probe\r\nConnection: close\r\n\r\n'));
+      s.add(ascii.encode(
+          'GET / HTTP/1.1\r\nHost: probe\r\nUpgrade: websocket\r\n'
+          'Connection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
+          'Sec-WebSocket-Version: 13\r\n\r\n'));
       final data = await s.first
-          .timeout(const Duration(milliseconds: 600), onTimeout: () => Uint8List(0));
+          .timeout(const Duration(milliseconds: 1000), onTimeout: () => Uint8List(0));
       if (data.isEmpty) return false;
-      final head = String.fromCharCodes(data.take(32));
-      return head.startsWith('HTTP/1.1 ') || head.startsWith('HTTP/1.0 ');
+      final head = String.fromCharCodes(data.take(40));
+      return head.startsWith('HTTP/1.1 101');
     } catch (_) {
       return false;
     }

@@ -210,6 +210,38 @@ class MatteBlack extends StatelessWidget {
   }
 }
 
+/// 磨砂哑金按钮面：金渐变 + gold_texture.png 噪点叠层。
+/// 用于发现列表设备条目等需要金色主视觉的按钮（黑色主按钮用 MatteBlack）。
+class FrostedGoldTile extends StatelessWidget {
+  const FrostedGoldTile({super.key, required this.child, this.radius = 16});
+
+  final Widget child;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final rb = BorderRadius.circular(radius);
+    return Container(
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFE6C25C), Color(0xFFC69A2E)],
+        ),
+        borderRadius: rb,
+      ),
+      foregroundDecoration: BoxDecoration(
+        image: const DecorationImage(
+          image: AssetImage('assets/icons/gold_texture.png'),
+          repeat: ImageRepeat.repeat,
+        ),
+        borderRadius: rb,
+      ),
+      child: child,
+    );
+  }
+}
+
 /// 哑金磨砂 SVG 图标（assets/icons/，gen_icons.py 生成；_f 系列为实心金渐变 + 噪斑）
 class RIcon extends StatelessWidget {
   const RIcon(this.name, {super.key, this.size = 22});

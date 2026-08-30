@@ -64,9 +64,8 @@ fn on_attach(_services: &plugin_api::VaHostServices) {
     let (event_tx, event_rx) = mpsc::unbounded_channel::<String>();
     let _ = EVENT_TX.set(event_tx);
 
-    // 配对状态：加载持久化 token、生成新码并上屏（PC 设置面板 display 字段）
+    // 配对状态：加载持久化 token（配对码路径已移除，唯一配对路径为免码弹窗确认）
     let pairing = pairing::Pairing::load();
-    let initial_code = pairing.code().to_string();
 
     let shared = std::sync::Arc::new(server::Shared::new(pairing));
 
@@ -102,14 +101,11 @@ fn on_attach(_services: &plugin_api::VaHostServices) {
     // mDNS 广播（独立线程，探测失败自动跳过）
     mdns_adv::spawn_broadcast(server::PORT);
 
-    // 初始配对码 + 遥控地址上屏（阻塞 FFI 放独立线程，attach 尽快返回）
+    // 遥控地址上屏（阻塞 FFI 放独立线程，attach 尽快返回）
     let host_addr = mdns_adv::local_lan_ip()
         .map(|ip| format!("{ip}:{}", server::PORT))
         .unwrap_or_else(|| format!("127.0.0.1:{}", server::PORT));
     std::thread::spawn(move || {
-        if let Err(e) = plugin_api::host_bridge::set_own_config("pair_code", &initial_code) {
-            eprintln!("[lan-remote] 配对码上屏失败: {e}");
-        }
         if let Err(e) = plugin_api::host_bridge::set_own_config("host_addr", &host_addr) {
             eprintln!("[lan-remote] 遥控地址上屏失败: {e}");
         }
