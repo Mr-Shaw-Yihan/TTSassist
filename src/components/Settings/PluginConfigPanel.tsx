@@ -18,7 +18,7 @@ const inputCls =
 const REMOTE_APK_URL =
   "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/voiceassist-remote-latest-arm64.apk";
 // 用户交流群号（点击复制）
-const REMOTE_QQ_GROUP = "待补充群号";
+const REMOTE_QQ_GROUP = "690907648";
 
 async function copyText(text: string) {
   try {

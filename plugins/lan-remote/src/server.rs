@@ -19,6 +19,33 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::pairing::Pairing;
 
+/// 最近一次上报面板的「服务地址 IP」（去重节流：连接频繁时避免反复写 settings）
+static LAST_SERVED_IP: Mutex<Option<std::net::IpAddr>> = Mutex::new(None);
+
+/// 用真实连接的**服务端地址**动态刷新面板的遥控地址。
+/// host_addr 不能只在启动时探测一次：多网卡/换 Wi-Fi/开 VPN 都会让静态值失效——
+/// 客户端实际连通时 `stream.local_addr()` 的 IP 就是该走的那块网卡（回环除外，
+/// 本机浏览器经 127.0.0.1 连入不覆盖面板上的局域网地址）。
+fn push_host_addr_if_changed(ip: std::net::IpAddr) {
+    if ip.is_loopback() {
+        return;
+    }
+    let mut last = LAST_SERVED_IP.lock().unwrap_or_else(|e| e.into_inner());
+    if *last == Some(ip) {
+        return;
+    }
+    *last = Some(ip);
+    let addr = format!("{}:{}", ip, PORT);
+    // set_own_config 是阻塞 FFI（写 settings.json + 广播），放独立线程
+    std::thread::spawn(move || {
+        if let Err(e) = plugin_api::host_bridge::set_own_config("host_addr", &addr) {
+            eprintln!("[lan-remote] 遥控地址上屏失败: {e}");
+        } else {
+            eprintln!("[lan-remote] 遥控地址已更新: {addr}");
+        }
+    });
+}
+
 /// HTTP/WS 同端口分流：把已读首包作为前缀"塞回"流，
 /// 让 tungstenite 的握手从完整请求开始（TcpStream 不支持 unpeek）。
 struct PrefixedIo {
@@ -212,11 +239,17 @@ async fn handle_conn(mut stream: TcpStream, shared: Arc<Shared>) -> Result<(), S
 
     if !is_ws {
         // HTTP：Web 遥控页面（与 WS 同源，浏览器无 Mixed Content 限制）
+        if let Ok(local) = stream.local_addr() {
+            push_host_addr_if_changed(local.ip());
+        }
         serve_http(&mut stream, &first).await?;
         return Ok(());
     }
 
     // WS：首包需要"塞回"流里交给 tungstenite 握手 → PrefixedIo 前缀包装
+    if let Ok(local) = stream.local_addr() {
+        push_host_addr_if_changed(local.ip());
+    }
     let prefixed = PrefixedIo::new(first, stream);
     let ws = tokio_tungstenite::accept_async(prefixed)
         .await

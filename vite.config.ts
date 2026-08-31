@@ -27,7 +27,12 @@ export default defineConfig(async () => ({
       : undefined,
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      ignored: [
+        "**/src-tauri/**",
+        // 插件的 Rust 构建产物（如 lan_remote.dll）会被编译进程锁住（EBUSY），
+        // 监视到会导致 dev server 直接崩溃
+        "**/plugins/**/target/**",
+      ],
     },
   },
 }));
