@@ -13,6 +13,105 @@ const SECRET_MASK = "已设置";
 const inputCls =
   "w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none transition-colors placeholder:text-[var(--ink-300)] focus:border-[var(--amber-500)]";
 
+// ── 移动端遥控器（lan-remote 专属） ──
+// 安卓 App 固定名下载地址（随本体 Release 发布，latest 永远指最新非预发版）
+const REMOTE_APK_URL =
+  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/voiceassist-remote-latest-arm64.apk";
+// 用户交流群号（点击复制）
+const REMOTE_QQ_GROUP = "待补充群号";
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    // WebView 剪贴板 API 不可用时退回 execCommand
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+}
+
+/** lan-remote 专属面板：移动端遥控器的两个入口（安卓 App / 浏览器网页端） */
+function RemotePanel({ fields }: { fields: PluginConfigFieldView[] | null }) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const hostAddr = fields?.find((f) => f.key === "host_addr")?.value ?? "";
+  const webUrl = hostAddr ? `http://${hostAddr}` : "";
+
+  function copy(text: string, tag: string) {
+    void copyText(text);
+    setCopied(tag);
+    setTimeout(() => setCopied(null), 1500);
+  }
+
+  return (
+    <div className="rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2.5">
+      {/* 卡片头 */}
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-[var(--ink-900)]">移动端遥控器</p>
+        <span className="rounded-lg bg-[var(--ink-100)] px-2 py-0.5 text-[10px] text-[var(--ink-500)]">
+          已启用
+        </span>
+      </div>
+      <p className="mt-1 text-[11px] leading-relaxed text-[var(--ink-400)]">
+        用手机遥控这台电脑上的电子声带：游戏内发言、点收藏、开关麦克风，全程不抢焦点。
+        首次连接时在电脑弹窗上点「允许」即可。
+      </p>
+
+      {/* 网页端：免安装，iOS 仅此入口 */}
+      <div className="mt-2.5 rounded-xl border border-dashed border-[var(--ink-200)] bg-[var(--ink-100)]/40 px-3 py-2.5">
+        <p className="text-[11px] font-medium text-[var(--ink-700)]">
+          网页端 · 免安装（iPhone / iPad 仅支持此方式）
+        </p>
+        <p className="mt-1 text-[10px] leading-relaxed text-[var(--ink-400)]">
+          手机与电脑连同一个 Wi-Fi，用手机浏览器打开下面地址即可，无需安装任何 App。
+        </p>
+        <div className="mt-1.5 flex items-center gap-1.5">
+          <code className="min-w-0 flex-1 truncate rounded-lg bg-[var(--paper)] px-2 py-1.5 font-mono text-xs text-[var(--ink-900)]">
+            {webUrl || "等待插件上报地址…"}
+          </code>
+          <button
+            type="button"
+            disabled={!webUrl}
+            onClick={() => copy(webUrl, "web")}
+            className="shrink-0 rounded-lg border border-[var(--ink-200)] px-2.5 py-1.5 text-[11px] text-[var(--ink-700)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)] disabled:opacity-50"
+          >
+            {copied === "web" ? "已复制 ✓" : "复制"}
+          </button>
+        </div>
+      </div>
+
+      {/* 安卓端：App 下载 + 群号 */}
+      <div className="mt-2 rounded-xl border border-dashed border-[var(--ink-200)] bg-[var(--ink-100)]/40 px-3 py-2.5">
+        <p className="text-[11px] font-medium text-[var(--ink-700)]">
+          安卓 App · 推荐（自动发现电脑、桌面图标直达）
+        </p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => openUrl(REMOTE_APK_URL).catch(() => {})}
+            className="rounded-lg bg-[var(--ink-900)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--paper)] transition-colors hover:bg-[var(--ink-700)]"
+          >
+            下载安卓 App ↗
+          </button>
+          <button
+            type="button"
+            onClick={() => copy(REMOTE_QQ_GROUP, "qq")}
+            className="rounded-lg border border-[var(--ink-200)] px-2.5 py-1.5 text-[11px] text-[var(--ink-700)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)]"
+          >
+            {copied === "qq" ? "群号已复制 ✓" : `复制群号：${REMOTE_QQ_GROUP}`}
+          </button>
+        </div>
+        <p className="mt-1 text-[10px] leading-relaxed text-[var(--ink-400)]">
+          下载后直接安装（允许「未知来源」）；群文件内也有安装包与使用说明。
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /** 单个插件的配置卡片 */
 export function PluginConfigPanel({
   pluginId,
@@ -101,6 +200,11 @@ export function PluginConfigPanel({
     } catch (e) {
       setMsg({ ok: false, text: String(e) });
     }
+  }
+
+  // lan-remote 走专属「移动端遥控器」卡片（App/网页端入口），不渲染通用配置表单
+  if (pluginId === "lan-remote") {
+    return <RemotePanel fields={fields} />;
   }
 
   return (

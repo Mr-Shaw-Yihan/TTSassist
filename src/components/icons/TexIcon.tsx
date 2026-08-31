@@ -29,19 +29,18 @@ export function TexDefs() {
           <stop offset="0.5" stopColor="#e9d07c" />
           <stop offset="1" stopColor="#d2a23e" />
         </linearGradient>
-        <filter id="sandDark" x="0" y="0" width="100%" height="100%">
-          <feTurbulence type="fractalNoise" baseFrequency="0.55" numOctaves="3" seed="11" />
-          <feColorMatrix values="0 0 0 0 0.30  0 0 0 0 0.19  0 0 0 0 0.04  0 0 0 0.75 0" />
+        <filter id="mottleDark" x="0" y="0" width="100%" height="100%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.7" numOctaves="4" seed="7" />
+          <feColorMatrix values="0 0 0 0 0.55  0 0 0 0 0.40  0 0 0 0 0.10  0 0 0 3.8 -1.5" />
         </filter>
-        <pattern id="goldTex" width="64" height="64" patternUnits="userSpaceOnUse">
-          <rect width="64" height="64" fill="url(#goldGrad)" />
-          <rect width="64" height="64" filter="url(#sandDark)" opacity="0.5" />
-          <g fill="#fff8e8" opacity="0.85">
-            <circle cx="9" cy="12" r="0.8" /><circle cx="26" cy="34" r="0.6" />
-            <circle cx="45" cy="15" r="0.9" /><circle cx="56" cy="45" r="0.7" />
-            <circle cx="17" cy="52" r="0.7" /><circle cx="38" cy="57" r="0.8" />
-            <circle cx="59" cy="29" r="0.5" /><circle cx="5" cy="35" r="0.6" />
-          </g>
+        <filter id="mottleLight" x="0" y="0" width="100%" height="100%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.7" numOctaves="4" seed="21" />
+          <feColorMatrix values="0 0 0 0 1  0 0 0 0 0.97  0 0 0 0 0.85  0 0 0 3.8 -1.7" />
+        </filter>
+        <pattern id="goldTex" width="120" height="120" patternUnits="userSpaceOnUse">
+          <rect width="120" height="120" fill="url(#goldGrad)" />
+          <rect width="120" height="120" filter="url(#mottleDark)" opacity="0.38" />
+          <rect width="120" height="120" filter="url(#mottleLight)" opacity="0.55" />
         </pattern>
 
         {/* 紫水晶磨砂纹理（暗档）：中心稍淡的径向深紫 + 磨砂颗粒 + 白色星点（参考「紫色闪粉」质感） */}

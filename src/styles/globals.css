@@ -37,14 +37,14 @@
   --ln: #241a0c;
   --lnw: 1.7;
 
-  /* 质感按钮（.btn-tex）：金渐变 + 深色细砂 + 亮砂点 */
-  --btn-tex-n1: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Cfilter id='d'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.55' numOctaves='3' seed='11'/%3E%3CfeColorMatrix values='0 0 0 0 0.30  0 0 0 0 0.19  0 0 0 0 0.04  0 0 0 0.75 0'/%3E%3C/filter%3E%3Crect width='80' height='80' filter='url(%23d)'/%3E%3C/svg%3E");
-  --btn-tex-n2: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='72' height='72'%3E%3Cg fill='%23fff8e8'%3E%3Ccircle cx='10' cy='14' r='.9'/%3E%3Ccircle cx='30' cy='40' r='.7'/%3E%3Ccircle cx='52' cy='18' r='1'/%3E%3Ccircle cx='64' cy='52' r='.8'/%3E%3Ccircle cx='20' cy='60' r='.8'/%3E%3Ccircle cx='44' cy='66' r='.9'/%3E%3Ccircle cx='68' cy='34' r='.6'/%3E%3C/g%3E%3C/svg%3E");
-  --btn-tex-base: linear-gradient(180deg, #ecd684 0%, #e0bd54 100%);  /* 扁平弱渐变，金味稍浓 */
+  /* 质感按钮（.btn-tex）：移动端 FrostedGoldTile 同款——金渐变 + gold_texture.png 亮斑贴图 */
+  --btn-tex-n1: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='4' seed='7'/%3E%3CfeColorMatrix values='0 0 0 0 0.55  0 0 0 0 0.40  0 0 0 0 0.10  0 0 0 1.44 -0.57'/%3E%3C/filter%3E%3Crect width='130' height='130' filter='url(%23f)'/%3E%3C/svg%3E");
+  --btn-tex-n2: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.7' numOctaves='4' seed='21'/%3E%3CfeColorMatrix values='0 0 0 0 1  0 0 0 0 0.97  0 0 0 0 0.85  0 0 0 1.9 -0.85'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23f)'/%3E%3C/svg%3E");
+  --btn-tex-base: linear-gradient(180deg, #E6C25C 0%, #C69A2E 100%);
   --btn-tex-blend: multiply, screen, normal;
-  --btn-tex-border: rgba(160, 124, 52, 0.25);  /* 扁平化：仅细边 */
-  --btn-tex-text: #33270f;     /* 按钮文字/图标色（金底墨字） */
-  --btn-tex-icon: #33270f;
+  --btn-tex-border: rgba(150, 110, 30, 0.25);  /* 扁平化：仅细边 */
+  --btn-tex-text: #43350f;     /* 按钮文字/图标色（移动端推荐褐墨压印） */
+  --btn-tex-icon: #43350f;
   --btn-tex-shadow: none;      /* 扁平化：无投影、无内高光 */
 
   /* 节奏 */
