@@ -1,4 +1,4 @@
-# verify-index.ps1 - Read-only consistency guard for the plugin online index.
+﻿# verify-index.ps1 - Read-only consistency guard for the plugin online index.
 #
 # Catches the exact class of bug that caused the v1.8.2 incident: the built
 # plugin (dist/package/manifest.json + dist zip) drifting out of sync with
