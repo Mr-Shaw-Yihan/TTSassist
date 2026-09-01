@@ -29,6 +29,8 @@ plugins/genie-tts/dist/
 plugins/lan-remote/target/
 plugins/lan-remote/dist/
 plugins/lan-remote/Cargo.lock
+plugins/hojo-tts/target/
+plugins/hojo-tts/Cargo.lock
 
 # Editor directories and files
 .vscode/*

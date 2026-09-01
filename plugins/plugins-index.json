@@ -31,6 +31,16 @@
       "plugin_type": "tts_engine"
     },
     {
+      "id": "hojo-tts",
+      "name": "Hojo TTS（本地·离线）",
+      "version": "0.1.0",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/hojo-tts-0.1.0.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/hojo-tts-0.1.0.zip",
+      "checksum": "b0fa5517bf74fbc4d89423356a7005577788a4201bea08c6381042591e7a2113",
+      "description": "Hojo-TTS-Light-80M 零样本音色克隆本地推理引擎，CPU 离线合成，中英混读，音色包可扩展（首次使用自动下载运行环境与模型）",
+      "plugin_type": "tts_engine"
+    },
+    {
       "id": "minimax-tts",
       "name": "MiniMax TTS（国内版）",
       "version": "0.2.1",
@@ -52,12 +62,12 @@
     },
     {
       "id": "lan-remote",
-      "name": "手机遥控（局域网）",
-      "version": "0.1.0",
-      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/lan-remote-0.1.0.zip",
-      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/lan-remote-0.1.0.zip",
-      "checksum": "2fcd641756b8ee22b75ec53edfa9063e8a04b766f07a5a38408857e414835b31",
-      "description": "手机遥控 PC 端：局域网 WebSocket + 免码配对，需配合官方安卓 App（随本体 Release 分发）使用",
+      "name": "移动端遥控器",
+      "version": "0.2.1",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/lan-remote-0.2.1.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/lan-remote-0.2.1.zip",
+      "checksum": "ecf1bc36f192e5989cf6a422f736f1c84e2d36fc3c13e90c335b3e28ff8bc006",
+      "description": "手机/网页遥控 PC 端：局域网 WebSocket + mDNS 免码配对，内置网页遥控器（同端口 45271），需配合移动端 App 使用",
       "plugin_type": "service"
     }
   ]
