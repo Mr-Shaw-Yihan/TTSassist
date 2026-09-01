@@ -1,6 +1,6 @@
 ﻿# 插件库一键发布脚本（PowerShell）
 #
-# 把全部可发布插件（edge-tts / mimo-asr / genie-tts）打包、生成官方索引 plugins-index.json，
+# 自动发现并打包全部可发布插件（凡含 package.ps1 + dist/package/manifest.json 者），生成官方索引 plugins-index.json，
 # 上传到 GitHub Release，并把索引 + 全部 zip 同步到 Gitee dist 镜像分支（国内通道）。
 # VoiceAssist 宿主拉索引双通道：
 #   主：https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/plugins-index.json
@@ -10,6 +10,8 @@
 #   powershell -ExecutionPolicy Bypass -File .\publish.ps1                # 打包 + 生成索引 + 创建/更新 Release
 #   powershell -ExecutionPolicy Bypass -File .\publish.ps1 -Tag plugins-v0.2.0
 #   powershell -ExecutionPolicy Bypass -File .\publish.ps1 -DryRun        # 只打包和生成索引，不碰 GitHub
+#   powershell -ExecutionPolicy Bypass -File .\publish.ps1 -SkipBuild        # 不重新编译，直接用现有 dist 产物重生成索引
+#   powershell -ExecutionPolicy Bypass -File .\publish.ps1 -SyncResources  # 同时把 zip 同步进 resources/plugins（供本体安装包内置）
 #
 # 前置条件：已安装 gh CLI 且已登录（gh auth status 检查）。
 #
@@ -19,7 +21,9 @@
 
 param(
     [string]$Tag = "plugins-v0.1.0",
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$SkipBuild,
+    [switch]$SyncResources
 )
 
 $ErrorActionPreference = "Stop"
@@ -31,46 +35,55 @@ $PluginsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $PluginsDir
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
-# 可发布插件清单（id / 显示名 / 类型 / 描述），版本与 checksum 由打包产物自动得出
-# Type 与各插件 manifest.json 的 type 一致：tts_engine 语音合成 / asr_engine 语音输入（识别）
-$Plugins = @(
-    @{ Id = "edge-tts"; Name = "Edge TTS（免费·微软）";    Type = "tts_engine"; Desc = "免费、无需 Key 的微软 Edge 语音（非官方接口，可能不稳定）" },
-    @{ Id = "mimo-asr"; Name = "MiMo ASR（小米·云端）";    Type = "asr_engine"; Desc = "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测" },
-    @{ Id = "genie-tts"; Name = "Genie TTS（本地·离线）";  Type = "tts_engine"; Desc = "GPT-SoVITS ONNX 本地推理引擎，CPU 离线合成，音色包可扩展（首次使用自动下载运行环境约 1.1GB，每个音色另约 320MB）" },
-    @{ Id = "minimax-tts"; Name = "MiniMax TTS（国内版）"; Type = "tts_engine"; Desc = "MiniMax 云端语音合成（国内版），需 API Key，50+ 音色、40 种语言" },
-    @{ Id = "minimax-tts-global"; Name = "MiniMax TTS（国际版）"; Type = "tts_engine"; Desc = "MiniMax 云端语音合成（国际版），需 API Key，50+ 音色、40 种语言" },
-    @{ Id = "lan-remote"; Name = "手机遥控（局域网）";      Type = "service";    Desc = "手机遥控 PC 端：局域网 WebSocket + 免码配对，需配合官方安卓 App（随本体 Release 分发）使用" }
-)
+$ResourcesDir = Join-Path $RepoRoot 'src-tauri\resources\plugins'
 
-# ── 1. 逐个打包（复用各插件自己的 package.ps1）─────────────
+# ── 1. 自动发现可发布插件：含 package.ps1 且已产出 dist/package/manifest.json 的目录
+#     索引字段（name/version/type/description）全部从各插件 manifest.json 派生（单一权威源），
+#     杜绝手工清单漂移（v1.8.2 事故根因：硬编码数组漏了 hojo-tts、lan-remote 名字陈旧）。
+$PluginDirs = Get-ChildItem $PluginsDir -Directory | Where-Object {
+    (Test-Path (Join-Path $_.FullName 'package.ps1')) -and
+    (Test-Path (Join-Path $_.FullName 'dist\package\manifest.json'))
+} | Sort-Object Name
+if (-not $PluginDirs) { throw "未发现任何可发布插件（plugins/*/dist/package/manifest.json）" }
+
 $Entries = @()
 $Assets  = @()
-foreach ($p in $Plugins) {
+foreach ($dir in $PluginDirs) {
+    $id = $dir.Name
     Write-Host ""
-    Write-Host "══ 打包 $($p.Id) ══" -ForegroundColor Cyan
-    & (Join-Path $PluginsDir "$($p.Id)\package.ps1")
-    if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne $null) { throw "$($p.Id) 打包失败" }
+    Write-Host "══ $id ══" -ForegroundColor Cyan
+    if (-not $SkipBuild) {
+        & (Join-Path $dir.FullName 'package.ps1')
+        if ($LASTEXITCODE -ne 0 -and $null -ne $LASTEXITCODE) { throw "$id 打包失败" }
+    }
 
-    # 从 dist 找产物 zip（名字形如 <id>-<version>.zip）
-    $Zip = Get-ChildItem (Join-Path $PluginsDir "$($p.Id)\dist") -Filter "$($p.Id)-*.zip" |
+    $man = Get-Content (Join-Path $dir.FullName 'dist\package\manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    # zip 名必须等于 <id>-<manifest.version>.zip（隐式断言版本一致）
+    $Zip = Get-ChildItem (Join-Path $dir.FullName 'dist') -Filter "$id-$($man.version).zip" |
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
-    if (-not $Zip) { throw "找不到 $($p.Id) 的 zip 产物" }
+    if (-not $Zip) { throw "找不到 $id 的 zip 产物（$id-$($man.version).zip）；如不重新打包请用 -SkipBuild 并确保 dist 已有对应 zip" }
 
-    $Version = $Zip.BaseName.Substring($p.Id.Length + 1)   # 去掉 "<id>-" 前缀
     $Sha = (Get-FileHash $Zip.FullName -Algorithm SHA256).Hash.ToLower()
-
     $Entries += [ordered]@{
-        id           = $p.Id
-        name         = $p.Name
-        version      = $Version
+        id           = $man.id
+        name         = $man.name
+        version      = $man.version
         download_url = "$RepoBase/releases/latest/download/$($Zip.Name)"
         mirror_url   = "$GiteeBase/raw/dist/$($Zip.Name)"
         checksum     = $Sha
-        description  = $p.Desc
-        plugin_type  = $p.Type
+        description  = $man.description
+        plugin_type  = $man.type
     }
     $Assets += $Zip.FullName
-    Write-Host "$($p.Id) v$Version  zip SHA-256: $Sha" -ForegroundColor Green
+
+    # 可选：把 dist zip 同步到 resources/plugins（供本体安装包内置），并清理同 id 旧版本
+    if ($SyncResources) {
+        if (-not (Test-Path $ResourcesDir)) { New-Item -ItemType Directory -Force -Path $ResourcesDir | Out-Null }
+        Get-ChildItem $ResourcesDir -Filter "$id-*.zip" | Where-Object { $_.Name -ne $Zip.Name } | Remove-Item -Force
+        Copy-Item $Zip.FullName -Destination (Join-Path $ResourcesDir $Zip.Name) -Force
+        Write-Host "  -> 已同步 resources/plugins/$($Zip.Name)" -ForegroundColor DarkGray
+    }
+    Write-Host "$id v$($man.version)  zip SHA-256: $Sha" -ForegroundColor Green
 }
 
 # ── 2. 生成官方索引 plugins-index.json ────────────────────
@@ -80,6 +93,12 @@ $IndexPath = Join-Path $PluginsDir "plugins-index.json"
 Write-Host ""
 Write-Host "索引已生成: $IndexPath" -ForegroundColor Green
 $Assets += $IndexPath
+
+# ── 2b. 一致性自检：防漂移（对刚生成的索引校验 dist/resources）──────────────
+$verifyArgs = @{ IndexPath = $IndexPath }
+if (-not $SyncResources) { $verifyArgs['SkipResources'] = $true }
+& (Join-Path $PluginsDir 'verify-index.ps1') @verifyArgs
+if ($LASTEXITCODE -ne 0) { throw "一致性自检未通过，已中止发布" }
 
 if ($DryRun) {
     Write-Host "DryRun 模式：跳过 GitHub 上传。" -ForegroundColor Yellow
