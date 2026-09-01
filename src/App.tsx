@@ -68,7 +68,7 @@ function App() {
   const settings = useSettingsStore((s) => s.settings);
   const setSettings = useSettingsStore((s) => s.setSettings);
   const patch = useSettingsStore((s) => s.patch);
-  // 麦克风发送状态指示（标题栏图标）：开关开启且已配置设备 = 生效中（绿色），与 MicToggle 口径一致
+  // 麦克风发送状态指示（标题栏图标）：开关开启且已配置设备 = 生效中（随皮肤强调色），与 MicToggle 口径一致
   const micSendOn =
     (settings?.mic_send_enabled ?? false) &&
     !!(settings?.mic_output_device && settings.mic_output_device.trim());
@@ -457,7 +457,7 @@ function App() {
           <BallLogo />
           <span className="font-display text-sm text-[var(--ink-900)] tracking-tight">电子声带</span>
           <span className="text-[9px] text-[var(--ink-300)] tracking-[0.3em] uppercase">TTSassist</span>
-          {/* 麦克风发送状态指示：开启发绿，未开启为灰色描边 */}
+          {/* 麦克风发送状态指示：生效中实心发强调色（浅金/深紫随皮肤），未开启为灰色描边 */}
           <span
             title={micSendOn ? "发送到麦克风：已开启" : "发送到麦克风：未开启"}
             className="self-center"
@@ -465,7 +465,7 @@ function App() {
             <MicIcon
               size={13}
               filled={micSendOn}
-              className={["transition-colors", micSendOn ? "text-emerald-600" : "text-[var(--ink-300)]"].join(" ")}
+              className={["transition-colors", micSendOn ? "text-[var(--amber-600)]" : "text-[var(--ink-300)]"].join(" ")}
             />
           </span>
         </div>
