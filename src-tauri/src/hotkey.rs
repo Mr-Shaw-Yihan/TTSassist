@@ -296,7 +296,7 @@ pub fn toggle_mic_send(app: &AppHandle) {
         "mic_send_enabled",
         serde_json::json!(new_val),
     ) {
-        eprintln!("持久化麦克风开关失败: {e}");
+        log_warn!("持久化麦克风开关失败: {e}");
     }
     notify_changed(app, EVENT_SETTINGS_CHANGED);
 }

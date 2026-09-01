@@ -182,7 +182,7 @@ impl PluginManager {
         let mut best: Vec<(super::manifest::PluginManifest, PathBuf)> = Vec::new();
         for zip_path in &zips {
             let Ok(m) = super::install::peek_zip_manifest(zip_path) else {
-                eprintln!(
+                log_error!(
                     "[plugins] 内置 zip 无法解析，跳过: {}",
                     zip_path.display()
                 );
@@ -198,7 +198,7 @@ impl PluginManager {
                 None => best.push((m, zip_path.clone())),
             }
         }
-        eprintln!(
+        log_info!(
             "[plugins] 内置插件引导：发现 {} 个内置 zip，{} 个插件",
             zips.len(),
             best.len()
@@ -214,7 +214,7 @@ impl PluginManager {
             }
             match self.install_zip(&zip_path, None) {
                 Ok((outcome, m)) => {
-                    eprintln!(
+                    log_info!(
                         "[plugins] 内置插件已自动安装: {} v{}（{outcome:?}）",
                         m.id, m.version
                     );
@@ -223,7 +223,7 @@ impl PluginManager {
                     *reg = registry::load_registry(&self.plugins_root);
                 }
                 Err(e) => {
-                    eprintln!(
+                    log_error!(
                         "[plugins] 内置 zip 安装失败，跳过: {}（{e}）",
                         zip_path.display()
                     );
@@ -274,7 +274,7 @@ impl PluginManager {
         let manifest = match PluginManifest::load(&dir) {
             Ok(m) => m,
             Err(e) => {
-                eprintln!("插件加载失败 [{id}]: {e}");
+                log_error!("插件加载失败 [{id}]: {e}");
                 if let Ok(mut map) = self.failed.write() {
                     map.insert(id.to_string(), e.to_string());
                 }
@@ -289,11 +289,11 @@ impl PluginManager {
                 }
                 match LoadedAsrPlugin::load(&dir, APP_VERSION) {
                     Ok(plugin) => {
-                        eprintln!("ASR 插件已加载: {id} v{}", plugin.manifest.version);
+                        log_info!("ASR 插件已加载: {id} v{}", plugin.manifest.version);
                         if plugin.manifest.requires_host_bridge {
                             match plugin.f_attach_host {
                                 Some(attach) => self.attach_host_bridge(id, attach),
-                                None => eprintln!(
+                                None => log_warn!(
                                     "提示：插件「{id}」声明 requires_host_bridge 但未导出 va_plugin_attach_host，桥未注入"
                                 ),
                             }
@@ -303,7 +303,7 @@ impl PluginManager {
                         }
                     }
                     Err(e) => {
-                        eprintln!("ASR 插件加载失败 [{id}]: {e}");
+                        log_error!("ASR 插件加载失败 [{id}]: {e}");
                         if let Ok(mut map) = self.failed.write() {
                             map.insert(id.to_string(), e.to_string());
                         }
@@ -316,11 +316,11 @@ impl PluginManager {
                 }
                 match LoadedServicePlugin::load(&dir, APP_VERSION) {
                     Ok(plugin) => {
-                        eprintln!("服务插件已加载: {id} v{}", plugin.manifest.version);
+                        log_info!("服务插件已加载: {id} v{}", plugin.manifest.version);
                         if plugin.manifest.requires_host_bridge {
                             match plugin.f_attach_host {
                                 Some(attach) => self.attach_host_bridge(id, attach),
-                                None => eprintln!(
+                                None => log_warn!(
                                     "提示：插件「{id}」声明 requires_host_bridge 但未导出 va_plugin_attach_host，桥未注入"
                                 ),
                             }
@@ -330,7 +330,7 @@ impl PluginManager {
                         }
                     }
                     Err(e) => {
-                        eprintln!("服务插件加载失败 [{id}]: {e}");
+                        log_error!("服务插件加载失败 [{id}]: {e}");
                         if let Ok(mut map) = self.failed.write() {
                             map.insert(id.to_string(), e.to_string());
                         }
@@ -343,11 +343,11 @@ impl PluginManager {
                 }
                 match LoadedPlugin::load(&dir, APP_VERSION) {
                     Ok(plugin) => {
-                        eprintln!("插件已加载: {id} v{}", plugin.manifest.version);
+                        log_info!("插件已加载: {id} v{}", plugin.manifest.version);
                         if plugin.manifest.requires_host_bridge {
                             match plugin.f_attach_host {
                                 Some(attach) => self.attach_host_bridge(id, attach),
-                                None => eprintln!(
+                                None => log_warn!(
                                     "提示：插件「{id}」声明 requires_host_bridge 但未导出 va_plugin_attach_host，桥未注入"
                                 ),
                             }
@@ -357,7 +357,7 @@ impl PluginManager {
                         }
                     }
                     Err(e) => {
-                        eprintln!("插件加载失败 [{id}]: {e}");
+                        log_error!("插件加载失败 [{id}]: {e}");
                         if let Ok(mut map) = self.failed.write() {
                             map.insert(id.to_string(), e.to_string());
                         }
@@ -373,11 +373,11 @@ impl PluginManager {
     /// 此时挂入 pending，等 lib.rs 在 manage 之后调 attach_pending_bridges 补注入。
     fn attach_host_bridge(&self, id: &str, attach: plugin_api::VaPluginAttachHostFn) {
         let Some(app) = self.bridge_app.as_ref() else {
-            eprintln!("提示：插件「{id}」声明 requires_host_bridge，但当前环境无宿主桥（测试运行），跳过注入");
+            log_warn!("提示：插件「{id}」声明 requires_host_bridge，但当前环境无宿主桥（测试运行），跳过注入");
             return;
         };
         let Some(bridge) = app.try_state::<HostBridge>() else {
-            eprintln!("警告：插件「{id}」声明 requires_host_bridge，但宿主桥未初始化，未注入");
+            log_warn!("警告：插件「{id}」声明 requires_host_bridge，但宿主桥未初始化，未注入");
             return;
         };
         if app.try_state::<PluginManager>().is_some() {
@@ -411,7 +411,7 @@ impl PluginManager {
             "清单错误: 插件「{}」的必填配置环境变量与已加载插件「{}」冲突，请让插件作者改名",
             manifest.id, conflict
         );
-        eprintln!("插件加载失败 [{id}]: {msg}");
+        log_error!("插件加载失败 [{id}]: {msg}");
         if let Ok(mut map) = self.failed.write() {
             map.insert(id.to_string(), msg);
         }
@@ -589,7 +589,7 @@ impl PluginManager {
         let dir = self.plugins_root.join(id);
         if dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&dir) {
-                eprintln!("插件目录删除失败（重启后自动清理）: {e}");
+                log_warn!("插件目录删除失败（重启后自动清理）: {e}");
             }
         }
 
@@ -683,11 +683,11 @@ fn apply_pending_zip(plugins_root: &Path, id: &str, pending_rel: &str) -> Option
         .and_then(|staged| copy_staged_to(&staged, plugins_root).map(|_| staged.manifest));
     match result {
         Ok(m) => {
-            eprintln!("插件 [{id}] 已应用待更新版本 → v{}", m.version);
+            log_info!("插件 [{id}] 已应用待更新版本 → v{}", m.version);
             Some(m)
         }
         Err(e) => {
-            eprintln!("插件 [{id}] 应用待更新版本失败: {e}");
+            log_error!("插件 [{id}] 应用待更新版本失败: {e}");
             None
         }
     }
@@ -732,8 +732,8 @@ fn sweep_orphan_dirs(plugins_root: &Path, reg: &registry::Registry) {
         }
         if !reg.plugins.iter().any(|e| e.id == name) {
             match std::fs::remove_dir_all(&path) {
-                Ok(()) => eprintln!("已清理孤儿插件目录: {name}"),
-                Err(e) => eprintln!("孤儿插件目录清理失败 [{name}]: {e}"),
+                Ok(()) => log_info!("已清理孤儿插件目录: {name}"),
+                Err(e) => log_warn!("孤儿插件目录清理失败 [{name}]: {e}"),
             }
         }
     }

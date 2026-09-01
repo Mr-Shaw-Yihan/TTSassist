@@ -192,7 +192,7 @@ fn write_ok(status: &Arc<Mutex<MicStatus>>, device: Option<String>, volume: f32,
 }
 
 fn write_error(status: &Arc<Mutex<MicStatus>>, err: String) {
-    eprintln!("mic 错误: {err}");
+    log_error!("mic 错误: {err}");
     if let Ok(mut s) = status.lock() {
         s.is_playing = false;
         s.last_error = Some(err);

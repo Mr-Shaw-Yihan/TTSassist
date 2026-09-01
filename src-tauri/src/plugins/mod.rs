@@ -63,7 +63,7 @@ pub fn migrate_legacy_engine(data_dir: &Path) {
             .or_insert(serde_json::Value::String(voice));
     }
     if let Err(e) = crate::storage::atomic::write_json_pretty(&path, &value) {
-        eprintln!("edge→插件迁移设置保存失败: {e}");
+        log_warn!("edge→插件迁移设置保存失败: {e}");
     }
 }
 

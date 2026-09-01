@@ -41,7 +41,7 @@ pub fn load_registry(plugins_root: &Path) -> Registry {
     // PowerShell 等工具写出的 UTF-8 文件可能带 BOM，serde_json 不认，先剥掉
     let raw = raw.trim_start_matches('\u{FEFF}');
     serde_json::from_str(raw).unwrap_or_else(|e| {
-        eprintln!("插件注册表损坏，按空处理: {e}");
+        log_warn!("插件注册表损坏，按空处理: {e}");
         Registry::default()
     })
 }

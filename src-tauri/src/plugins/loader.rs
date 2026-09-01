@@ -65,7 +65,7 @@ impl LoadedPlugin {
         // 加载是串行进行的，此处 set_var 无并发问题。插件应在初始化时读取并缓存。
         let data_dir = plugin_dir.join("data");
         if let Err(e) = std::fs::create_dir_all(&data_dir) {
-            eprintln!("提示：插件「{}」数据目录创建失败: {e}", manifest.id);
+            log_warn!("提示：插件「{}」数据目录创建失败: {e}", manifest.id);
         }
         let env_key = format!(
             "VA_PLUGIN_DATA_DIR_{}",
@@ -148,7 +148,7 @@ impl LoadedPlugin {
             )));
         }
         if version != manifest.version {
-            eprintln!(
+            log_warn!(
                 "提示：插件「{}」dll 版本 {version} 与清单版本 {} 不一致（以清单为准）",
                 manifest.id, manifest.version
             );
@@ -703,7 +703,7 @@ impl LoadedServicePlugin {
         // 2. 数据目录环境变量（与 TTS/ASR 插件同约定）
         let data_dir = plugin_dir.join("data");
         if let Err(e) = std::fs::create_dir_all(&data_dir) {
-            eprintln!("提示：插件「{}」数据目录创建失败: {e}", manifest.id);
+            log_warn!("提示：插件「{}」数据目录创建失败: {e}", manifest.id);
         }
         let env_key = format!(
             "VA_PLUGIN_DATA_DIR_{}",

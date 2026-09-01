@@ -1,6 +1,9 @@
 // VoiceAssist Tauri 后端入口。
 // 多窗口架构：main（主窗）+ quick_input（浮窗），跨窗口同步事件。
 
+#[macro_use]
+pub mod logging;
+
 pub mod asr;
 pub mod commands;
 pub mod hotkey;
@@ -43,11 +46,11 @@ fn migrate_plugins_if_needed(data_dir: &std::path::Path, plugins_root: &std::pat
         return;
     }
 
-    eprintln!("检测到旧位置插件，正在迁移: {} → {}", old_root.display(), plugins_root.display());
+    log_info!("检测到旧位置插件，正在迁移: {} → {}", old_root.display(), plugins_root.display());
     if let Err(e) = copy_dir_all(&old_root, plugins_root) {
-        eprintln!("插件迁移失败（不影响启动，可手动复制）: {e}");
+        log_error!("插件迁移失败（不影响启动，可手动复制）: {e}");
     } else {
-        eprintln!("插件迁移完成。旧目录保留在 {}，确认无误后可手动删除。", old_root.display());
+        log_info!("插件迁移完成。旧目录保留在 {}，确认无误后可手动删除。", old_root.display());
     }
 }
 
@@ -139,7 +142,7 @@ pub fn run() {
             let register_ok = match hotkey::register_hotkey(app.handle(), &accel) {
                 Ok(()) => true,
                 Err(e) => {
-                    eprintln!("注册快捷键 {accel} 失败: {e}");
+                    log_error!("注册快捷键 {accel} 失败: {e}");
                     false
                 }
             };
@@ -156,7 +159,7 @@ pub fn run() {
                 match hotkey::register_voice_input_hotkey(app.handle(), &vi_accel) {
                     Ok(()) => true,
                     Err(e) => {
-                        eprintln!("注册语音输入快捷键 {vi_accel} 失败: {e}");
+                        log_error!("注册语音输入快捷键 {vi_accel} 失败: {e}");
                         false
                     }
                 }
@@ -173,7 +176,7 @@ pub fn run() {
                 match hotkey::register_play_last_hotkey(app.handle(), &pl_accel) {
                     Ok(()) => true,
                     Err(e) => {
-                        eprintln!("注册播放最近消息快捷键 {pl_accel} 失败: {e}");
+                        log_error!("注册播放最近消息快捷键 {pl_accel} 失败: {e}");
                         false
                     }
                 }
@@ -189,7 +192,7 @@ pub fn run() {
                 match hotkey::register_mic_toggle_hotkey(app.handle(), &mt_accel) {
                     Ok(()) => true,
                     Err(e) => {
-                        eprintln!("注册麦克风开关快捷键 {mt_accel} 失败: {e}");
+                        log_error!("注册麦克风开关快捷键 {mt_accel} 失败: {e}");
                         false
                     }
                 }
@@ -256,7 +259,7 @@ pub fn run() {
 
             // 注册收藏快捷键（需在 AppState/MicPlayback manage 之后）
             if let Err(e) = hotkey::refresh_favorite_hotkeys(app.handle(), &favorites) {
-                eprintln!("注册收藏快捷键失败: {e}");
+                log_error!("注册收藏快捷键失败: {e}");
             }
             // 系统托盘
             tray::setup(app)?;

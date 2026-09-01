@@ -163,7 +163,7 @@ impl HostBridge {
             confirm_dialog: br_confirm_dialog,
         }));
         unsafe { attach(table as *const VaHostServices) };
-        eprintln!("宿主能力桥已注入插件「{plugin_id}」");
+        log_info!("宿主能力桥已注入插件「{plugin_id}」");
         true
     }
 }
