@@ -56,6 +56,11 @@ pub fn update_setting(
         plugins.inject_config_env(&settings.plugin_config);
     }
 
+    // 诊断日志（支持模式）开关：运行期即时切换是否落盘
+    if key == "diagnostics_log_enabled" {
+        crate::logging::set_enabled(settings.diagnostics_log_enabled);
+    }
+
     notify_changed(&app, EVENT_SETTINGS_CHANGED);
 
     Ok(settings)

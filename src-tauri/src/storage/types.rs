@@ -137,6 +137,9 @@ pub struct Settings {
     /// 悬浮球皮肤：ink（墨黑）/ white（素白）
     #[serde(default = "default_ball_skin")]
     pub floating_ball_skin: String,
+    /// 诊断日志（支持模式）：开启后运行日志同时写入 app_data_dir/logs/app.log，便于反馈问题。默认关。
+    #[serde(default)]
+    pub diagnostics_log_enabled: bool,
 }
 
 impl Default for Settings {
@@ -180,6 +183,7 @@ impl Default for Settings {
             floating_ball_size: default_ball_size(),
             floating_ball_perf_mode: default_perf_mode(),
             floating_ball_skin: default_ball_skin(),
+            diagnostics_log_enabled: false,
         }
     }
 }

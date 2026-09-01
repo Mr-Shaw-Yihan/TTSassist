@@ -19,8 +19,10 @@ const REMOTE_CONFIG_MIRROR_URL: &str =
 /// 缓存有效期：24 小时
 const CACHE_TTL_SECS: u64 = 24 * 3600;
 
-/// 内置兜底邀请码（断网且无缓存时使用）
-const DEFAULT_INVITE_CODE: &str = "U277DH";
+/// 内置兜底邀请码（断网且无缓存时使用）。
+/// ⚠ 轮换提醒：这是**离线兜底**，应与 `plugins/remote-config.json` 的在线值保持一致；
+/// 换码时若不同步改这里，全新离线安装的用户会拿到旧码。改后需随下次发版才能送达。
+const DEFAULT_INVITE_CODE: &str = "5P9J2B";
 
 /// 远程配置。字段全部带默认值：线上 JSON 缺字段不报错，
 /// 以后加新字段（如公告）老版本解析时自动忽略。

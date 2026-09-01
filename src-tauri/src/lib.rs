@@ -107,6 +107,15 @@ pub fn run() {
 
             let settings: Settings = storage::settings::load_settings(&data_dir);
 
+            // 诊断日志（支持模式）：默认关仅 stderr；设置或 env VA_DIAG_LOG 命中时
+            // 同时落 app_data_dir/logs/app.log（仅本地、不含用户合成文本，启动超限自动轮转）
+            {
+                let env_on = std::env::var("VA_DIAG_LOG")
+                    .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
+                    .unwrap_or(false);
+                logging::init(&data_dir.join("logs"), settings.diagnostics_log_enabled || env_on);
+            }
+
             // ASR 插件需要 API Key：通过环境变量传递（插件加载时读取）
             if !settings.mimo_api_key.is_empty() {
                 std::env::set_var("MIMO_API_KEY", &settings.mimo_api_key);

@@ -84,7 +84,8 @@ export function SettingsPage() {
   const [copied, setCopied] = useState(false);
 
   // MiMo 邀请码：远程配置动态下发（后端 24h 缓存，断网退回缓存/内置默认值）
-  const [inviteCode, setInviteCode] = useState("U277DH");
+  // 初值用当前有效码（与内置兜底/在线值一致），拉取成功后被覆盖；避免拉取前闪现旧失效码
+  const [inviteCode, setInviteCode] = useState("5P9J2B");
   useEffect(() => {
     getRemoteConfig()
       .then((c) => setInviteCode(c.mimo_invite_code))

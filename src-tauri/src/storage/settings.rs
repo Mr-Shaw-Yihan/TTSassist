@@ -73,6 +73,7 @@ pub fn load_settings(data_dir: &Path) -> Settings {
             floating_ball_size: v.get("floating_ball_size").and_then(|x| x.as_i64()).map(|x| super::types::clamp_ball_size(x as i32)).unwrap_or(default.floating_ball_size),
             floating_ball_perf_mode: v.get("floating_ball_perf_mode").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.floating_ball_perf_mode),
             floating_ball_skin: v.get("floating_ball_skin").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.floating_ball_skin),
+            diagnostics_log_enabled: v.get("diagnostics_log_enabled").and_then(|x| x.as_bool()).unwrap_or(default.diagnostics_log_enabled),
         },
         Err(_) => default,
     };
@@ -171,6 +172,7 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "floating_ball_size" => if let Some(v) = value.as_i64() { s.floating_ball_size = super::types::clamp_ball_size(v as i32) },
         "floating_ball_perf_mode" => if let Some(v) = value.as_str() { s.floating_ball_perf_mode = v.to_string() },
         "floating_ball_skin" => if let Some(v) = value.as_str() { s.floating_ball_skin = v.to_string() },
+        "diagnostics_log_enabled" => if let Some(v) = value.as_bool() { s.diagnostics_log_enabled = v },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;
