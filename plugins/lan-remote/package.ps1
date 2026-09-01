@@ -17,7 +17,7 @@ $PluginId   = "lan-remote"
 $PluginName = "移动端遥控器"
 $Version    = "0.2.1"
 $MinAppVer  = "1.7.9"
-$Desc       = "手机遥控 PC 端：局域网 WebSocket 服务 + mDNS 发现 + 配对码配对，需配合移动端 App 使用"
+$Desc       = "手机/网页遥控 PC 端：局域网 WebSocket 服务 + mDNS 发现 + 免码弹窗配对，内置网页遥控器（同端口 45271），需配合移动端 App 或浏览器使用"
 
 $PluginDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $DistDir = Join-Path $PluginDir "dist"
