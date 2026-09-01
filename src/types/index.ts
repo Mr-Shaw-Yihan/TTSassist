@@ -82,6 +82,8 @@ export interface Settings {
   floating_ball_perf_mode: string;
   /** 悬浮球皮肤：ink（墨黑）/ white（素白） */
   floating_ball_skin: string;
+  /** 诊断日志（支持模式）：开启后运行日志额外落本地文件，便于反馈问题。默认关 */
+  diagnostics_log_enabled: boolean;
 }
 
 /** 通用插件配置：manifest 的 config 声明 */

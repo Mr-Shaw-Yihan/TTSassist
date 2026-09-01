@@ -1320,6 +1320,29 @@ export function SettingsPage() {
                 )
               )}
 
+              {/* 诊断日志（支持模式）：默认关，开启后运行日志落本地文件，便于反馈问题 */}
+              <div className="mt-3 rounded-lg border border-[var(--ink-200)] bg-[var(--ink-100)]/40 px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-[11px] font-medium text-[var(--ink-600)]">诊断日志（支持模式）</div>
+                  <button
+                    type="button"
+                    onClick={() => { void patch("diagnostics_log_enabled", !(settings?.diagnostics_log_enabled ?? false)).catch(() => {}); }}
+                    aria-pressed={settings?.diagnostics_log_enabled ?? false}
+                    className={[
+                      "shrink-0 rounded-full px-3 py-1 text-[11px] font-medium transition-colors",
+                      (settings?.diagnostics_log_enabled ?? false)
+                        ? "bg-[var(--amber-500)] text-[var(--paper)]"
+                        : "border border-[var(--ink-200)] text-[var(--ink-400)] hover:text-[var(--ink-700)]",
+                    ].join(" ")}
+                  >
+                    {(settings?.diagnostics_log_enabled ?? false) ? "已开启" : "已关闭"}
+                  </button>
+                </div>
+                <div className="mt-1 text-[10px] leading-relaxed text-[var(--ink-300)]">
+                  开启后会把运行日志额外保存到本地 <span className="font-mono">…/logs/app.log</span>，仅用于排查问题；日志不含你合成的文本，也不会上传。反馈问题时把该文件发给开发者即可。
+                </div>
+              </div>
+
               {/* 免责声明 */}
               <div className="mt-3 rounded-lg border border-[var(--ink-200)] bg-[var(--ink-100)]/40 px-3 py-2 text-[10px] leading-relaxed text-[var(--ink-300)]">
                 <div className="mb-1 font-medium text-[var(--ink-500)]">免责声明</div>
