@@ -9,13 +9,14 @@
 // - 使用中的音色禁止卸载（先切换到其他音色）；
 // - 卸载需二次确认；导入为"复制"，保留用户原文件夹。
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   uninstallVoice,
   importVoicePack,
   pickVoicePackFolder,
 } from "../../services/invoke";
 import { usePluginTaskStore } from "../../stores/pluginTaskStore";
+import { SectionHeading } from "../common/SettingsSection";
 import type { PluginInfo } from "../../types";
 
 interface Props {
@@ -24,9 +25,11 @@ interface Props {
   currentVoiceId: string;
   /** 音色表/状态变化后的刷新回调（父组件重查 list_plugins） */
   onChanged: () => void;
+  /** 「当前音色」下拉插槽（并入本卡顶部，与其它引擎音色管理卡同构） */
+  voiceSelect?: ReactNode;
 }
 
-export function VoiceManager({ plugin, currentVoiceId, onChanged }: Props) {
+export function VoiceManager({ plugin, currentVoiceId, onChanged, voiceSelect }: Props) {
   const task = usePluginTaskStore((s) => s.task);
   const startVoice = usePluginTaskStore((s) => s.startVoice);
   const taskRunning = task?.status === "running";
@@ -85,15 +88,18 @@ export function VoiceManager({ plugin, currentVoiceId, onChanged }: Props) {
   }
 
   return (
-    <div className="mt-2 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2.5">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-medium text-[var(--ink-700)]">音色管理</span>
-        <span className="text-[10px] text-[var(--ink-300)]">
-          已安装 {installed.length} 个
-        </span>
-      </div>
+    <div className="rounded-xl border border-[var(--ink-200)]/70 bg-[var(--ink-100)]/25 px-3.5 py-3">
+      <SectionHeading
+        title="音色管理"
+        desc="选择当前音色，或安装 / 卸载 / 导入本地音色包。"
+        right={
+          <span className="text-[10px] text-[var(--ink-300)]">已安装 {installed.length} 个</span>
+        }
+      />
 
-      <div className="space-y-1.5">
+      {voiceSelect && <div className="mt-2.5">{voiceSelect}</div>}
+
+      <div className="mt-2.5 space-y-1.5">
         {plugin.voices.map((v) => {
           const isInstalled = installed.includes(v.id);
           const isCurrent = v.id === currentVoiceId;

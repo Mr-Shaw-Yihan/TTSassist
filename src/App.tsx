@@ -18,6 +18,7 @@ import { QuickInput } from "./components/QuickInput/QuickInput";
 import { FloatingBall } from "./components/FloatingBall/FloatingBall";
 import { BallLogo } from "./components/FloatingBall/BallLogo";
 import { PluginPage } from "./components/Plugins/PluginPage";
+import { VoiceCenterPage } from "./components/Voice/VoiceCenterPage";
 import { UpdateDialog } from "./components/Settings/UpdateDialog";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "./stores/updateStore";
@@ -36,7 +37,7 @@ import {
 } from "./services/invoke";
 import type { Message, Favorite, PluginSetupProgress } from "./types";
 
-type Tab = "messages" | "favorites" | "plugins" | "settings";
+type Tab = "messages" | "favorites" | "voice" | "plugins" | "settings";
 
 /** 消息列表每页条数：首屏只载最近一页，上滑再翻页加载更早的 */
 const MESSAGE_PAGE_SIZE = 20;
@@ -510,6 +511,7 @@ function App() {
           <SideButton icon={<TexIcon name="msg" size={16} />} label="消息" active={tab === "messages"} onClick={() => setTab("messages")} />
           <SideButton icon={<TexIcon name="star" size={16} />} label="收藏" active={tab === "favorites"} onClick={() => setTab("favorites")} />
           <SideButton icon={<TexIcon name="grid" size={16} />} label="插件" active={tab === "plugins"} onClick={() => setTab("plugins")} />
+          <SideButton icon={<TexIcon name="mic" size={16} />} label="语音" active={tab === "voice"} onClick={() => setTab("voice")} />
           <SideButton icon={<TexIcon name="gear" size={16} />} label="设置" active={tab === "settings"} dot={updateDot} onClick={() => setTab("settings")} />
           <div className="flex-1" />
 
@@ -608,6 +610,13 @@ function App() {
           {tab === "plugins" && (
             <main className="min-h-0 flex-1 overflow-hidden bg-[var(--paper)]">
               <PluginPage />
+            </main>
+          )}
+
+          {/* 语音中心（TTS 合成 + ASR 识别引擎/音色管理） */}
+          {tab === "voice" && (
+            <main className="min-h-0 flex-1 overflow-hidden bg-[var(--paper)]">
+              <VoiceCenterPage />
             </main>
           )}
 

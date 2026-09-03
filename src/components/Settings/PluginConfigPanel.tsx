@@ -7,6 +7,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { getPluginConfig, setPluginConfig, clearPluginConfig } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useTauriListen } from "../../hooks/useTauriListen";
+import { SectionHeading } from "../common/SettingsSection";
 import type { PluginConfigFieldView } from "../../types";
 
 const SECRET_MASK = "已设置";
@@ -116,9 +117,12 @@ function RemotePanel({ fields }: { fields: PluginConfigFieldView[] | null }) {
 export function PluginConfigPanel({
   pluginId,
   pluginName,
+  title,
 }: {
   pluginId: string;
   pluginName: string;
+  /** 卡片标题；默认用插件名。语音中心传「API 密钥」与内置引擎密钥卡风格统一 */
+  title?: string;
 }) {
   const setSettings = useSettingsStore((s) => s.setSettings);
   const [fields, setFields] = useState<PluginConfigFieldView[] | null>(null);
@@ -208,32 +212,34 @@ export function PluginConfigPanel({
   }
 
   return (
-    <div className="rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2.5">
-      {/* 卡片头：插件名 + 获取链接 + 清空 */}
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-medium text-[var(--ink-900)]">{pluginName}</p>
-        <div className="flex shrink-0 gap-1.5">
-          {helpUrl && (
-            <button
-              onClick={() => openUrl(helpUrl).catch(() => {})}
-              className="rounded-lg border border-[var(--ink-200)] px-2 py-1 text-[11px] text-[var(--ink-700)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)]"
-            >
-              获取 API Key ↗
-            </button>
-          )}
-          {hasEditable && (
-            <button
-              onClick={clear}
-              className="rounded-lg border border-[var(--ink-200)] px-2 py-1 text-[11px] text-[var(--ink-500)] transition-colors hover:border-[var(--seal)] hover:text-[var(--seal)]"
-            >
-              清空
-            </button>
-          )}
-        </div>
-      </div>
+    <div className="rounded-xl border border-[var(--ink-200)]/70 bg-[var(--ink-100)]/25 px-3.5 py-3">
+      {/* 卡片头：标题（默认插件名；语音中心传「API 密钥」与内置引擎统一）+ 获取链接 + 清空 */}
+      <SectionHeading
+        title={title ?? pluginName}
+        right={
+          <div className="flex shrink-0 items-center gap-1.5">
+            {helpUrl && (
+              <button
+                onClick={() => openUrl(helpUrl).catch(() => {})}
+                className="rounded-lg border border-[var(--ink-200)] px-2 py-1 text-[11px] text-[var(--ink-700)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)]"
+              >
+                获取 API Key ↗
+              </button>
+            )}
+            {hasEditable && (
+              <button
+                onClick={clear}
+                className="rounded-lg border border-[var(--ink-200)] px-2 py-1 text-[11px] text-[var(--ink-500)] transition-colors hover:border-[var(--seal)] hover:text-[var(--seal)]"
+              >
+                清空
+              </button>
+            )}
+          </div>
+        }
+      />
 
       {/* 字段控件 */}
-      <div className="mt-2 space-y-2.5">
+      <div className="mt-2.5 space-y-2.5">
         {fields.map((f) => (
           <div key={f.key}>
             <label className="mb-1 flex items-baseline gap-1.5 text-xs text-[var(--ink-700)]">
