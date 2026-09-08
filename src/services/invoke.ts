@@ -175,6 +175,56 @@ export async function getRemoteConfig(force = false): Promise<RemoteConfig> {
   return invoke<RemoteConfig>("get_remote_config", { force });
 }
 
+// ── 局域网遥控可达性（移动端遥控器）─────────────
+
+/** 一个本机网卡 IPv4 */
+export interface LanIp {
+  iface: string;
+  ip: string;
+  /** 是否默认路由出口网卡（最可能是手机可达的那块） */
+  default: boolean;
+}
+
+/** 局域网遥控自检结果 */
+export interface LanStatus {
+  ips: LanIp[];
+  listening: boolean;
+  firewall: boolean;
+  port: number;
+}
+
+/** 查询局域网遥控状态：网卡 IP 列表 + 端口监听 + 防火墙规则。失败时抛错 */
+export async function getRemoteLanStatus(): Promise<LanStatus> {
+  return invoke<LanStatus>("remote_lan_status");
+}
+
+/** 一键放行防火墙（弹一次 UAC）；返回提示文案，失败（含取消）抛错 */
+export async function openRemoteFirewall(): Promise<string> {
+  return invoke<string>("remote_firewall_open");
+}
+
+/** 遥控会话信息：已配对设备 + 当前连接态（镜像后端 remote::SessionInfo）。
+ *  时间字段为 ISO8601 字符串；未配对 / 未连接时对应字段为 null。 */
+export interface RemoteSessionInfo {
+  /** 是否已配对（存在有效 token） */
+  paired: boolean;
+  /** 已配对设备名（旧 token 迁移无设备名时为 null） */
+  device: string | null;
+  /** 配对时间（ISO8601） */
+  paired_at: string | null;
+  /** 最近连接时间（ISO8601） */
+  last_seen: string | null;
+  /** 当前是否有已鉴权连接 */
+  connected: boolean;
+  /** 当前连接对端地址（ip:port；未连接为 null） */
+  peer: string | null;
+}
+
+/** 查询遥控会话信息：遥控页挂载时拉取一次；实时变化另经 remote:status 事件推送 */
+export async function getRemoteSessionInfo(): Promise<RemoteSessionInfo> {
+  return invoke<RemoteSessionInfo>("remote_session_info");
+}
+
 // ── Messages ──────────────────────────────────────
 
 /** 消息分页结果：窗口消息（旧→新）+ 是否还有更早的 */
