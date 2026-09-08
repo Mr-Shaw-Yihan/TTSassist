@@ -130,6 +130,16 @@
   .waitcard .t1 { font-size: 14px; color: var(--ink); }
   .waitcard .t2 { font-size: 11px; color: var(--sub); margin-top: 4px; }
 
+  /* 浏览器不兼容兜底提示：连续重连失败若干次仍未鉴权时显示 */
+  .hintcard { margin-top: 14px; border-radius: 16px; padding: 14px 16px;
+    background: rgba(169,130,28,.10); border: 1px solid rgba(169,130,28,.28); }
+  .hintcard .ht { font-size: 13px; color: var(--gold-text); font-weight: 600; margin-bottom: 6px; }
+  .hintcard .hb { font-size: 12px; color: var(--sub); line-height: 1.65; }
+  .hintcard .hb b { color: var(--ink); font-weight: 600; }
+  .hintcard .hsteps { margin: 8px 0 0; padding-left: 20px; }
+  .hintcard .hsteps li { font-size: 12px; color: var(--sub); line-height: 1.75; }
+  .hintcard .hsteps b { color: var(--ink); font-weight: 600; }
+
   .iprow { display: flex; gap: 10px; margin-top: 16px; }
   .field {
     flex: 1; background: rgba(255,255,255,.55); border-radius: 14px; border: 0; outline: 0;
@@ -197,6 +207,16 @@
         <input class="field port" id="port" value="45271" inputmode="numeric">
       </div>
       <div class="gbtn fbk press" id="btn-connect">连接</div>
+
+      <div class="hintcard" id="compat-hint" style="display:none">
+        <div class="ht">😕 连不上？多半不是电脑或网络的问题</div>
+        <div class="hb">你用的浏览器开启了「网页加速 / 省流量」，它会把连接转一道弯，导致遥控连不上。任选下面一种方法即可：</div>
+        <ol class="hsteps">
+          <li>换用<b>手机自带的浏览器</b>，或 <b>Chrome</b>，重新打开这个地址；</li>
+          <li>或在当前浏览器设置里<b>关掉「网页加速 / 云端加速 / 省流量」</b>，再重新打开本页；</li>
+          <li>最省心：<b>安装官方「电子声带遥控」App</b>，连得更稳、还能后台用。</li>
+        </ol>
+      </div>
     </div>
   </div>
 
@@ -237,7 +257,7 @@ var S = {
   ws: null, phase: 'disconnected', token: null, host: null,
   mic: false, playingId: null, synthesizing: false, favorites: [],
   refSeq: 0, pending: {}, reconnectMs: 0, reconnectTimer: null,
-  userClosed: false, pairWaitTimer: null, everConnected: false,
+  userClosed: false, pairWaitTimer: null, everConnected: false, failCount: 0,
 };
 var $ = function (id) { return document.getElementById(id); };
 var TOKEN_KEY = 'lan_remote_token';
@@ -287,6 +307,8 @@ function connect(host, port) {
 }
 function scheduleReconnect() {
   if (S.userClosed) return;
+  S.failCount++;
+  if (S.failCount >= 3) $('compat-hint').style.display = 'block';
   S.reconnectMs = S.reconnectMs ? Math.min(S.reconnectMs * 2, 30000) : 1000;
   setLed('wait', S.reconnectMs / 1000 + ' 秒后重连…', 'led-label', 'led');
   clearTimeout(S.reconnectTimer);
@@ -365,7 +387,8 @@ function onMessage(m) {
   }
 }
 function onAuthed() {
-  S.phase = 'connected'; S.everConnected = true;
+  S.phase = 'connected'; S.everConnected = true; S.failCount = 0;
+  $('compat-hint').style.display = 'none';
   clearTimeout(S.pairWaitTimer); $('waitcard').style.display = 'none';
   showPage('main');
   setLed('on', '已连接', 'led-label2', 'led2');
