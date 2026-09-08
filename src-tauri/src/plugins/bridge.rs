@@ -50,6 +50,9 @@ struct BridgeInner {
     /// 是否有合成进行中（generate_tts_impl 置位）
     synthesizing: bool,
     subscribers: Vec<Subscriber>,
+    /// 本体遥控服务（remote/）的事件转发通道：与插件共用同一套事件 JSON，
+    /// 由 remote::spawn 注册。原 lan-remote 插件迁入本体后不再走 C ABI 订阅。
+    native_event_tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
 /// 宿主能力桥（Tauri State）。须在 PluginManager::load_all 之前 manage，
@@ -69,7 +72,16 @@ impl HostBridge {
                 playing_path: None,
                 synthesizing: false,
                 subscribers: Vec::new(),
+                native_event_tx: None,
             }),
+        }
+    }
+
+    /// 注册本体遥控服务的事件转发通道（remote::spawn 调用一次）。
+    /// 与插件订阅共用同一套事件 JSON（favorites/settings/playback/state changed）。
+    pub fn register_native_event_sink(&self, tx: tokio::sync::mpsc::UnboundedSender<String>) {
+        if let Ok(mut inner) = self.inner.write() {
+            inner.native_event_tx = Some(tx);
         }
     }
 
@@ -104,12 +116,15 @@ impl HostBridge {
     fn broadcast(app: &AppHandle, event_json: &str) {
         let Some(bridge) = app.try_state::<HostBridge>() else { return };
         let Ok(inner) = bridge.inner.read() else { return };
-        let c = match CString::new(event_json) {
-            Ok(c) => c,
-            Err(_) => return,
-        };
-        for sub in &inner.subscribers {
-            unsafe { (sub.cb)(sub.user_data, c.as_ptr()) };
+        // 本体遥控服务：无 C ABI 开销，直接送通道（即便无插件订阅也要送达）
+        if let Some(tx) = &inner.native_event_tx {
+            let _ = tx.send(event_json.to_string());
+        }
+        // C ABI 订阅插件
+        if let Ok(c) = CString::new(event_json) {
+            for sub in &inner.subscribers {
+                unsafe { (sub.cb)(sub.user_data, c.as_ptr()) };
+            }
         }
     }
 
@@ -188,7 +203,7 @@ fn write_out(out: *mut *mut c_char, s: String) {
 }
 
 /// 收藏播放（与收藏快捷键回调同逻辑）：麦克风开启时发虚拟麦克风 + 发事件让主窗播扬声器。
-fn play_favorite_by_id(app: &AppHandle, id: &str) -> Result<(), String> {
+pub fn play_favorite_by_id(app: &AppHandle, id: &str) -> Result<(), String> {
     let state = app
         .try_state::<crate::commands::AppState>()
         .ok_or("宿主状态未就绪")?;
@@ -215,7 +230,7 @@ fn play_favorite_by_id(app: &AppHandle, id: &str) -> Result<(), String> {
 
 /// 状态快照 JSON：{"mic_send","playing_id","synthesizing"}。
 /// playing_id = 当前播放音频对应的收藏 id（无收藏匹配时 null）
-fn state_json(app: &AppHandle) -> String {
+pub fn state_json(app: &AppHandle) -> String {
     let mic_send = app
         .try_state::<crate::commands::AppState>()
         .map(|s| s.settings.read().map(|g| g.mic_send_enabled).unwrap_or(false))
@@ -238,6 +253,60 @@ fn state_json(app: &AppHandle) -> String {
         "synthesizing": synthesizing,
     })
     .to_string()
+}
+
+// ── 原生能力（供本体遥控服务 remote/ 直接调用；下方 C ABI br_* 转调这些，单一事实源）──
+
+/// 收藏元数据 JSON 数组（id/备注/时间/快捷键，不含音频路径）
+pub fn native_list_favorites(app: &AppHandle) -> String {
+    let list = app
+        .try_state::<crate::commands::AppState>()
+        .map(|s| crate::storage::favorites::load_favorites(&s.data_dir))
+        .unwrap_or_default();
+    let items: Vec<serde_json::Value> = list
+        .iter()
+        .map(|f| {
+            serde_json::json!({
+                "id": f.id,
+                "note": f.note,
+                "created_at": f.created_at,
+                "hotkey": f.hotkey,
+            })
+        })
+        .collect();
+    serde_json::Value::Array(items).to_string()
+}
+
+/// 停止播放：主窗监听 playback:stop 停扬声器（并回报 playback:stopped），虚拟麦克风侧直接停
+pub fn native_stop_playback(app: &AppHandle) {
+    let _ = app.emit("playback:stop", ());
+    if let Some(mic) = app.try_state::<MicPlayback>() {
+        mic.stop();
+    }
+}
+
+/// 合成并播放（async，供本体遥控直接 await）：走现有合成管线 + emit playback:play 让主窗播扬声器。
+/// 与后端麦克风避免双份（generate_tts_impl 内已按需发麦克风）。
+pub async fn native_synthesize(app: &AppHandle, text: &str) -> Result<(), String> {
+    if text.trim().is_empty() {
+        return Err("文本不能为空".to_string());
+    }
+    let msg = crate::commands::tts::generate_tts_impl(app, text).await?;
+    let _ = app.emit("playback:play", msg.audio_path);
+    Ok(())
+}
+
+/// 翻转「发送到麦克风」开关并返回新状态（与快捷键/悬浮球菜单共用同一入口）
+pub fn native_toggle_mic(app: &AppHandle) -> bool {
+    crate::hotkey::toggle_mic_send(app);
+    app.try_state::<crate::commands::AppState>()
+        .map(|s| s.settings.read().map(|g| g.mic_send_enabled).unwrap_or(false))
+        .unwrap_or(false)
+}
+
+/// 播放最近一条消息（与「播放最近一条消息」快捷键同通道）
+pub fn native_play_last(app: &AppHandle) {
+    let _ = app.emit("playback:play-last", ());
 }
 
 /// set_own_config 实现：回写自身 display 字段（仅 display 类型生效）→ 落盘 →
@@ -294,24 +363,7 @@ unsafe extern "C" fn br_free_string(_ctx: VaHostCtx, ptr: *mut c_char) {
 
 unsafe extern "C" fn br_list_favorites(ctx: VaHostCtx, out_json: *mut *mut c_char) -> i32 {
     let Some(bc) = BridgeCtx::from_raw(ctx) else { return plugin_api::VA_ERR };
-    let list = bc
-        .app
-        .try_state::<crate::commands::AppState>()
-        .map(|s| crate::storage::favorites::load_favorites(&s.data_dir))
-        .unwrap_or_default();
-    // 只回元数据（id/备注/时间/快捷键），不含音频路径
-    let items: Vec<serde_json::Value> = list
-        .iter()
-        .map(|f| {
-            serde_json::json!({
-                "id": f.id,
-                "note": f.note,
-                "created_at": f.created_at,
-                "hotkey": f.hotkey,
-            })
-        })
-        .collect();
-    write_out(out_json, serde_json::Value::Array(items).to_string());
+    write_out(out_json, native_list_favorites(&bc.app));
     plugin_api::VA_OK
 }
 
@@ -333,12 +385,7 @@ unsafe extern "C" fn br_play_favorite(
 
 unsafe extern "C" fn br_stop_playback(ctx: VaHostCtx) -> i32 {
     let Some(bc) = BridgeCtx::from_raw(ctx) else { return plugin_api::VA_ERR };
-    // 通用停止：主窗监听 playback:stop 停扬声器（并回报 playback:stopped），
-    // 虚拟麦克风侧直接停
-    let _ = bc.app.emit("playback:stop", ());
-    if let Some(mic) = bc.app.try_state::<MicPlayback>() {
-        mic.stop();
-    }
+    native_stop_playback(&bc.app);
     plugin_api::VA_OK
 }
 
@@ -348,18 +395,9 @@ unsafe extern "C" fn br_synthesize(
     out_err: *mut *mut c_char,
 ) -> i32 {
     let Some(bc) = BridgeCtx::from_raw(ctx) else { return plugin_api::VA_ERR };
-    let result = read_arg(text, "文本").and_then(|text| {
-        if text.trim().is_empty() {
-            return Err("文本不能为空".to_string());
-        }
-        // 阻塞执行现有合成管线（引擎分发 + 消息记录 + 麦克风）。
-        // 调用线程来自插件，不在宿主异步运行时内，block_on 安全。
-        tauri::async_runtime::block_on(crate::commands::tts::generate_tts_impl(&bc.app, text))
-            .map(|msg: crate::storage::types::Message| {
-                // 扬声器播放：主窗监听 playback:play（与后端麦克风避免双份）
-                let _ = bc.app.emit("playback:play", msg.audio_path);
-            })
-    });
+    // 调用线程来自插件后台（spawn_blocking），不在宿主异步运行时内，block_on 安全
+    let result = read_arg(text, "文本")
+        .and_then(|text| tauri::async_runtime::block_on(native_synthesize(&bc.app, text)));
     match result {
         Ok(()) => plugin_api::VA_OK,
         Err(e) => {
@@ -371,21 +409,14 @@ unsafe extern "C" fn br_synthesize(
 
 unsafe extern "C" fn br_toggle_mic_send(ctx: VaHostCtx, out_json: *mut *mut c_char) -> i32 {
     let Some(bc) = BridgeCtx::from_raw(ctx) else { return plugin_api::VA_ERR };
-    // 与快捷键/悬浮球菜单共用同一入口（翻转 → 持久化 → 广播）
-    crate::hotkey::toggle_mic_send(&bc.app);
-    let on = bc
-        .app
-        .try_state::<crate::commands::AppState>()
-        .map(|s| s.settings.read().map(|g| g.mic_send_enabled).unwrap_or(false))
-        .unwrap_or(false);
+    let on = native_toggle_mic(&bc.app);
     write_out(out_json, serde_json::json!({ "mic_send": on }).to_string());
     plugin_api::VA_OK
 }
 
 unsafe extern "C" fn br_play_last(ctx: VaHostCtx) -> i32 {
     let Some(bc) = BridgeCtx::from_raw(ctx) else { return plugin_api::VA_ERR };
-    // 与「播放最近一条消息」快捷键同通道
-    let _ = bc.app.emit("playback:play-last", ());
+    native_play_last(&bc.app);
     plugin_api::VA_OK
 }
 

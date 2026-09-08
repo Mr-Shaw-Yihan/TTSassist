@@ -8,6 +8,7 @@ pub mod asr;
 pub mod commands;
 pub mod hotkey;
 pub mod plugins;
+pub mod remote;
 pub mod storage;
 pub mod sync;
 pub mod tray;
@@ -136,6 +137,10 @@ pub fn run() {
             let plugins_root = resolve_plugins_root();
             migrate_plugins_if_needed(&data_dir, &plugins_root);
 
+            // 移动端遥控已本体化：在插件加载前清理旧 lan-remote（迁移配对 token +
+            // 删注册表条目/插件目录/残留内置 zip），避免其被重新加载与本体服务抢 45271
+            remote::purge_legacy_plugin(&plugins_root, &data_dir);
+
             // 插件系统：加载已安装插件（单个插件失败只记日志，不影响主流程）；
             // 传入 AppHandle 供宿主能力桥注入（声明 requires_host_bridge 的插件）
             let plugin_manager = plugins::PluginManager::load_all(&plugins_root, Some(app.handle()));
@@ -145,6 +150,11 @@ pub fn run() {
             app.manage(plugin_manager);
             // 补注入 load_all 期间挂起的能力桥（attach 回调需取到已 manage 的 PluginManager）
             app.state::<plugins::PluginManager>().attach_pending_bridges();
+
+            // 移动端遥控（本体常驻服务）：WS 服务 + mDNS 广播。须在 HostBridge/AppState/
+            // MicPlayback 就绪后启动（native_* 能力依赖三者）；RemoteCore 供 remote_session_info 读取
+            let remote_shared = remote::spawn(app.handle().clone(), data_dir.clone());
+            app.manage(remote::RemoteCore::new(remote_shared));
 
             // 浮窗呼出快捷键：读设置 → 注册（失败只记日志，不影响主功能）
             let accel = settings.hotkey_show_window.clone();
@@ -302,6 +312,9 @@ pub fn run() {
             crate::commands::plugins::import_voice_pack,
             crate::commands::update::check_app_update,
             crate::commands::remote::get_remote_config,
+            crate::commands::remote::remote_lan_status,
+            crate::commands::remote::remote_firewall_open,
+            crate::remote::remote_session_info,
             crate::commands::message::list_messages,
             crate::commands::message::delete_message,
             crate::commands::favorite::list_favorites,

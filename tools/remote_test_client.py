@@ -1,24 +1,35 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""lan-remote 验证客户端（模拟手机 App 的完整遥控流程）。
+"""移动端遥控 本体服务 验证客户端（模拟手机 App 的完整遥控流程）。
 
-跑通：pair → list_favorites → play_favorite → stop → synthesize → toggle_mic
-→ play_last，并打印期间收到的全部 s2c 推送（state / event / ack）。
+原 lan-remote 插件的 test_client.py 迁入本体 tools/，并同步到当前协议：
+配对码（pair/refresh_code）已于 1.8.x 移除，现走免码弹窗配对（pair_request）
+或已配对 token 重连（hello）。命令序列（list_favorites/play_favorite/stop/
+synthesize/toggle_mic/play_last）与协议契约保持不变（doc/移动端遥控器设计.md §三）。
+
+跑通：pair_request（或 hello）→ list_favorites → play_favorite → stop
+→ synthesize → toggle_mic → play_last，并打印期间收到的全部 s2c 推送
+（state / event / ack）。
 
 用法：
     pip install websockets
-    python test_client.py --host 127.0.0.1 --code 123456
+    # 免码配对（需在 PC 端弹窗点「是」，物理在场模型）
+    python tools/remote_test_client.py --host 127.0.0.1 --pair-request --device "测试手机"
+    # 已配对 token 重连（跳过配对，适合自动化回归）
+    python tools/remote_test_client.py --host 127.0.0.1 --token <64位hex>
 
 参数：
-    --host    PC 端 IP（本机测试填 127.0.0.1）
-    --code    PC 设置-插件服务面板上显示的 6 位配对码（必填，除非 --token）
-    --token   用已配对的 token 走 hello 重连（跳过配对）
-    --port    WS 端口，默认 45271
-    --skip    跳过部分步骤（逗号分隔：favorites,play,stop,synth,mic,last）
+    --host          PC 端 IP（本机测试填 127.0.0.1）
+    --port          WS 端口，默认 45271
+    --pair-request  走免码弹窗配对（发 pair_request，等 PC 端点「是」后回 pair_ok）
+    --device        pair_request 上报的设备名，默认「测试手机」
+    --token         用已配对的 token 走 hello 重连（跳过配对）
+    --skip          跳过部分步骤（逗号分隔：favorites,play,stop,synth,mic,last）
 
 说明：
     - 命令回执按 ref 关联（协议契约见 doc/移动端遥控器设计.md §三）；
-    - 每步打印宿主推送，最后静听 5 秒事件后退出。
+    - 每步打印宿主推送，最后静听 5 秒事件后退出；
+    - pair_ok 返回的 token 应持久化，供下次 --token 重连（App 侧同理）。
 """
 
 import argparse
@@ -79,30 +90,34 @@ async def send_and_wait_ack(ws, t: str, fields: dict, timeout: float = 60.0):
 
 
 async def main() -> int:
-    ap = argparse.ArgumentParser(description="lan-remote 验证客户端")
+    ap = argparse.ArgumentParser(description="移动端遥控本体服务 验证客户端")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=45271)
-    ap.add_argument("--code")
+    ap.add_argument("--pair-request", action="store_true", help="走免码弹窗配对")
+    ap.add_argument("--device", default="测试手机")
     ap.add_argument("--token")
     ap.add_argument("--skip", default="")
     args = ap.parse_args()
     skip = {s.strip() for s in args.skip.split(",") if s.strip()}
 
-    if not args.code and not args.token:
-        ap.error("需要 --code（PC 面板配对码）或 --token（重连）")
+    if not args.token and not args.pair_request:
+        ap.error("需要 --token（重连）或 --pair-request（免码弹窗配对）")
 
     uri = f"ws://{args.host}:{args.port}"
     print(f"连接 {uri} …")
     async with websockets.connect(uri) as ws:
         if args.token:
-            print(f">> hello（token 重连）")
+            print(">> hello（token 重连）")
             await ws.send(json.dumps({"t": "hello", "token": args.token}))
             hello = await recv_until(ws, "hello_ok")
             print(f"重连成功: {json.dumps(hello.get('state'), ensure_ascii=False)}")
         else:
-            print(f">> pair（配对码 {args.code}）")
-            await ws.send(json.dumps({"t": "pair", "code": args.code}))
-            pair = await recv_until(ws, "pair_ok")
+            print(f">> pair_request（免码配对，设备名 {args.device}）")
+            print("    ⚠ 请在 PC 端弹窗点「是」以完成物理在场确认…")
+            await ws.send(
+                json.dumps({"t": "pair_request", "device": args.device}, ensure_ascii=False)
+            )
+            pair = await recv_until(ws, "pair_ok", timeout=120)
             token = pair.get("token", "")
             print(f"配对成功 token={token[:8]}…（App 侧应持久化此 token 用于重连）")
 

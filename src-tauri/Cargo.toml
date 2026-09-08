@@ -38,8 +38,14 @@ libloading = "0.8"
 sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 plugin-api = { path = "../plugins/plugin-api" }
-# 只用 time（插件合成超时控制）；运行时时钟由 tauri 的 tokio 运行时提供
-tokio = { version = "1", features = ["time"] }
+# time（插件合成超时控制）+ 本体遥控服务所需：net(TcpListener)/sync(mpsc,Notify)/
+# macros(select!)/io-util(AsyncRead/WriteExt)/rt-multi-thread(spawn,spawn_blocking)。
+# 运行时仍复用 tauri::async_runtime（其底层即 tokio 多线程运行时）。
+tokio = { version = "1", features = ["time", "rt-multi-thread", "net", "sync", "macros", "io-util"] }
+# 本体遥控（原 lan-remote 插件迁入）：局域网 WS 服务 + mDNS 发现 + token 生成
+tokio-tungstenite = "0.24"
+mdns-sd = "0.11"
+rand = "0.8"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
