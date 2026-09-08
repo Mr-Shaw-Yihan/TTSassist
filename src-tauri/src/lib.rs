@@ -5,6 +5,7 @@
 pub mod logging;
 
 pub mod asr;
+pub mod audio_capture;
 pub mod commands;
 pub mod hotkey;
 pub mod plugins;
@@ -146,6 +147,9 @@ pub fn run() {
             // 补注入 load_all 期间挂起的能力桥（attach 回调需取到已 manage 的 PluginManager）
             app.state::<plugins::PluginManager>().attach_pending_bridges();
 
+            // 字幕监听运行态（采集/VAD/ASR 编排会话的启停与历史）
+            app.manage(commands::subtitle::SubtitleState::new());
+
             // 浮窗呼出快捷键：读设置 → 注册（失败只记日志，不影响主功能）
             let accel = settings.hotkey_show_window.clone();
             let register_ok = match hotkey::register_hotkey(app.handle(), &accel) {
@@ -208,6 +212,23 @@ pub fn run() {
             };
             app.manage(hotkey::MicToggleHotkeyState {
                 current: Mutex::new(mt_ok.then_some(mt_accel)),
+            });
+
+            // 字幕监听暂停/恢复快捷键（默认 Alt+M）：非空才注册，失败只记日志
+            let sp_accel = settings.subtitle_pause_hotkey.clone();
+            let sp_ok = if sp_accel.is_empty() {
+                false
+            } else {
+                match hotkey::register_subtitle_pause_hotkey(app.handle(), &sp_accel) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        log_error!("注册字幕监听暂停快捷键 {sp_accel} 失败: {e}");
+                        false
+                    }
+                }
+            };
+            app.manage(hotkey::SubtitlePauseHotkeyState {
+                current: Mutex::new(sp_ok.then_some(sp_accel)),
             });
 
             // 加载收藏用于注册收藏快捷键（data_dir 随后移入 AppState）
@@ -325,6 +346,14 @@ pub fn run() {
             crate::commands::vbcable::install_vb_cable,
             crate::asr::list_asr_plugins,
             crate::asr::asr_transcribe,
+            crate::commands::subtitle::list_audio_processes,
+            crate::commands::subtitle::start_audio_listener,
+            crate::commands::subtitle::stop_audio_listener,
+            crate::commands::subtitle::subtitle_status,
+            crate::commands::subtitle::set_subtitle_paused,
+            crate::commands::subtitle::get_subtitle_sessions,
+            crate::commands::subtitle::export_subtitle_history,
+            crate::hotkey::set_subtitle_pause_hotkey,
             crate::commands::minimax_clone::minimax_global_voice_clone,
             crate::commands::minimax_clone::minimax_global_get_voices,
             crate::commands::minimax_clone::minimax_global_delete_voice,

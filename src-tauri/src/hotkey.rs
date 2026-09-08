@@ -38,6 +38,11 @@ pub struct MicToggleHotkeyState {
     pub current: Mutex<Option<String>>,
 }
 
+/// 记录当前已注册的「暂停/恢复字幕监听」快捷键
+pub struct SubtitlePauseHotkeyState {
+    pub current: Mutex<Option<String>>,
+}
+
 impl FavoriteHotkeys {
     pub fn new() -> Self {
         Self { registered: Mutex::new(HashSet::new()) }
@@ -320,6 +325,9 @@ pub fn find_accel_conflict(app_state: &AppState, accel: &str, exclude_key: Optio
     if exclude_key != Some("hotkey_mic_toggle") && !s.hotkey_mic_toggle.is_empty() && s.hotkey_mic_toggle == accel {
         return Some("开关发送到麦克风".to_string());
     }
+    if exclude_key != Some("subtitle_pause_hotkey") && !s.subtitle_pause_hotkey.is_empty() && s.subtitle_pause_hotkey == accel {
+        return Some("暂停/恢复字幕监听".to_string());
+    }
     let favorites = crate::storage::favorites::load_favorites(&app_state.data_dir);
     favorites
         .iter()
@@ -380,6 +388,7 @@ fn replace_hotkey(
         match setting_key {
             "hotkey_play_last" => g.hotkey_play_last = accel.to_string(),
             "hotkey_mic_toggle" => g.hotkey_mic_toggle = accel.to_string(),
+            "subtitle_pause_hotkey" => g.subtitle_pause_hotkey = accel.to_string(),
             _ => {}
         }
     }
@@ -420,6 +429,36 @@ pub fn set_mic_toggle_hotkey(
         accel.trim(),
         "hotkey_mic_toggle",
         register_mic_toggle_hotkey,
+        &app_state,
+    )
+}
+
+/// 注册「暂停/恢复字幕监听」快捷键：按下时翻转会话暂停态（仅运行时有效）。
+pub fn register_subtitle_pause_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
+    app.global_shortcut()
+        .on_shortcut(accel, |app, _shortcut, event| {
+            if event.state() != ShortcutState::Pressed {
+                return;
+            }
+            crate::commands::subtitle::toggle_subtitle_pause(app);
+        })
+        .map_err(|e| format!("注册字幕监听暂停快捷键失败：{e}"))
+}
+
+/// 设置（更换/清除）「暂停/恢复字幕监听」快捷键。空串 = 注销并清除。
+#[tauri::command]
+pub fn set_subtitle_pause_hotkey(
+    app: AppHandle,
+    accel: String,
+    state: State<'_, SubtitlePauseHotkeyState>,
+    app_state: State<'_, crate::commands::AppState>,
+) -> Result<(), String> {
+    replace_hotkey(
+        &app,
+        &state.current,
+        accel.trim(),
+        "subtitle_pause_hotkey",
+        register_subtitle_pause_hotkey,
         &app_state,
     )
 }

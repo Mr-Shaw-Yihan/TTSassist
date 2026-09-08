@@ -15,6 +15,7 @@ pub mod minimax_clone;
 pub mod plugins;
 pub mod remote;
 pub mod settings;
+pub mod subtitle;
 pub mod tts;
 pub mod update;
 pub mod vbcable;

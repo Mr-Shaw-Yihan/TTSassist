@@ -140,6 +140,43 @@ pub struct Settings {
     /// 诊断日志（支持模式）：开启后运行日志同时写入 app_data_dir/logs/app.log，便于反馈问题。默认关。
     #[serde(default)]
     pub diagnostics_log_enabled: bool,
+    // ── 字幕（音频监听）设置 ──────────────────────
+    /// 字幕功能总开关（管理页「开始监听」置 true）
+    #[serde(default)]
+    pub subtitle_enabled: bool,
+    /// 字幕浮窗是否置顶（默认 true）
+    #[serde(default = "default_true")]
+    pub subtitle_always_on_top: bool,
+    /// 字幕底板不透明度 0.0~1.0（默认 0.6）
+    #[serde(default = "default_subtitle_opacity")]
+    pub subtitle_opacity: f32,
+    /// 字幕字号 px（默认 18，范围 14~32）
+    #[serde(default = "default_subtitle_font_size")]
+    pub subtitle_font_size: u32,
+    /// 字幕浮窗位置："bottom" / "top"
+    #[serde(default = "default_subtitle_position")]
+    pub subtitle_position: String,
+    /// 上次选中的监听进程名（仅记忆用）
+    #[serde(default)]
+    pub subtitle_target_process: String,
+    /// 监听的 ASR 插件 id（空 = 复用 asr_plugin）
+    #[serde(default)]
+    pub subtitle_asr_plugin: String,
+    /// 监听识别语言（"auto" 或语言码；空 = auto）
+    #[serde(default = "default_subtitle_language")]
+    pub subtitle_language: String,
+    /// VAD 灵敏度："low" / "medium" / "high"（默认 medium）
+    #[serde(default = "default_vad_sensitivity")]
+    pub subtitle_vad_sensitivity: String,
+    /// 暂停/恢复监听全局快捷键（默认 "Alt+M"，空 = 未设置）
+    #[serde(default = "default_subtitle_hotkey")]
+    pub subtitle_pause_hotkey: String,
+    /// 浮窗最多同时显示几条（默认 3）
+    #[serde(default = "default_subtitle_max_lines")]
+    pub subtitle_max_lines: u32,
+    /// 字幕自动淡出秒数（默认 15）
+    #[serde(default = "default_subtitle_fade_seconds")]
+    pub subtitle_fade_seconds: u32,
 }
 
 impl Default for Settings {
@@ -184,6 +221,18 @@ impl Default for Settings {
             floating_ball_perf_mode: default_perf_mode(),
             floating_ball_skin: default_ball_skin(),
             diagnostics_log_enabled: false,
+            subtitle_enabled: false,
+            subtitle_always_on_top: true,
+            subtitle_opacity: default_subtitle_opacity(),
+            subtitle_font_size: default_subtitle_font_size(),
+            subtitle_position: default_subtitle_position(),
+            subtitle_target_process: String::new(),
+            subtitle_asr_plugin: String::new(),
+            subtitle_language: default_subtitle_language(),
+            subtitle_vad_sensitivity: default_vad_sensitivity(),
+            subtitle_pause_hotkey: default_subtitle_hotkey(),
+            subtitle_max_lines: default_subtitle_max_lines(),
+            subtitle_fade_seconds: default_subtitle_fade_seconds(),
         }
     }
 }
@@ -243,6 +292,32 @@ pub fn clamp_ball_size(v: i32) -> i32 {
 
 fn default_true() -> bool {
     true
+}
+
+// ── 字幕设置默认值 ──
+fn default_subtitle_opacity() -> f32 {
+    0.6
+}
+fn default_subtitle_font_size() -> u32 {
+    18
+}
+fn default_subtitle_position() -> String {
+    "bottom".to_string()
+}
+fn default_subtitle_language() -> String {
+    "auto".to_string()
+}
+fn default_vad_sensitivity() -> String {
+    "medium".to_string()
+}
+fn default_subtitle_hotkey() -> String {
+    "Alt+M".to_string()
+}
+fn default_subtitle_max_lines() -> u32 {
+    3
+}
+fn default_subtitle_fade_seconds() -> u32 {
+    15
 }
 
 /// 生成当前时间的 ISO8601 字符串（带本地时区偏移），用于 created_at。

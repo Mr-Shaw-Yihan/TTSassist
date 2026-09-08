@@ -40,6 +40,19 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 plugin-api = { path = "../plugins/plugin-api" }
 # 只用 time（插件合成超时控制）；运行时时钟由 tauri 的 tokio 运行时提供
 tokio = { version = "1", features = ["time"] }
+# 字幕（音频监听）：WAV 编码 + WASAPI 系统音频采集 / 会话枚举
+hound = "3.5"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_System_Com",
+    "Win32_Devices_FunctionDiscovery",
+    "Win32_System_Variant",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }

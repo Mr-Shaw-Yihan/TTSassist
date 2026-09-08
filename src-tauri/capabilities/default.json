@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "quick_input", "floating_ball"],
+  "windows": ["main", "quick_input", "floating_ball", "subtitle_window"],
   "permissions": [
     "core:default",
     "opener:default",
@@ -17,8 +17,16 @@
     "core:window:allow-set-position",
     "core:window:allow-outer-position",
     "core:window:allow-set-size",
+    "core:window:allow-inner-size",
     "core:window:allow-scale-factor",
     "core:window:allow-current-monitor",
-    "core:window:allow-hide"
+    "core:window:allow-primary-monitor",
+    "core:window:allow-available-monitors",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-set-ignore-cursor-events",
+    "core:window:allow-is-focused"
   ]
 }

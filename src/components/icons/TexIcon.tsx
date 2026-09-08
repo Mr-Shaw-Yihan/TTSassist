@@ -13,6 +13,7 @@ export type TexIconName =
   | "gear"
   | "dots"
   | "mic"
+  | "subtitle"
   | "play"
   | "send"
   | "copy"
@@ -174,6 +175,22 @@ export function TexDefs() {
         <path
           style={{ fill: "none", stroke: "var(--ln)", strokeWidth: "var(--lnw)", strokeLinecap: "round" }}
           strokeDasharray="10 6 7 5" d="M20 8.9v7.6"
+        />
+      </symbol>
+      {/* 字幕（音频监听）：金/紫字幕框 + 墨色断线勾边 + 两道字幕线 */}
+      <symbol id="ti-subtitle" viewBox="0 0 24 24">
+        <path
+          style={{ fill: "var(--tx)" }}
+          d="M4.6 4.2h14.8A2.6 2.6 0 0 1 22 6.8v10.4a2.6 2.6 0 0 1-2.6 2.6H4.6A2.6 2.6 0 0 1 2 17.2V6.8a2.6 2.6 0 0 1 2.6-2.6z"
+        />
+        <path
+          style={{ fill: "none", stroke: "var(--ln)", strokeWidth: "var(--lnw)", strokeLinecap: "round" }}
+          pathLength={100} strokeDasharray="20 9 16 11"
+          d="M21.8 8.5v8.7a2.6 2.6 0 0 1-2.6 2.6H4.6A2.6 2.6 0 0 1 2 17.2V9"
+        />
+        <path
+          style={{ fill: "none", stroke: "var(--ln)", strokeWidth: "2", strokeLinecap: "round" }}
+          d="M5.6 13.7h5.2M12.7 13.7h5.7M5.6 9.9h3.7"
         />
       </symbol>
       {/* 删除 */}

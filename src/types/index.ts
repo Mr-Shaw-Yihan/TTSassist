@@ -84,6 +84,31 @@ export interface Settings {
   floating_ball_skin: string;
   /** 诊断日志（支持模式）：开启后运行日志额外落本地文件，便于反馈问题。默认关 */
   diagnostics_log_enabled: boolean;
+  // ── 字幕（音频监听）设置 ──
+  /** 字幕监听是否运行中 */
+  subtitle_enabled: boolean;
+  /** 字幕浮窗置顶 */
+  subtitle_always_on_top: boolean;
+  /** 字幕底板不透明度 0.0~1.0 */
+  subtitle_opacity: number;
+  /** 字幕字号 px */
+  subtitle_font_size: number;
+  /** 浮窗位置：bottom / top */
+  subtitle_position: string;
+  /** 上次选中的监听进程名（仅记忆） */
+  subtitle_target_process: string;
+  /** 监听的 ASR 插件 id（空 = 复用 asr_plugin） */
+  subtitle_asr_plugin: string;
+  /** 监听识别语言（auto 或语言码） */
+  subtitle_language: string;
+  /** VAD 灵敏度：low / medium / high */
+  subtitle_vad_sensitivity: string;
+  /** 暂停/恢复监听全局快捷键（默认 Alt+M） */
+  subtitle_pause_hotkey: string;
+  /** 浮窗最多同时显示几条 */
+  subtitle_max_lines: number;
+  /** 字幕自动淡出秒数 */
+  subtitle_fade_seconds: number;
 }
 
 /** 通用插件配置：manifest 的 config 声明 */
@@ -247,4 +272,36 @@ export interface MicStatus {
   volume: number;
   last_error: string | null;
   last_source: string | null;
+}
+
+/** 正在发声的音频进程（字幕监听下拉候选，list_audio_processes 返回） */
+export interface AudioProcess {
+  pid: number;
+  /** 进程 exe 文件名 */
+  name: string;
+  /** 友好显示名 */
+  display_name: string;
+  /** 当前是否有音频活动 */
+  is_active: boolean;
+}
+
+/** 一条字幕 */
+export interface SubtitleLine {
+  text: string;
+  /** Unix 毫秒时间戳 */
+  ts: number;
+}
+
+/** 一次监听会话记录 */
+export interface SubtitleSession {
+  started_ts: number;
+  ended_ts: number;
+  process: string;
+  lines: SubtitleLine[];
+}
+
+/** 监听状态（subtitle_status 返回） */
+export interface SubtitleStatus {
+  running: boolean;
+  paused: boolean;
 }

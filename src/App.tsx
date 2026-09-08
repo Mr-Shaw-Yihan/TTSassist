@@ -19,6 +19,8 @@ import { FloatingBall } from "./components/FloatingBall/FloatingBall";
 import { BallLogo } from "./components/FloatingBall/BallLogo";
 import { PluginPage } from "./components/Plugins/PluginPage";
 import { VoiceCenterPage } from "./components/Voice/VoiceCenterPage";
+import { SubtitlePage } from "./components/Subtitle/SubtitlePage";
+import { SubtitleWindow } from "./components/Subtitle/SubtitleWindow";
 import { UpdateDialog } from "./components/Settings/UpdateDialog";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "./stores/updateStore";
@@ -33,11 +35,12 @@ import {
   playToMic,
   stopMic,
   listPlugins,
+  listAsrPlugins,
   promptEngineWarmup,
 } from "./services/invoke";
 import type { Message, Favorite, PluginSetupProgress } from "./types";
 
-type Tab = "messages" | "favorites" | "voice" | "plugins" | "settings";
+type Tab = "messages" | "favorites" | "voice" | "plugins" | "subtitle" | "settings";
 
 /** 消息列表每页条数：首屏只载最近一页，上滑再翻页加载更早的 */
 const MESSAGE_PAGE_SIZE = 20;
@@ -51,6 +54,9 @@ function App() {
   if (win.label === "floating_ball") {
     return <FloatingBall />;
   }
+  if (win.label === "subtitle_window") {
+    return <SubtitleWindow />;
+  }
 
   const [messages, setMessages] = useState<Message[]>([]);
   // 消息分页：是否还有更早的 / 翻页加载中（防重入）
@@ -62,6 +68,8 @@ function App() {
   const [atBottom, setAtBottom] = useState(true);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [tab, setTab] = useState<Tab>("messages");
+  // 字幕入口门控：仅当检测到已安装可用 ASR 插件时，侧边栏才显示「字幕」tab
+  const [asrAvailable, setAsrAvailable] = useState(false);
   // 「其他」弹层（收纳麦克风开关、音量与播放速度）
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement | null>(null);
@@ -120,6 +128,13 @@ function App() {
   useEffect(() => {
     void checkUpdate();
   }, [checkUpdate]);
+
+  // 字幕入口门控：拉一次 ASR 插件列表，有 loaded 才显「字幕」入口（与「语音」分类口径一致）
+  useEffect(() => {
+    listAsrPlugins()
+      .then((ps) => setAsrAvailable(ps.some((p) => p.loaded)))
+      .catch(() => {});
+  }, []);
 
   // 启动时：当前引擎若为已就绪的本地引擎，询问是否后台预热
   //（避免第一次对话时现场加载模型久等；通用机制，适用所有 category=local 引擎）
@@ -512,6 +527,9 @@ function App() {
           <SideButton icon={<TexIcon name="star" size={16} />} label="收藏" active={tab === "favorites"} onClick={() => setTab("favorites")} />
           <SideButton icon={<TexIcon name="grid" size={16} />} label="插件" active={tab === "plugins"} onClick={() => setTab("plugins")} />
           <SideButton icon={<TexIcon name="mic" size={16} />} label="语音" active={tab === "voice"} onClick={() => setTab("voice")} />
+          {asrAvailable && (
+            <SideButton icon={<TexIcon name="subtitle" size={16} />} label="字幕" active={tab === "subtitle"} onClick={() => setTab("subtitle")} />
+          )}
           <SideButton icon={<TexIcon name="gear" size={16} />} label="设置" active={tab === "settings"} dot={updateDot} onClick={() => setTab("settings")} />
           <div className="flex-1" />
 
@@ -617,6 +635,13 @@ function App() {
           {tab === "voice" && (
             <main className="min-h-0 flex-1 overflow-hidden bg-[var(--paper)]">
               <VoiceCenterPage />
+            </main>
+          )}
+
+          {/* 字幕（音频监听） */}
+          {tab === "subtitle" && (
+            <main className="min-h-0 flex-1 overflow-hidden bg-[var(--paper)]">
+              <SubtitlePage />
             </main>
           )}
 

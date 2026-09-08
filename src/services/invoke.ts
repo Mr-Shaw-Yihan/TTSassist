@@ -3,7 +3,7 @@
 
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry, BundledPluginInfo, UpdateInfo, AsrPluginInfo, PluginConfigInfo } from "../types";
+import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry, BundledPluginInfo, UpdateInfo, AsrPluginInfo, PluginConfigInfo, AudioProcess, SubtitleSession, SubtitleStatus } from "../types";
 
 // ── TTS ──────────────────────────────────────────
 
@@ -104,6 +104,48 @@ export async function asrTranscribe(
     pluginId,
     language,
   });
+}
+
+// ── 字幕（音频监听） ─────────────────────────
+
+/** 枚举当前正在发声的进程（监听目标候选） */
+export async function listAudioProcesses(): Promise<AudioProcess[]> {
+  return invoke<AudioProcess[]>("list_audio_processes");
+}
+
+/** 开始监听（系统混音 → VAD → ASR → 字幕浮窗） */
+export async function startAudioListener(): Promise<void> {
+  return invoke<void>("start_audio_listener");
+}
+
+/** 停止监听（收编本轮字幕为一条会话记录） */
+export async function stopAudioListener(): Promise<void> {
+  return invoke<void>("stop_audio_listener");
+}
+
+/** 查询监听运行/暂停状态 */
+export async function subtitleStatus(): Promise<SubtitleStatus> {
+  return invoke<SubtitleStatus>("subtitle_status");
+}
+
+/** 设置暂停态（true=暂停 false=恢复），返回生效后的暂停态 */
+export async function setSubtitlePaused(paused: boolean): Promise<boolean> {
+  return invoke<boolean>("set_subtitle_paused", { paused });
+}
+
+/** 读取历史会话（回看） */
+export async function getSubtitleSessions(): Promise<SubtitleSession[]> {
+  return invoke<SubtitleSession[]>("get_subtitle_sessions");
+}
+
+/** 导出全部历史会话为 txt（传入绝对路径） */
+export async function exportSubtitleHistory(path: string): Promise<void> {
+  return invoke<void>("export_subtitle_history", { path });
+}
+
+/** 设置字幕监听暂停/恢复全局快捷键（空串=清除） */
+export async function setSubtitlePauseHotkey(hotkey: string): Promise<void> {
+  return invoke<void>("set_subtitle_pause_hotkey", { accel: hotkey });
 }
 
 // ── 插件环境安装与音色管理 ────────────────────
