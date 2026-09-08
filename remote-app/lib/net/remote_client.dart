@@ -3,8 +3,10 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:web_socket_channel/io.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../proto/messages.dart';
@@ -24,6 +26,10 @@ class RemoteClient {
   final void Function(S2C msg) onMessage;
 
   WebSocketChannel? _channel;
+  /// 局域网遥控专用 HTTP 客户端：强制 findProxy=DIRECT，绕过手机系统代理/VPN，
+  /// 避免代理层打断到局域网 IP 的 WebSocket（与网页端被夸克/UC 代理打断同类问题）。
+  final HttpClient _http = HttpClient()
+    ..findProxy = (_) => 'DIRECT';
   ConnPhase _phase = ConnPhase.disconnected;
   ConnPhase get phase => _phase;
   bool get isConnected => _phase == ConnPhase.connected;
@@ -47,7 +53,10 @@ class RemoteClient {
     _teardown();
     _setPhase(ConnPhase.connecting);
     final myGen = ++_gen;
-    final ch = WebSocketChannel.connect(Uri.parse('ws://$host:$port'));
+    final ch = IOWebSocketChannel.connect(
+      Uri.parse('ws://$host:$port'),
+      customClient: _http,
+    );
     try {
       // 5s 握手超时：断网重连时部分连接挂死（无成功无错误），超时确保重连循环转动
       await ch.ready.timeout(const Duration(seconds: 5));
