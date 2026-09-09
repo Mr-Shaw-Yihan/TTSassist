@@ -178,7 +178,7 @@ pub async fn install_vb_cable(zip_path: String) -> Result<String, String> {
         setup_str
     );
 
-    let output = std::process::Command::new("powershell")
+    let output = crate::proc::hidden_command("powershell")
         .args(["-NoProfile", "-Command", &ps_cmd])
         .output()
         .map_err(|e| format!("启动安装程序失败: {e}"))?;

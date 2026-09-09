@@ -36,7 +36,6 @@ import {
   playToMic,
   stopMic,
   listPlugins,
-  listAsrPlugins,
   promptEngineWarmup,
 } from "./services/invoke";
 import type { Message, Favorite, PluginSetupProgress } from "./types";
@@ -69,8 +68,6 @@ function App() {
   const [atBottom, setAtBottom] = useState(true);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [tab, setTab] = useState<Tab>("messages");
-  // 字幕入口门控：仅当检测到已安装可用 ASR 插件时，侧边栏才显示「字幕」tab
-  const [asrAvailable, setAsrAvailable] = useState(false);
   // 「其他」弹层（收纳麦克风开关、音量与播放速度）
   const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement | null>(null);
@@ -129,13 +126,6 @@ function App() {
   useEffect(() => {
     void checkUpdate();
   }, [checkUpdate]);
-
-  // 字幕入口门控：拉一次 ASR 插件列表，有 loaded 才显「字幕」入口（与「语音」分类口径一致）
-  useEffect(() => {
-    listAsrPlugins()
-      .then((ps) => setAsrAvailable(ps.some((p) => p.loaded)))
-      .catch(() => {});
-  }, []);
 
   // 启动时：当前引擎若为已就绪的本地引擎，询问是否后台预热
   //（避免第一次对话时现场加载模型久等；通用机制，适用所有 category=local 引擎）
@@ -527,9 +517,10 @@ function App() {
           <SideButton icon={<TexIcon name="msg" size={16} />} label="消息" active={tab === "messages"} onClick={() => setTab("messages")} />
           <SideButton icon={<TexIcon name="star" size={16} />} label="收藏" active={tab === "favorites"} onClick={() => setTab("favorites")} />
           <SideButton icon={<TexIcon name="mic" size={16} />} label="语音" active={tab === "voice"} onClick={() => setTab("voice")} />
-          {asrAvailable && (
-            <SideButton icon={<TexIcon name="subtitle" size={16} />} label="字幕" active={tab === "subtitle"} onClick={() => setTab("subtitle")} />
-          )}
+          {/* 「字幕」入口常驻：曾因 ASR 插件未加载而整体隐藏入口，用户看到的却是
+              “字幕功能凭空消失”（插件页里它又显示正常）。现在入口不消失，
+              无可用引擎时由字幕页自己的提示引导去「插件」页装。 */}
+          <SideButton icon={<TexIcon name="subtitle" size={16} />} label="字幕" active={tab === "subtitle"} onClick={() => setTab("subtitle")} />
           <SideButton icon={<TexIcon name="grid" size={16} />} label="插件" active={tab === "plugins"} onClick={() => setTab("plugins")} />
           <SideButton icon={<TexIcon name="remote" size={16} />} label="遥控" active={tab === "remote"} onClick={() => setTab("remote")} />
           <SideButton icon={<TexIcon name="gear" size={16} />} label="设置" active={tab === "settings"} dot={updateDot} onClick={() => setTab("settings")} />

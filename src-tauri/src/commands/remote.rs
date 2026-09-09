@@ -178,7 +178,9 @@ fn port_listening() -> bool {
 /// 防火墙是否已放行 TCP 45271（netsh 输出含本规则 ASCII 名即认为存在，跨语言稳健）
 fn firewall_rule_present() -> bool {
     const RULE: &str = "VoiceAssist Remote TCP 45271";
-    std::process::Command::new("netsh")
+    // 走 hidden_command：本函数在每次进入「遥控」页时被调用，
+    // 直接派生 netsh 会闪一个控制台黑框（GUI 进程无控制台，子进程会被临时分配一个）。
+    crate::proc::hidden_command("netsh")
         .args(["advfirewall", "firewall", "show", "rule", &format!("name={RULE}")])
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).contains(RULE))
@@ -191,7 +193,7 @@ fn lan_ips() -> Vec<LanIp> {
     let script = "$ErrorActionPreference='SilentlyContinue';@{ips=@(Get-NetIPAddress -AddressFamily IPv4 | ? { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' } | % { @{ iface=$_.InterfaceAlias; ip=$_.IPAddress } })} | ConvertTo-Json -Compress";
     let egress = egress_ip().map(|a| a.to_string());
     let mut ips: Vec<LanIp> = Vec::new();
-    if let Ok(out) = std::process::Command::new("powershell")
+    if let Ok(out) = crate::proc::hidden_command("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .output()
     {
@@ -254,7 +256,7 @@ pub async fn remote_firewall_open() -> Result<String, String> {
             "Start-Process -FilePath '{}' -Verb RunAs -WindowStyle Hidden -Wait",
             bat_str
         );
-        let out = std::process::Command::new("powershell")
+        let out = crate::proc::hidden_command("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", &ps])
             .output();
         let _ = std::fs::remove_file(&bat);

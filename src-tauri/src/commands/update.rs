@@ -582,8 +582,6 @@ pub fn install_app_update(app: AppHandle, path: String) -> Result<(), String> {
 
 #[cfg(windows)]
 fn launch_installer(path: &str, relaunch: &str) -> Result<(), String> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     // 三段：等 2 秒让本进程退出并释放 voiceassist.exe 占用 → 静默安装并等它结束
     // → 按原路径重新拉起（不等安装完就拉起会拿到旧进程或撞上占用）。
     // 用 Start-Sleep 而非 timeout——后者要求可读 stdin，隐藏窗口下会报错。
@@ -592,7 +590,7 @@ fn launch_installer(path: &str, relaunch: &str) -> Result<(), String> {
         path.replace('\'', "''"),
         relaunch.replace('\'', "''")
     );
-    std::process::Command::new("powershell")
+    crate::proc::hidden_command("powershell")
         .args([
             "-NoProfile",
             "-NonInteractive",
@@ -601,7 +599,6 @@ fn launch_installer(path: &str, relaunch: &str) -> Result<(), String> {
             "-Command",
             &ps,
         ])
-        .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .map_err(|e| format!("拉起安装器失败：{e}"))?;
     Ok(())

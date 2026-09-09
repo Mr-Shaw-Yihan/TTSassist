@@ -2,9 +2,8 @@
 #
 # 用法示例：
 #   powershell -ExecutionPolicy Bypass -File make-app-version.ps1 -Version 1.8.5
-#   ... -NotesPath release-notes.md        # 说明来源（缺省直接取 GitHub Release 正文，避免两处各写一份）
+#   ... -NotesPath release-notes.md        # 说明来源（缺省自动取仓库根 release-notes.md，即建 Release 用的那份）
 #   ... -SetupExe <path>                   # 安装包不在默认 bundle 目录时显式指定
-#   ... -OriginProxy http://127.0.0.1:7897 # git 不读系统代理，需要走代理时显式传
 #   ... -SkipGiteeRelease / -DryRun
 #
 # 前置：gh 已登录；GITEE_TOKEN 环境变量；安装包已构建（npm run tauri build）。
@@ -68,18 +67,36 @@ try {
     $size = [int64]$item.Length
     Ok "安装包 $($item.Name)：$size 字节  sha256=$sha"
 
-    # ── 2. 更新说明（默认取 GitHub Release 正文，保持单一权威源）──
+    # ── 2. 更新说明 ──
+    # 默认读仓库里的 release-notes.md（就是建 Release 时 --notes-file 用的那份，字节可控）。
+    # 绝不默认从 gh 的标准输出取正文：PS 5.1 会按控制台代码页（GBK）解码 gh 的 UTF-8 输出，
+    # 中文被二次编码写进清单、客户端就显示乱码（v1.8.6 踩过）。确需回读时必须先切 UTF-8。
+    if (-not $NotesPath -and (Test-Path (Join-Path $RepoRoot 'release-notes.md'))) {
+        $NotesPath = 'release-notes.md'
+    }
     $notes = ""
     if ($NotesPath) {
         $np = if ([System.IO.Path]::IsPathRooted($NotesPath)) { $NotesPath } else { Join-Path $RepoRoot $NotesPath }
         if (-not (Test-Path $np)) { throw "说明文件不存在：$np" }
         $notes = [System.IO.File]::ReadAllText($np, [System.Text.Encoding]::UTF8)
+        Info "更新说明取自 $np"
     } else {
-        $ErrorActionPreference = "Continue"
-        $notes = (& gh release view $Tag --json body --jq .body 2>&1 | Out-String)
-        $ghExit = $LASTEXITCODE
-        $ErrorActionPreference = "Stop"
+        $prevEnc = [Console]::OutputEncoding
+        try {
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+            $ErrorActionPreference = "Continue"
+            $notes = (& gh release view $Tag --json body --jq .body 2>&1 | Out-String)
+            $ghExit = $LASTEXITCODE
+            $ErrorActionPreference = "Stop"
+        } finally {
+            [Console]::OutputEncoding = $prevEnc
+        }
         if ($ghExit -ne 0) { throw "取 GitHub Release $Tag 正文失败，请改用 -NotesPath 显式指定：$notes" }
+        Info "更新说明回读自 GitHub Release $Tag"
+    }
+    # 拦网：本项目说明必含中文，一旦一个中文都没有，基本就是取回链路发生了重编码
+    if ($notes.Length -gt 0 -and $notes -notmatch '[\u4e00-\u9fff]') {
+        Warn "更新说明里没有任何中文字符，请核实取回链路是否发生了重编码（PS 按 GBK 解码 gh 输出即会如此）"
     }
 
     $giteeDl  = "https://gitee.com/$($gt.Owner)/$($gt.Repo)/releases/download/$Tag/$FileName"

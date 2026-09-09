@@ -9,6 +9,7 @@ pub mod audio_capture;
 pub mod commands;
 pub mod hotkey;
 pub mod plugins;
+pub mod proc;
 pub mod remote;
 pub mod storage;
 pub mod sync;
