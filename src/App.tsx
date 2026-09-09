@@ -522,16 +522,16 @@ function App() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {/* 左侧边栏（永久）：消息 / 收藏 / 插件 / 设置（恒为按钮组最后一个），「其他」置底 */}
+        {/* 左侧边栏（永久）：消息 / 收藏 / 语音 / 字幕 / 插件 / 遥控 / 设置（恒为按钮组最后一个），「其他」置底 */}
         <nav className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-[var(--ink-200)] bg-[var(--paper)] py-3">
           <SideButton icon={<TexIcon name="msg" size={16} />} label="消息" active={tab === "messages"} onClick={() => setTab("messages")} />
           <SideButton icon={<TexIcon name="star" size={16} />} label="收藏" active={tab === "favorites"} onClick={() => setTab("favorites")} />
-          <SideButton icon={<TexIcon name="grid" size={16} />} label="插件" active={tab === "plugins"} onClick={() => setTab("plugins")} />
           <SideButton icon={<TexIcon name="mic" size={16} />} label="语音" active={tab === "voice"} onClick={() => setTab("voice")} />
-          <SideButton icon={<TexIcon name="remote" size={16} />} label="遥控" active={tab === "remote"} onClick={() => setTab("remote")} />
           {asrAvailable && (
             <SideButton icon={<TexIcon name="subtitle" size={16} />} label="字幕" active={tab === "subtitle"} onClick={() => setTab("subtitle")} />
           )}
+          <SideButton icon={<TexIcon name="grid" size={16} />} label="插件" active={tab === "plugins"} onClick={() => setTab("plugins")} />
+          <SideButton icon={<TexIcon name="remote" size={16} />} label="遥控" active={tab === "remote"} onClick={() => setTab("remote")} />
           <SideButton icon={<TexIcon name="gear" size={16} />} label="设置" active={tab === "settings"} dot={updateDot} onClick={() => setTab("settings")} />
           <div className="flex-1" />
 
