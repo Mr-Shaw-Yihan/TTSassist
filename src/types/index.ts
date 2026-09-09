@@ -149,8 +149,41 @@ export interface UpdateInfo {
   version: string;
   /** Release 页面地址 */
   url: string;
-  /** 更新说明 */
+  /** 更新说明（markdown） */
   notes: string;
+  /** 是否支持应用内下载+安装（发布清单通道才有；旧回退通道为 false） */
+  has_download: boolean;
+  /** 安装包文件名 */
+  file: string;
+  /** 字节数（0 = 未知） */
+  size: number;
+  /** 安装包 SHA-256 */
+  sha256: string;
+  /** 国内主通道直链 */
+  gitee_url: string;
+  /** 海外次通道直链 */
+  github_url: string;
+}
+
+/** 应用内下载进度（事件 app-update-progress 载荷） */
+export interface UpdateProgress {
+  /** downloading / verifying / done / failed */
+  phase: string;
+  /** 0~1；总大小未知时为 -1 */
+  percent: number;
+  /** 当前通道：gitee / github / "" */
+  channel: string;
+  /** 面向用户的中文说明 */
+  message: string;
+}
+
+/** 下载完成信息（download_app_update 返回） */
+export interface DownloadedInfo {
+  path: string;
+  version: string;
+  size: number;
+  sha256: string;
+  channel: string;
 }
 
 /** 插件音色条目 */

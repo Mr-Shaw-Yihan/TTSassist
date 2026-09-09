@@ -3,7 +3,7 @@
 
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry, BundledPluginInfo, UpdateInfo, AsrPluginInfo, PluginConfigInfo, AudioProcess, SubtitleSession, SubtitleStatus } from "../types";
+import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry, BundledPluginInfo, UpdateInfo, DownloadedInfo, AsrPluginInfo, PluginConfigInfo, AudioProcess, SubtitleSession, SubtitleStatus } from "../types";
 
 // ── TTS ──────────────────────────────────────────
 
@@ -202,6 +202,21 @@ export async function importVoicePack(id: string, srcDir: string): Promise<strin
 /** 检查新版本；无更新或网络失败返回 null */
 export async function checkAppUpdate(): Promise<UpdateInfo | null> {
   return invoke<UpdateInfo | null>("check_app_update");
+}
+
+/** 下载新版安装包（Gitee 优先、GitHub 次选，边下边算 SHA-256）；进度走 app-update-progress 事件 */
+export async function downloadAppUpdate(): Promise<DownloadedInfo> {
+  return invoke<DownloadedInfo>("download_app_update");
+}
+
+/** 取消正在进行的下载 */
+export async function cancelAppUpdate(): Promise<void> {
+  return invoke<void>("cancel_app_update");
+}
+
+/** 拉起已校验的安装包并退出本程序（仅接受下载接口返回过的路径） */
+export async function installAppUpdate(path: string): Promise<void> {
+  return invoke<void>("install_app_update", { path });
 }
 
 // ── 远程配置 ─────────────────────────────────────

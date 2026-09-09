@@ -40,7 +40,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-Add-Type -AssemblyName System.Net.Http
 
 function Info($m) { Write-Host "[publish-remote] $m" -ForegroundColor Cyan }
 function Warn($m) { Write-Host "[publish-remote] $m" -ForegroundColor Yellow }
@@ -51,52 +50,8 @@ $ToolsDir     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RemoteAppDir = Split-Path -Parent $ToolsDir
 $RepoRoot     = Split-Path -Parent $RemoteAppDir
 
-function ParseOwnerRepo([string]$url) {
-    $n = ($url -replace '\.git$', '' -replace '^[a-z]+://[^/]+/', '' -replace '^[^@]+@[^:]+:', '')
-    $p = $n.Split('/')
-    if ($p.Count -lt 2) { throw "无法从远端 URL 解析 owner/repo：$url" }
-    return @{ Owner = $p[-2]; Repo = $p[-1] }
-}
-
-# Gitee API 统一入口：请求体用 UTF-8 字节的 JSON 并声明 charset，响应由 .NET 按
-# charset 解码。curl 方案两处必坑：form-urlencoded 不带 charset 使中文被按 Latin-1
-# 存入；响应被 PS 5.1 按控制台代码页（GBK）解码导致 ConvertFrom-Json 抛异常。
-function Invoke-GiteeJson {
-    param([string]$Method, [string]$Uri, [hashtable]$Body)
-    $client = New-Object System.Net.Http.HttpClient
-    try {
-        $client.Timeout = [TimeSpan]::FromMinutes(2)
-        $req = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]$Method, $Uri)
-        if ($Body) {
-            $json = $Body | ConvertTo-Json -Depth 5
-            $req.Content = New-Object System.Net.Http.StringContent($json, [System.Text.Encoding]::UTF8, 'application/json')
-        }
-        $resp = $client.SendAsync($req).Result
-        $text = $resp.Content.ReadAsStringAsync().Result
-        if (-not $resp.IsSuccessStatusCode) { throw "HTTP $([int]$resp.StatusCode) : $text" }
-        if ($text) { return ($text | ConvertFrom-Json) }
-        return $null
-    } finally { $client.Dispose() }
-}
-
-# 上传 Release 附件：字段名是 file（非 files[]/files）；令牌只走查询参数——
-# 把 access_token 当 multipart 分块且带 Content-Type 时会被当成文件，鉴权回 401。
-function Send-GiteeAttachment {
-    param([string]$Uri, [string]$FilePath)
-    $bytes = [System.IO.File]::ReadAllBytes($FilePath)
-    $client = New-Object System.Net.Http.HttpClient
-    try {
-        $client.Timeout = [TimeSpan]::FromMinutes(15)
-        $mp = New-Object System.Net.Http.MultipartFormDataContent
-        $fc = New-Object System.Net.Http.ByteArrayContent(, $bytes)
-        $fc.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/vnd.android.package-archive')
-        $mp.Add($fc, 'file', [System.IO.Path]::GetFileName($FilePath))
-        $resp = $client.PostAsync($Uri, $mp).Result
-        $text = $resp.Content.ReadAsStringAsync().Result
-        if (-not $resp.IsSuccessStatusCode) { throw "HTTP $([int]$resp.StatusCode) : $text" }
-        return $text
-    } finally { $client.Dispose() }
-}
+# ── Gitee API 公共函数：统一住在本仓库根 gitee-release.ps1，勿在此另存一份 ──
+. (Join-Path $RepoRoot 'gitee-release.ps1')
 
 Push-Location $RepoRoot
 try {
@@ -105,8 +60,8 @@ try {
     if (-not $giteeUrl -or $giteeUrl -match 'error|没有') { throw "未配置 gitee remote" }
     $originUrl = (git remote get-url origin 2>&1 | Out-String).Trim()
     if (-not $originUrl) { throw "未配置 origin remote" }
-    $gt = ParseOwnerRepo $giteeUrl
-    $gh = ParseOwnerRepo $originUrl
+    $gt = Parse-OwnerRepo $giteeUrl
+    $gh = Parse-OwnerRepo $originUrl
 
     # ── 版本：显式 > pubspec 解析 ──
     if (-not $Version) {
@@ -205,48 +160,27 @@ try {
         }
     }
 
-    # ══ 步骤 2B：Gitee Release 附件（.NET UTF-8 JSON / multipart，不经 curl 命令行）══
+    # ══ 步骤 2B：Gitee Release 附件（公共函数见仓库根 gitee-release.ps1）══
     if (-not $SkipGitee) {
         $apiBase = "https://gitee.com/api/v5/repos/$($gt.Owner)/$($gt.Repo)"
-        $q = "?access_token=$token"
         if ($DryRun) {
             Warn "[dry-run] Gitee: 建 Release $Tag + 上传 $ApkName 附件（access_token 走 GITEE_TOKEN）"
         } else {
-            # 查 tag 是否已有 Release；tags 端点偶有不返 id，回退到列表检索
-            $relId = $null
-            try {
-                $one = Invoke-GiteeJson -Method 'GET' -Uri "$apiBase/releases/tags/$Tag$q"
-                if ($one -and $one.id) { $relId = $one.id }
-            } catch { }
-            if (-not $relId) {
-                $all = @(Invoke-GiteeJson -Method 'GET' -Uri "$apiBase/releases$q&per_page=100")
-                $hit = @($all) | Where-Object { $_.tag_name -eq $Tag } | Select-Object -First 1
-                if ($hit) { $relId = $hit.id }
-            }
-
+            $relId = Get-GiteeReleaseIdByTag -ApiBase $apiBase -Token $token -Tag $Tag
             if (-not $relId) {
                 Info "创建 Gitee Release $Tag ..."
-                $created = Invoke-GiteeJson -Method 'POST' -Uri "$apiBase/releases$q" -Body @{
-                    tag_name         = $Tag
-                    name             = "遥控 App $Version"
-                    body             = $Notes
-                    target_commitish = 'main'
-                }
-                if (-not $created -or -not $created.id) { throw 'Gitee 建 Release 失败（响应无 id）' }
-                $relId = $created.id
+                $relId = New-GiteeRelease -ApiBase $apiBase -Token $token -Tag $Tag `
+                    -Name "遥控 App $Version" -Body $Notes
             } else {
                 Info "Gitee Release 已存在（id=$relId），检查附件..."
             }
 
             # 已含同名附件则不重复传（如需替换请先在网页删除该附件后重跑）
-            $assets = @(Invoke-GiteeJson -Method 'GET' -Uri "$apiBase/releases/$relId/attach_files$q")
-            $hasApk = @($assets | Where-Object { $_.name -eq $ApkName }).Count -gt 0
-            if ($hasApk) {
-                Warn "Gitee 附件 $ApkName 已存在 → 跳过上传。如需替换，请在 Gitee 网页删除该附件后重跑本步。"
-            } else {
-                Info "上传 Gitee 附件 $ApkName ..."
-                $null = Send-GiteeAttachment -Uri "$apiBase/releases/$relId/attach_files$q" -FilePath $stageApk
-            }
+            $uploaded = Add-GiteeAttachmentIfMissing -ApiBase $apiBase -Token $token `
+                -ReleaseId $relId -FilePath $stageApk -ContentType 'application/vnd.android.package-archive'
+            if ($uploaded) { Ok "Gitee 附件已上传：$ApkName" }
+            else { Warn "Gitee 附件 $ApkName 已存在 → 跳过上传。如需替换，请在 Gitee 网页删除该附件后重跑本步。" }
+
             Ok "Gitee 附件（预期直链）：$giteeDl"
             Info "注：Gitee 的 API 读接口有缓存，页面即时生效，API 回读可能滞后几十秒。"
         }

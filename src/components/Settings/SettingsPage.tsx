@@ -14,6 +14,8 @@ import { HotkeyRecorder } from "./HotkeyRecorder";
 import { MicSettings } from "./MicSettings";
 import { PluginConfigPanel } from "./PluginConfigPanel";
 import { Section } from "../common/SettingsSection";
+import { AppUpdater } from "../common/AppUpdater";
+import { CopyableGroupId } from "../common/CopyableGroupId";
 
 const THEMES = [
   { id: "light", label: "安墨（浅色）", desc: "宣纸暖白 · 墨色 · 暖琥珀" },
@@ -294,23 +296,7 @@ export function SettingsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-[var(--ink-400)]">QQ 群</span>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText("690907648");
-                      const el = document.getElementById("qq-copied-tip");
-                      if (el) { el.style.opacity = "1"; setTimeout(() => el.style.opacity = "0", 1500); }
-                    }}
-                    className="relative font-mono text-[var(--ink-600)] underline decoration-dashed underline-offset-2 hover:text-[var(--amber-600)]"
-                    title="点击复制群号"
-                  >
-                    690907648
-                    <span
-                      id="qq-copied-tip"
-                      className="pointer-events-none absolute -top-6 left-1/2 -translate-x-1/2 rounded bg-[var(--ink-700)] px-1.5 py-0.5 text-[10px] text-[var(--paper)] opacity-0 transition-opacity"
-                    >
-                      已复制
-                    </span>
-                  </button>
+                  <CopyableGroupId />
                 </div>
               </div>
 
@@ -330,15 +316,12 @@ export function SettingsPage() {
 
               {/* 检查/启动检查结果 */}
               {updateLatest ? (
-                <div className="mt-2.5 rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/20 px-3 py-2 text-[11px] leading-relaxed text-[var(--amber-600)]">
-                  发现新版本 <span className="font-mono font-medium">v{updateLatest.version}</span>
-                  ，建议更新以获得新功能与修复。
-                  <button
-                    onClick={() => openUrl(updateLatest.url).catch(() => {})}
-                    className="ml-1.5 font-medium underline underline-offset-2 hover:text-[var(--ink-700)]"
-                  >
-                    前往下载
-                  </button>
+                <div className="mt-2.5">
+                  <div className="rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/20 px-3 py-2 text-[11px] leading-relaxed text-[var(--amber-600)]">
+                    发现新版本 <span className="font-mono font-medium">v{updateLatest.version}</span>
+                    ，可在软件内直接升级。
+                  </div>
+                  <AppUpdater info={updateLatest} className="mt-2" />
                 </div>
               ) : (
                 updateChecked && (

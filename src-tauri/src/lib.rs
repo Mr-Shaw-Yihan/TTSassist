@@ -160,6 +160,9 @@ pub fn run() {
             // 字幕监听运行态（采集/VAD/ASR 编排会话的启停与历史）
             app.manage(commands::subtitle::SubtitleState::new());
 
+            // 应用内升级运行态（下载忙碌位与取消标志）
+            app.manage(commands::update::AppUpdaterState::new());
+
             // 浮窗呼出快捷键：读设置 → 注册（失败只记日志，不影响主功能）
             let accel = settings.hotkey_show_window.clone();
             let register_ok = match hotkey::register_hotkey(app.handle(), &accel) {
@@ -332,6 +335,9 @@ pub fn run() {
             crate::commands::plugins::preload_voice,
             crate::commands::plugins::import_voice_pack,
             crate::commands::update::check_app_update,
+            crate::commands::update::download_app_update,
+            crate::commands::update::cancel_app_update,
+            crate::commands::update::install_app_update,
             crate::commands::remote::get_remote_config,
             crate::commands::remote::remote_lan_status,
             crate::commands::remote::remote_firewall_open,
