@@ -696,6 +696,27 @@ mod tests {
         assert!(manifest_to_info(&m).unwrap().is_none());
     }
 
+    /// 线上清单自检：默认跳过，每次发完版手动跑一次（`cargo test --lib -- --ignored`）。
+    /// 它走的是真实 fetch_manifest + validate_download，能在装机器之前
+    /// 就发现清单字段漂移、域名写错、安装包没传上去这类发布事故。
+    #[test]
+    #[ignore = "需要联网，发版后手动执行"]
+    fn 线上清单可拉取且通过校验() {
+        let m = tauri::async_runtime::block_on(fetch_manifest()).expect("线上清单应可拉取");
+        m.validate_download().expect("线上清单应通过白名单与自洽校验");
+        assert_eq!(m.version.split('.').count(), 3, "版本号应形如 x.y.z");
+        assert!(is_app_version(&m.version));
+        assert!(!m.notes.trim().is_empty(), "清单应携带更新说明");
+        // 刚发完版时清单版本应等于或高于当前包；低于当前包说明 dist 没更新
+        let cur = env!("CARGO_PKG_VERSION");
+        assert!(
+            !crate::plugins::manifest::version_less_than(&m.version, cur),
+            "线上清单版本 {} 不应低于当前包版本 {}",
+            m.version,
+            cur
+        );
+    }
+
     #[test]
     fn 过滤插件tag只认应用版本() {
         assert!(is_app_version("1.6.0"));
