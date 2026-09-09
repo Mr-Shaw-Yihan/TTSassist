@@ -17,7 +17,8 @@ export type TexIconName =
   | "play"
   | "send"
   | "copy"
-  | "trash";
+  | "trash"
+  | "remote";
 
 /** 全局纹理与符号定义：主窗口挂载一次即可（放到 App 根节点） */
 export function TexDefs() {
@@ -202,6 +203,18 @@ export function TexDefs() {
         <path
           style={{ fill: "none", stroke: "var(--ln)", strokeWidth: "var(--lnw)", strokeLinecap: "round" }}
           strokeDasharray="6 4 5 4" d="M10 12.5v5M14 12.5v5"
+        />
+      </symbol>
+      {/* 遥控（手机主体 + 右上两道信号弧，寓意移动端无线遥控） */}
+      <symbol id="ti-remote" viewBox="0 0 24 24">
+        <rect style={{ fill: "var(--tx)" }} x="4.6" y="6.4" width="10.4" height="15.2" rx="2.6" />
+        <path
+          style={{ fill: "none", stroke: "var(--ln)", strokeWidth: "var(--lnw)", strokeLinecap: "round" }}
+          strokeDasharray="7 4" d="M14.2 3.7a3.5 3.5 0 0 1 3.4 3.4"
+        />
+        <path
+          style={{ fill: "none", stroke: "var(--ln)", strokeWidth: "var(--lnw)", strokeLinecap: "round" }}
+          strokeDasharray="11 5" d="M14.2 0.9a6.3 6.3 0 0 1 6.2 6.2"
         />
       </symbol>
     </svg>

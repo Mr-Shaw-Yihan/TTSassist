@@ -1,4 +1,4 @@
-// Web 遥控：自托管单文件页面（remote_page.html 编译进 dll）+ 图标常量。
+// Web 遥控：自托管单文件页面（remote_page.html 编译进本体）+ 图标常量。
 //
 // 页面经 server.rs 的同端口分流在 http://<PC-IP>:45271 直接 serve——
 // 页面与 WS 同源，浏览器无 Mixed Content 限制，iOS 等无 App 设备扫码即用。
@@ -29,10 +29,6 @@ fn encode_uri_component(s: &str) -> String {
         }
     }
     out
-}
-
-fn icon_url(svg: &str) -> String {
-    format!("data:image/svg+xml,{}", encode_uri_component(svg))
 }
 
 /// 组装最终页面（图标占位符 → url-encoded data URL）

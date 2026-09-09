@@ -59,16 +59,6 @@
       "checksum": "5c344b74599a00b1820d8dcd38b83fcd30860695dd0b1a2de1647bdef160853d",
       "description": "MiniMax 云端语音合成（国际版），需 API Key，50+ 音色、40 种语言",
       "plugin_type": "tts_engine"
-    },
-    {
-      "id": "lan-remote",
-      "name": "移动端遥控器",
-      "version": "0.2.1",
-      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/lan-remote-0.2.1.zip",
-      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/lan-remote-0.2.1.zip",
-      "checksum": "ecf1bc36f192e5989cf6a422f736f1c84e2d36fc3c13e90c335b3e28ff8bc006",
-      "description": "手机/网页遥控 PC 端：局域网 WebSocket + mDNS 免码配对，内置网页遥控器（同端口 45271），需配合移动端 App 使用",
-      "plugin_type": "service"
     }
   ]
 }
