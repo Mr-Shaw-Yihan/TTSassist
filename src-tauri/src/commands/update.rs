@@ -570,7 +570,7 @@ pub fn install_app_update(app: AppHandle, path: String) -> Result<(), String> {
         return Err("安装包已损坏或被替换，已拒绝执行".into());
     }
 
-    launch_installer(&path)?;
+    launch_installer(&path, &std::env::current_exe().map_err(|e| e.to_string())?.display().to_string())?;
     // 稍退一步再退出：让前端收到本次回复，也给安装器腾出文件占用
     let handle = app.clone();
     tauri::async_runtime::spawn(async move {
@@ -581,14 +581,16 @@ pub fn install_app_update(app: AppHandle, path: String) -> Result<(), String> {
 }
 
 #[cfg(windows)]
-fn launch_installer(path: &str) -> Result<(), String> {
+fn launch_installer(path: &str, relaunch: &str) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    // 先等 2 秒再起安装器：给本进程退出、释放 voiceassist.exe 占用留出时间，否则 NSIS
-    // 覆盖文件会失败。用 Start-Sleep 而非 timeout——后者要求可读 stdin，隐藏窗口下会报错。
+    // 三段：等 2 秒让本进程退出并释放 voiceassist.exe 占用 → 静默安装并等它结束
+    // → 按原路径重新拉起（不等安装完就拉起会拿到旧进程或撞上占用）。
+    // 用 Start-Sleep 而非 timeout——后者要求可读 stdin，隐藏窗口下会报错。
     let ps = format!(
-        "Start-Sleep -Seconds 2; Start-Process -FilePath '{}' -ArgumentList '/S'",
-        path.replace('\'', "''")
+        "Start-Sleep -Seconds 2; Start-Process -FilePath '{}' -ArgumentList '/S' -Wait; Start-Process -FilePath '{}'",
+        path.replace('\'', "''"),
+        relaunch.replace('\'', "''")
     );
     std::process::Command::new("powershell")
         .args([
@@ -606,7 +608,7 @@ fn launch_installer(path: &str) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-fn launch_installer(_path: &str) -> Result<(), String> {
+fn launch_installer(_path: &str, _relaunch: &str) -> Result<(), String> {
     Err("当前平台不支持应用内升级，请手动下载安装".into())
 }
 

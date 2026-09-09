@@ -42,7 +42,12 @@
 
 清单获取顺序（改后）：**Gitee raw 优先**（8s 超时）→ GitHub `releases/latest/download/app-version.json`（10s）→ 都失败返回 null（保持"静默不打扰"）。
 
-存放位置三份，互为镜像：Gitee `dist` 分支 raw（国内主入口，实测 raw 对 JSON 返回 200）、GitHub 本体 Release 资产（`releases/latest/download/`）、origin 的 `dist` 分支（当前 dist 只存在于 Gitee，GitHub raw 实测 404，需补推）。
+存放位置两份：Gitee `dist` 分支 raw（国内主入口，实测 200）、GitHub 本体 Release 资产
+`releases/latest/download/`（实测 200）。
+
+> 实施偏差：原计划再把 `dist` 分支补推到 origin 做 GitHub raw 兜底，已取消——dist 里存着
+> 历史安装包（GitHub 已有这些资产，推过去是重复占用 git 存储），且浅克隆直接推 GitHub 会被
+> 拒（`remote unpack failed: index-pack failed`）；而客户端的 GitHub 兜底本来就走 Release 资产。
 
 ## 安全边界
 
@@ -98,4 +103,17 @@
 Rust 单测：清单解析（缺字段/多余字段容错）、版本比较、URL 白名单接受与拒绝、`file` 与 `version` 一致性、sha256 校验通过与篡改失败、tag 过滤既有测试保持绿。
 前端：`tsc --noEmit` + `vite build`；MarkdownLite 手工对照本次 release-notes 实际文本。
 真机四场景：断网 / 只通 Gitee / 只通 GitHub / 两通道全断（走群号兜底）。
-端到端：先发布 v1.8.5，再本地构建一个**版本号仍写 1.8.4** 的带新逻辑包，跑完整"发现 1.8.5 → Gitee 下载 → 校验 → 安装 → 重启为 1.8.5"（因为正在运行的 1.8.4 官方包不含新逻辑，不这样做无法真机验证）。
+端到端：先发布 v1.8.5，再本地构建一个**版本号仍写 1.8.4** 的带新逻辑包，跑完整“发现 1.8.5 → Gitee 下载 → 校验 → 安装 → 重启为 1.8.5”（因为正在运行的 1.8.4 官方包不含新逻辑，不这样做无法真机验证）。
+
+## 实施记录（2026-09-09）
+
+已发布 v1.8.5：安装包 20,543,902 字节，`sha256=db1f292516f4088f82f99cd75345730bb6d7d01837e12423807eda2f969c8457`；
+四条通道（两份清单 + 两端安装包）实测均 200；Gitee 本体 Release 首次建成（此前根本不存在）。
+
+实测得到的两个事实：
+
+1. **两份清单不会逐字节相等**：Gitee 入库把 CRLF 归一化为 LF（差 8 字节 = 8 个行尾），
+   六个字段与 notes 全等。因此清单的发布校验口径是**字段级**，安装包才是 SHA-256。
+2. **发现一个既存缺陷（本次未修）**：遥控 App 文档写了“Gitee raw 优先、GitHub raw 回退”，
+   但 `raw.githubusercontent.com/.../dist/remote-app-version.json` 因 origin 无 dist 分支而**始终 404**，
+   即 App 的清单实际只有单一通道（APK 下载仍是双通道，影响面有限）。已向用户报告，待定是否单独修。

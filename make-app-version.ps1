@@ -14,7 +14,9 @@
 #   2. Gitee 建本体 Release（tag vX.Y.Z）+ 上传安装包附件
 #      —— Gitee raw 对 exe 返回 403，安装包只能走 Release 附件直链
 #   3. 清单作为资产附到 GitHub 本体 Release（releases/latest/download/app-version.json）
-#   4. 清单写进 dist 分支并同时推 gitee 与 origin（两端 raw 都要可读）
+#   4. 清单写进 Gitee dist 分支（客户端主通道 raw）
+#      注：不往 origin 推 dist 分支——dist 里存着历史安装包，而 GitHub 已有这些资产，
+#      推过去等于同一堆字节再塞一份进 git 存储；客户端的 GitHub 兜底走 Release 资产。
 #
 # 注：PS 5.1 的 ConvertTo-Json 会把中文转义成 \uXXXX，这是合法 JSON，客户端 serde_json 正常
 #     解码，不必为此改写。清单文件本身必须以 UTF-8 无 BOM 写出。
@@ -25,7 +27,6 @@ param(
     [Parameter(Mandatory = $true)][string]$Version,
     [string]$NotesPath,
     [string]$SetupExe,
-    [string]$OriginProxy,
     [switch]$SkipGiteeRelease,
     [switch]$DryRun
 )
@@ -137,9 +138,9 @@ try {
         Ok "清单已作为资产附到 GitHub Release $Tag"
     }
 
-    # ── 5. dist 分支：Gitee raw 主入口 + origin 兜底 ──
+    # ── 5. dist 分支（Gitee raw 主入口）──
     if ($DryRun) {
-        Warn "[dry-run] 将把 app-version.json 提交进 dist 分支并推 gitee 与 origin"
+        Warn "[dry-run] 将把 app-version.json 提交进 Gitee dist 分支并推送"
     } else {
         $Tmp = Join-Path $env:TEMP "va-dist-appver-body"
         if (Test-Path $Tmp) { Remove-Item $Tmp -Recurse -Force }
@@ -157,27 +158,21 @@ try {
             $ErrorActionPreference = "Continue"
             git push origin HEAD:refs/heads/dist 2>&1 | ForEach-Object { "$_" }
             $pushGiteeOk = ($LASTEXITCODE -eq 0)
-            # 同一份 dist 也推给 GitHub，让 raw.githubusercontent 兜底通道有数据
-            if ($OriginProxy) {
-                git -c http.proxy=$OriginProxy push $originUrl HEAD:refs/heads/dist 2>&1 | ForEach-Object { "$_" }
-            } else {
-                git push $originUrl HEAD:refs/heads/dist 2>&1 | ForEach-Object { "$_" }
-            }
-            $pushOriginOk = ($LASTEXITCODE -eq 0)
             Pop-Location
             $ErrorActionPreference = "Stop"
+            # 清单与上一版一致时无改动，不是错误
             if ($commitExit -ne 0) { Warn "dist 无改动（清单与线上一致），本次未产生新提交" }
             if (-not $pushGiteeOk) { throw "推送 Gitee dist 分支失败" }
-            if ($pushOriginOk) { Ok "dist 已同步 origin（GitHub raw 兜底可读）" }
-            else { Warn "推送 origin dist 失败（git 不读系统代理）：加 -OriginProxy http://127.0.0.1:7897 重跑，或改用 SSH 地址补推" }
+            Ok "清单已进 dist 分支（Gitee raw）"
         } finally {
             Remove-Item $Tmp -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 
     Ok "════════ 完成 ════════"
-    Info "客户端读取顺序：$giteeDl 所在清单 https://gitee.com/$($gt.Owner)/$($gt.Repo)/raw/dist/app-version.json → https://github.com/$GhOwnerRepo/releases/latest/download/app-version.json"
-    Info "发布后请抽查两处 raw 均 200 且内容逐字节一致（Gitee raw CDN 有缓存，生效可能延迟几分钟）。"
+    Info "客户端读取顺序：https://gitee.com/$($gt.Owner)/$($gt.Repo)/raw/dist/app-version.json → https://github.com/$GhOwnerRepo/releases/latest/download/app-version.json"
+    Info "发布后抽查两处 raw 均 200。比对两份清单请用字段级而非逐字节：Gitee 入库会把 CRLF 归一化成 LF。"
+    Info "安装包则必须以 SHA-256 为准（两端附件应同为一个本地文件，字节一致）。"
 }
 finally {
     Pop-Location
