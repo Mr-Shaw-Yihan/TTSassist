@@ -1,11 +1,9 @@
 // 字幕管理页（侧边栏「📺 字幕」入口，仅装了 ASR 插件时可见）。
-// 职责：配置监听源（进程 / 识别引擎 / 语言）+ VAD 灵敏度 + 暂停快捷键 + 浮窗外观 + 历史回看，
-// 并统管 subtitle_window 的显隐 / 定位 / 鼠标穿透（浮窗自身是纯展示叠加层，不含控件）。
+// 职责：配置监听源（进程 / 识别引擎 / 语言）+ VAD 灵敏度 + 开关快捷键 + 浮窗外观 + 历史回看。
+// 浮窗（subtitle_window）是纯展示叠加层，自身监听 subtitle:state / 预览事件完成显隐与定位，本页只发命令。
 // 采「安墨」观感：卡片 + 琥珀竖条标题 + 分段 / 滑块 / 步进控件，全部即时写入 settings。
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { primaryMonitor, PhysicalPosition } from "@tauri-apps/api/window";
 import { emit } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -28,8 +26,6 @@ import type {
   SubtitleSession,
   SubtitleStatus,
 } from "../../types";
-
-const SUB_WIN_LABEL = "subtitle_window";
 
 /** 秒 → m:ss */
 function fmtElapsed(sec: number): string {
@@ -121,48 +117,6 @@ export function SubtitlePage() {
     return () => window.clearInterval(id);
   }, [status.running]);
 
-  // ── 浮窗显隐 / 定位 / 穿透 ───────────────────
-  const getSubWin = useCallback(async () => {
-    try {
-      return await WebviewWindow.getByLabel(SUB_WIN_LABEL);
-    } catch {
-      return null;
-    }
-  }, []);
-
-  /** 定位到底部 / 顶部居中（物理像素，避开任务栏用 workArea） */
-  const positionSubWin = useCallback(
-    async (w: WebviewWindow) => {
-      const mon = await primaryMonitor().catch(() => null);
-      const size = await w.innerSize().catch(() => null);
-      if (!mon || !size) return;
-      const wa = mon.workArea;
-      const scale = mon.scaleFactor || 1;
-      const margin = Math.round(24 * scale);
-      const x = wa.position.x + Math.round((wa.size.width - size.width) / 2);
-      const y =
-        position === "top"
-          ? wa.position.y + margin
-          : wa.position.y + wa.size.height - size.height - margin;
-      await w.setPosition(new PhysicalPosition(x, y)).catch(() => {});
-    },
-    [position],
-  );
-
-  const showSubWin = useCallback(async () => {
-    const w = await getSubWin();
-    if (!w) return;
-    await positionSubWin(w);
-    // 纯叠加层：始终鼠标穿透，绝不挡游戏/其他程序点击
-    await w.setIgnoreCursorEvents(true).catch(() => {});
-    await w.show().catch(() => {});
-  }, [getSubWin, positionSubWin]);
-
-  const hideSubWin = useCallback(async () => {
-    const w = await getSubWin();
-    await w?.hide().catch(() => {});
-  }, [getSubWin]);
-
   // ── 操作 ────────────────────────────────────
   async function handleStart() {
     setError(null);
@@ -171,9 +125,8 @@ export function SubtitlePage() {
       return;
     }
     try {
+      // 后端 start 会 emit subtitle:state，浮窗自身监听后显示，本页无需再操作窗口
       await startAudioListener();
-      // 后端会广播 subtitle:state 刷新状态；这里负责把浮窗拉到前台就位
-      await showSubWin();
     } catch (e) {
       setError(String(e));
     }
@@ -183,7 +136,6 @@ export function SubtitlePage() {
     setError(null);
     try {
       await stopAudioListener();
-      await hideSubWin();
     } catch (e) {
       setError(String(e));
     }
@@ -199,10 +151,8 @@ export function SubtitlePage() {
   }
 
   async function handlePreview() {
-    await showSubWin();
-    await emit("asr:subtitle", { text: "这是字幕浮窗的显示效果预览", ts: Date.now() }).catch(
-      () => {},
-    );
+    // 浮窗自身监听 subtitle:preview → 显示并放一条示例
+    await emit("subtitle:preview").catch(() => {});
   }
 
   async function handleExport() {
@@ -393,15 +343,15 @@ export function SubtitlePage() {
         </InfoStrip>
       </Card>
 
-      {/* 暂停快捷键 */}
-      <Card title="暂停 / 恢复快捷键">
+      {/* 字幕开关快捷键 */}
+      <Card title="字幕开关快捷键">
         <div className="pt-1">
           <HotkeyRecorder
             value={settings?.subtitle_pause_hotkey ?? "Alt+M"}
             onApply={(accel) => setSubtitlePauseHotkey(accel)}
           />
           <Hint>
-            队伍语音出现敏感内容或想安静时随时按下暂停。保存时自动检测冲突（含被其他软件占用的键），冲突则不保存并提示。
+            一键开 / 关字幕监听（同时显示或隐藏浮窗），无需回到本页面。保存时自动检测冲突（含被其他软件占用的键），冲突则不保存并提示。
           </Hint>
         </div>
       </Card>
@@ -466,7 +416,9 @@ export function SubtitlePage() {
             预览浮窗
           </button>
           <button
-            onClick={hideSubWin}
+            onClick={() => {
+              void emit("subtitle:preview-hide").catch(() => {});
+            }}
             className="inline-flex items-center gap-1.5 rounded-[10px] border border-[var(--ink-200)] bg-[var(--paper)] px-3 py-2 text-xs text-[var(--ink-700)] transition-colors hover:bg-[var(--ink-100)]"
           >
             隐藏浮窗

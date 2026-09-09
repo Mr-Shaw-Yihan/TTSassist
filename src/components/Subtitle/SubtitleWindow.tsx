@@ -1,13 +1,45 @@
 // 字幕浮窗（subtitle_window）：透明 / 置顶 / 免焦点 / 鼠标穿透的纯展示叠加层。
-// 只把后端 asr:subtitle 推来的字幕按设置渲染出来，所有控制都在主窗「字幕」页里。
+// 自身监听 subtitle:state（开始/停止）与 subtitle:preview（预览）事件完成显隐与定位，
+// 不依赖主窗「字幕」页是否挂载 —— 热键或命令触发后，浮窗自己出现/收起。
 // 高对比配色（白字 + 描边 + 黑底）固定，不随皮肤变化，保证游戏画面上始终可读。
 
-import { useEffect, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { getCurrentWindow, primaryMonitor, PhysicalPosition } from "@tauri-apps/api/window";
 import { useTauriListen } from "../../hooks/useTauriListen";
 import { getSettings, subtitleStatus } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
 import type { SubtitleLine } from "../../types";
+
+/**
+ * 把一段（可能很长的）转写文本拆成适合浮窗显示的短条：
+ * 优先按标点断句（。！？，、；：…），无标点或仍超长则按字数硬切；
+ * 相邻短句会尽量合并到 ≤ maxChars，避免碎片化。maxChars 按中文字数计。
+ */
+function splitSubtitleText(text: string, maxChars = 22): string[] {
+  const clean = text.replace(/\s+/g, " ").trim();
+  if (!clean) return [];
+  // 每个 token = 一段正文 + 可选尾随标点（标点跟随前文，不单独成条）
+  const tokens = clean.match(/[^，。、；：！？,.;:!?\n]+[，。、；：！？,.;:!?\n]?/g) || [clean];
+  const out: string[] = [];
+  let buf = "";
+  const flush = () => {
+    const t = buf.trim();
+    if (t) out.push(t);
+    buf = "";
+  };
+  for (let tk of tokens) {
+    tk = tk.trim();
+    if (!tk) continue;
+    if (buf && buf.length + tk.length > maxChars) flush();
+    while (tk.length > maxChars) {
+      out.push(tk.slice(0, maxChars));
+      tk = tk.slice(maxChars);
+    }
+    buf += tk;
+  }
+  flush();
+  return out;
+}
 
 export function SubtitleWindow() {
   const settings = useSettingsStore((s) => s.settings);
@@ -25,17 +57,51 @@ export function SubtitleWindow() {
   const position = settings?.subtitle_position ?? "bottom";
   const fadeSeconds = settings?.subtitle_fade_seconds ?? 15;
 
-  // 挂载：拉设置 + 初始状态；整窗设为鼠标穿透（纯叠加，绝不挡游戏点击）
+  // 事件回调里读最新 position / running（避免闭包捕获旧值）
+  const positionRef = useRef(position);
+  positionRef.current = position;
+  const runningRef = useRef(running);
+  runningRef.current = running;
+
+  /** 定位到屏幕底部 / 顶部居中（物理像素，避开任务栏用 workArea）并显示；整窗鼠标穿透 */
+  const positionAndShow = useCallback(async () => {
+    const w = getCurrentWindow();
+    const mon = await primaryMonitor().catch(() => null);
+    const size = await w.innerSize().catch(() => null);
+    if (mon && size) {
+      const wa = mon.workArea;
+      const scale = mon.scaleFactor || 1;
+      const margin = Math.round(24 * scale);
+      const x = wa.position.x + Math.round((wa.size.width - size.width) / 2);
+      const y =
+        positionRef.current === "top"
+          ? wa.position.y + margin
+          : wa.position.y + wa.size.height - size.height - margin;
+      await w.setPosition(new PhysicalPosition(x, y)).catch(() => {});
+    }
+    // 纯叠加层：始终鼠标穿透，绝不挡游戏 / 其他程序点击
+    await w.setIgnoreCursorEvents(true).catch(() => {});
+    await w.show().catch(() => {});
+  }, []);
+
+  // 挂载：文档背景透明（否则 body 的 --paper 会把透明窗填成一整块奶白）+ 穿透 + 若已运行则显示
   useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const root = document.getElementById("root");
+    html.style.background = "transparent";
+    body.style.background = "transparent";
+    if (root) root.style.background = "transparent";
+    void getCurrentWindow().setIgnoreCursorEvents(true).catch(() => {});
     getSettings().then(setSettings).catch(() => {});
     subtitleStatus()
       .then((s) => {
         setRunning(s.running);
         setPaused(s.paused);
+        if (s.running) void positionAndShow();
       })
       .catch(() => {});
-    void getCurrentWindow().setIgnoreCursorEvents(true).catch(() => {});
-  }, [setSettings]);
+  }, [setSettings, positionAndShow]);
 
   // 置顶随设置即时生效
   useEffect(() => {
@@ -50,27 +116,35 @@ export function SubtitleWindow() {
     return () => window.clearInterval(id);
   }, []);
 
-  // 新字幕：追加并截断到 maxLines（旧在前、新在后 → 底部为最新，字幕自下往上刷新）
+  // 新字幕：把长文本拆成短条后逐条上屏（旧在前、新在后 → 底部为最新），同屏截断到 maxLines
   useTauriListen<SubtitleLine>(
     "asr:subtitle",
     (l) => {
+      const clauses = splitSubtitleText(l.text);
+      if (clauses.length === 0) return;
       setLines((prev) => {
-        const next = [...prev, l];
+        const add: SubtitleLine[] = clauses.map((t, i) => ({ text: t, ts: l.ts + i }));
+        const next = [...prev, ...add];
         return next.length > maxLines ? next.slice(next.length - maxLines) : next;
       });
     },
     [maxLines],
   );
 
-  // 会话启停：停止时清空画面（下次开始重新计数）
+  // 会话启停：运行→清空并显示浮窗；停止→隐藏浮窗
   useTauriListen<{ running: boolean; paused: boolean }>(
     "subtitle:state",
     (p) => {
       setRunning(p.running);
       setPaused(p.paused);
-      if (!p.running) setLines([]);
+      if (p.running) {
+        setLines([]);
+        void positionAndShow();
+      } else {
+        void getCurrentWindow().hide().catch(() => {});
+      }
     },
-    [],
+    [positionAndShow],
   );
   // 暂停态切换
   useTauriListen<{ paused: boolean }>(
@@ -78,10 +152,33 @@ export function SubtitleWindow() {
     (p) => setPaused(p.paused),
     [],
   );
-  // 设置变化（主窗改的）：重读换肤/换尺寸/换位置
-  useTauriListen("settings:changed", () => {
-    getSettings().then(setSettings).catch(() => {});
+
+  // 预览：管理页点「预览浮窗」→ 显示并放一条示例；「隐藏浮窗」→ 收起
+  useTauriListen(
+    "subtitle:preview",
+    () => {
+      void positionAndShow();
+      setLines([{ text: "这是字幕浮窗的显示效果预览", ts: Date.now() }]);
+    },
+    [positionAndShow],
+  );
+  useTauriListen("subtitle:preview-hide", () => {
+    void getCurrentWindow().hide().catch(() => {});
   }, []);
+
+  // 设置变化（主窗改的）：重读换肤/换尺寸；运行中则按新位置重定位
+  useTauriListen(
+    "settings:changed",
+    () => {
+      getSettings()
+        .then((s) => {
+          setSettings(s);
+          if (runningRef.current) void positionAndShow();
+        })
+        .catch(() => {});
+    },
+    [setSettings, positionAndShow],
+  );
 
   // 过期清理：淡出秒数 > 0 时，超过窗口的旧字幕移出
   useEffect(() => {
@@ -116,7 +213,7 @@ export function SubtitleWindow() {
         return (
           <div
             key={`${l.ts}-${i}`}
-            className="animate-fade max-w-[92%] rounded-[11px] px-4 py-1.5 text-center leading-snug"
+            className="animate-fade max-w-[90%] rounded-[11px] px-4 py-1.5 text-left leading-snug"
             style={{
               fontSize,
               fontWeight: 500,
@@ -159,7 +256,7 @@ function IdleChip() {
   );
 }
 
-/** 已暂停：朱印色点 + 文案 */
+/** 已暂停：琥珀色点 + 文案 */
 function PausedChip() {
   return (
     <div

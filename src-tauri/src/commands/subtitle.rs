@@ -146,15 +146,19 @@ pub fn subtitle_status(state: State<'_, SubtitleState>) -> SubtitleStatus {
     }
 }
 
-/// 开始监听。快照设置 → 解析 ASR 插件 → 拉起会话线程。
+/// 开始监听命令（供前端调用）。
 #[tauri::command]
 #[cfg(windows)]
-pub fn start_audio_listener(
-    app: AppHandle,
-    state: State<'_, SubtitleState>,
-    app_state: State<'_, AppState>,
-    manager: State<'_, PluginManager>,
-) -> Result<(), String> {
+pub fn start_audio_listener(app: AppHandle) -> Result<(), String> {
+    start_impl(&app)
+}
+
+/// 开始监听核心（命令与全局快捷键共用）：快照设置 → 解析 ASR 插件 → 拉起会话线程。
+#[cfg(windows)]
+fn start_impl(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<SubtitleState>();
+    let app_state = app.state::<AppState>();
+    let manager = app.state::<PluginManager>();
     // 已在运行则拒绝（避免双采集）
     if state.running.lock().map(|g| g.is_some()).unwrap_or(false) {
         return Err("字幕监听已在运行中".into());
@@ -227,23 +231,21 @@ pub fn start_audio_listener(
 /// 开始监听（非 Windows 占位）。
 #[tauri::command]
 #[cfg(not(windows))]
-pub fn start_audio_listener(
-    app: AppHandle,
-    state: State<'_, SubtitleState>,
-    app_state: State<'_, AppState>,
-    manager: State<'_, PluginManager>,
-) -> Result<(), String> {
-    let _ = (&app, &state, &app_state, &manager);
+pub fn start_audio_listener(app: AppHandle) -> Result<(), String> {
+    let _ = &app;
     Err("字幕监听仅在 Windows 平台可用".into())
 }
 
-/// 停止监听：收编本轮字幕为一条会话记录并落盘（最近 5 条）。
+/// 停止监听命令（供前端调用）。
 #[tauri::command]
-pub fn stop_audio_listener(
-    app: AppHandle,
-    state: State<'_, SubtitleState>,
-    app_state: State<'_, AppState>,
-) -> Result<(), String> {
+pub fn stop_audio_listener(app: AppHandle) -> Result<(), String> {
+    stop_impl(&app)
+}
+
+/// 停止监听核心（命令与全局快捷键共用）：收编本轮字幕为一条会话记录并落盘（最近 5 条）。
+fn stop_impl(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<SubtitleState>();
+    let app_state = app.state::<AppState>();
     let mut session = match state
         .running
         .lock()
@@ -305,6 +307,28 @@ pub fn toggle_subtitle_pause(app: &AppHandle) -> bool {
         serde_json::json!({ "paused": new_paused }),
     );
     new_paused
+}
+
+/// 全局快捷键「字幕开关」用：运行时→停止并隐藏浮窗；未运行→开始并显示浮窗。
+/// 浮窗显隐由 overlay 自身监听 subtitle:state 完成，这里只管会话启停（内部会 emit 状态）。
+pub fn toggle_subtitle_monitor(app: &AppHandle) {
+    #[cfg(windows)]
+    {
+        let running = app
+            .state::<SubtitleState>()
+            .running
+            .lock()
+            .map(|g| g.is_some())
+            .unwrap_or(false);
+        let result = if running { stop_impl(app) } else { start_impl(app) };
+        if let Err(e) = result {
+            eprintln!("[subtitle] 快捷键切换监听失败：{e}");
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+    }
 }
 
 #[tauri::command]

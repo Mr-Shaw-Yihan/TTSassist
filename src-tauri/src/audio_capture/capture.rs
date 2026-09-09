@@ -23,6 +23,8 @@ use super::{ComGuard, TARGET_SAMPLE_RATE};
 /// WAVEFORMATEX.wFormatTag 常见值。
 const WAVE_FORMAT_PCM: u16 = 0x0001;
 const WAVE_FORMAT_IEEE_FLOAT: u16 = 0x0003;
+/// 扩展格式（携带 SubFormat GUID），现代 Windows 混音格式多为此。
+const WAVE_FORMAT_EXTENSIBLE: u16 = 0xFFFE;
 
 /// 重采样器：线性插值，跨调用保持相位连续，输出缓冲有界。
 ///
@@ -151,8 +153,11 @@ fn capture_inner(stop: &AtomicBool, tx: &mpsc::Sender<Vec<f32>>) -> Result<(), S
         client.Start().map_err(|e| format!("启动采集失败：{e}"))?;
 
         let mut resampler = LinearResampler::new(device_rate, TARGET_SAMPLE_RATE);
-        let is_float = tag == WAVE_FORMAT_IEEE_FLOAT;
-        let is_pcm16 = tag == WAVE_FORMAT_PCM && bits == 16;
+        // 共享 loopback 的混音格式在 Windows 上恒为 IEEE float32；现代设备多以
+        // WAVE_FORMAT_EXTENSIBLE(0xFFFE) 承载（SubFormat=IEEE_FLOAT，bits=32）。
+        // 混音格式按位深判定已足以覆盖实际情形，无需解析 extensible 的 SubFormat GUID。
+        let is_float = bits == 32 && (tag == WAVE_FORMAT_IEEE_FLOAT || tag == WAVE_FORMAT_EXTENSIBLE);
+        let is_pcm16 = bits == 16 && (tag == WAVE_FORMAT_PCM || tag == WAVE_FORMAT_EXTENSIBLE);
         if !is_float && !is_pcm16 {
             client.Stop().ok();
             return Err(format!("不支持的混音格式 tag={tag} bits={bits}"));

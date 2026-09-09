@@ -50,7 +50,7 @@
         "label": "subtitle_window",
         "title": "",
         "width": 760,
-        "height": 150,
+        "height": 240,
         "decorations": false,
         "alwaysOnTop": true,
         "visible": false,

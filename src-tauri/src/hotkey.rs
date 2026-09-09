@@ -326,7 +326,7 @@ pub fn find_accel_conflict(app_state: &AppState, accel: &str, exclude_key: Optio
         return Some("开关发送到麦克风".to_string());
     }
     if exclude_key != Some("subtitle_pause_hotkey") && !s.subtitle_pause_hotkey.is_empty() && s.subtitle_pause_hotkey == accel {
-        return Some("暂停/恢复字幕监听".to_string());
+        return Some("字幕监听开关".to_string());
     }
     let favorites = crate::storage::favorites::load_favorites(&app_state.data_dir);
     favorites
@@ -433,16 +433,16 @@ pub fn set_mic_toggle_hotkey(
     )
 }
 
-/// 注册「暂停/恢复字幕监听」快捷键：按下时翻转会话暂停态（仅运行时有效）。
+/// 注册「字幕监听开关」快捷键：按下时一键开/关监听（含浮窗显隐）。
 pub fn register_subtitle_pause_hotkey(app: &AppHandle, accel: &str) -> Result<(), String> {
     app.global_shortcut()
         .on_shortcut(accel, |app, _shortcut, event| {
             if event.state() != ShortcutState::Pressed {
                 return;
             }
-            crate::commands::subtitle::toggle_subtitle_pause(app);
+            crate::commands::subtitle::toggle_subtitle_monitor(app);
         })
-        .map_err(|e| format!("注册字幕监听暂停快捷键失败：{e}"))
+        .map_err(|e| format!("注册字幕监听开关快捷键失败：{e}"))
 }
 
 /// 设置（更换/清除）「暂停/恢复字幕监听」快捷键。空串 = 注销并清除。

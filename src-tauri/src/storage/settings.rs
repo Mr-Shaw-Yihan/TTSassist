@@ -185,6 +185,19 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "floating_ball_perf_mode" => if let Some(v) = value.as_str() { s.floating_ball_perf_mode = v.to_string() },
         "floating_ball_skin" => if let Some(v) = value.as_str() { s.floating_ball_skin = v.to_string() },
         "diagnostics_log_enabled" => if let Some(v) = value.as_bool() { s.diagnostics_log_enabled = v },
+        // 字幕（音频监听）：与 Settings 字段一一对应，数值统一走 as_f64 兜底 int/float。
+        "subtitle_enabled" => if let Some(v) = value.as_bool() { s.subtitle_enabled = v },
+        "subtitle_always_on_top" => if let Some(v) = value.as_bool() { s.subtitle_always_on_top = v },
+        "subtitle_opacity" => if let Some(v) = value.as_f64() { s.subtitle_opacity = v as f32 },
+        "subtitle_font_size" => if let Some(v) = value.as_f64() { s.subtitle_font_size = v as u32 },
+        "subtitle_position" => if let Some(v) = value.as_str() { s.subtitle_position = v.to_string() },
+        "subtitle_target_process" => if let Some(v) = value.as_str() { s.subtitle_target_process = v.to_string() },
+        "subtitle_asr_plugin" => if let Some(v) = value.as_str() { s.subtitle_asr_plugin = v.to_string() },
+        "subtitle_language" => if let Some(v) = value.as_str() { s.subtitle_language = v.to_string() },
+        "subtitle_vad_sensitivity" => if let Some(v) = value.as_str() { s.subtitle_vad_sensitivity = v.to_string() },
+        "subtitle_pause_hotkey" => if let Some(v) = value.as_str() { s.subtitle_pause_hotkey = v.to_string() },
+        "subtitle_max_lines" => if let Some(v) = value.as_f64() { s.subtitle_max_lines = v as u32 },
+        "subtitle_fade_seconds" => if let Some(v) = value.as_f64() { s.subtitle_fade_seconds = v as u32 },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;
