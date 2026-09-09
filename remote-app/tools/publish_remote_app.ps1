@@ -8,14 +8,21 @@
 #   ... -Version 1.8.3 -Notes "..." -DryRun
 #   # 复用已构建 APK，只补推 GitHub
 #   ... -ApkPath <apk> -SkipGitee -SkipDist
+#   # 只补 Gitee 附件（构建与 GitHub 已就位）
+#   ... -SkipBuild -SkipGitHub -SkipDist -ApkPath <apk>
 #   # 只刷新 dist 版本清单（Release 附件已在双平台就位）
 #   ... -SkipBuild -SkipGitHub -SkipGitee
 #
 # 前置条件：
 #   - gh CLI 已 `gh auth login`（GitHub 通道）
 #   - 环境变量 GITEE_TOKEN（Gitee 私人令牌，需项目写权限；仅 Gitee 步骤用到，缺省则跳过 Gitee 并告警）
-#   - flutter / git 在 PATH；Windows 自带 curl.exe（Gitee Release 附件 multipart 上传用）
+#     注：SetEnvironmentVariable(...,'User') 对已打开的终端不生效，需重开窗口或在当前会话注入
+#   - flutter / git 在 PATH（Gitee API 走 .NET System.Net.Http，不再依赖 curl.exe）
 #   - 版本单一源 = pubspec.yaml：先手改 version: X.Y.Z+N（每次重打包 +N 递增），再跑本脚本
+#
+# 编码铁律（v1.8.4 发版踩实）：本文件须保持 UTF-8 带 BOM；含中文的 API 内容一律走
+#   JSON + 显式 charset=utf-8，勿用 curl --data-urlencode 传中文（不带 charset 会被按
+#   Latin-1 存入而变乱码）；外部命令（flutter/gh）的输出须经 Continue 而非 Stop。
 #
 # ⚠️ latest 语义铁律：GitHub 的 remote-vX.Y.Z 一律标 --prerelease，
 #    否则抢走 releases/latest，导致宿主拉不到 plugins-index.json（404，插件在线安装失效）。
@@ -33,6 +40,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Add-Type -AssemblyName System.Net.Http
 
 function Info($m) { Write-Host "[publish-remote] $m" -ForegroundColor Cyan }
 function Warn($m) { Write-Host "[publish-remote] $m" -ForegroundColor Yellow }
@@ -48,6 +56,46 @@ function ParseOwnerRepo([string]$url) {
     $p = $n.Split('/')
     if ($p.Count -lt 2) { throw "无法从远端 URL 解析 owner/repo：$url" }
     return @{ Owner = $p[-2]; Repo = $p[-1] }
+}
+
+# Gitee API 统一入口：请求体用 UTF-8 字节的 JSON 并声明 charset，响应由 .NET 按
+# charset 解码。curl 方案两处必坑：form-urlencoded 不带 charset 使中文被按 Latin-1
+# 存入；响应被 PS 5.1 按控制台代码页（GBK）解码导致 ConvertFrom-Json 抛异常。
+function Invoke-GiteeJson {
+    param([string]$Method, [string]$Uri, [hashtable]$Body)
+    $client = New-Object System.Net.Http.HttpClient
+    try {
+        $client.Timeout = [TimeSpan]::FromMinutes(2)
+        $req = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]$Method, $Uri)
+        if ($Body) {
+            $json = $Body | ConvertTo-Json -Depth 5
+            $req.Content = New-Object System.Net.Http.StringContent($json, [System.Text.Encoding]::UTF8, 'application/json')
+        }
+        $resp = $client.SendAsync($req).Result
+        $text = $resp.Content.ReadAsStringAsync().Result
+        if (-not $resp.IsSuccessStatusCode) { throw "HTTP $([int]$resp.StatusCode) : $text" }
+        if ($text) { return ($text | ConvertFrom-Json) }
+        return $null
+    } finally { $client.Dispose() }
+}
+
+# 上传 Release 附件：字段名是 file（非 files[]/files）；令牌只走查询参数——
+# 把 access_token 当 multipart 分块且带 Content-Type 时会被当成文件，鉴权回 401。
+function Send-GiteeAttachment {
+    param([string]$Uri, [string]$FilePath)
+    $bytes = [System.IO.File]::ReadAllBytes($FilePath)
+    $client = New-Object System.Net.Http.HttpClient
+    try {
+        $client.Timeout = [TimeSpan]::FromMinutes(15)
+        $mp = New-Object System.Net.Http.MultipartFormDataContent
+        $fc = New-Object System.Net.Http.ByteArrayContent(, $bytes)
+        $fc.Headers.ContentType = [System.Net.Http.Headers.MediaTypeHeaderValue]::Parse('application/vnd.android.package-archive')
+        $mp.Add($fc, 'file', [System.IO.Path]::GetFileName($FilePath))
+        $resp = $client.PostAsync($Uri, $mp).Result
+        $text = $resp.Content.ReadAsStringAsync().Result
+        if (-not $resp.IsSuccessStatusCode) { throw "HTTP $([int]$resp.StatusCode) : $text" }
+        return $text
+    } finally { $client.Dispose() }
 }
 
 Push-Location $RepoRoot
@@ -109,8 +157,12 @@ try {
         } else {
             Push-Location $RemoteAppDir
             Info "flutter build apk --release --split-per-abi --build-name=$Version ..."
+            # flutter/Gradle 把正常警告（如 KGP 插件提示）写向 stderr；在 Stop 下会被
+            # 2>&1 升级为终止错误，表现为“实际构建成功、脚本却中途退出”。
+            $ErrorActionPreference = "Continue"
             & flutter build apk --release --split-per-abi --build-name=$Version 2>&1 | ForEach-Object { "$_" }
             $buildExit = $LASTEXITCODE
+            $ErrorActionPreference = "Stop"
             Pop-Location
             if ($buildExit -ne 0) { throw "flutter build 失败（退出码 $buildExit）" }
         }
@@ -131,69 +183,72 @@ try {
         if ($DryRun) {
             Warn "[dry-run] gh release $Tag ← $ApkName（--prerelease）"
         } else {
+            # gh 的上传进度信息走 stderr，同样不能处于 Stop 下（否则附件传完仍会中断脚本），
+            # 整段降为 Continue，只以 $LASTEXITCODE 判成败。
             $ErrorActionPreference = "Continue"
             $null = gh release view $Tag 2>&1 | Out-String
             $exists = ($LASTEXITCODE -eq 0)
-            $ErrorActionPreference = "Stop"
             if ($exists) {
                 Info "GitHub Release $Tag 已存在 → 覆盖上传附件"
                 & gh release upload $Tag $stageApk --clobber 2>&1 | ForEach-Object { "$_" }
-                if ($LASTEXITCODE -ne 0) { throw "gh release upload 失败" }
+                if ($LASTEXITCODE -ne 0) { $ErrorActionPreference = "Stop"; throw "gh release upload 失败" }
             } else {
                 Info "创建 GitHub Release $Tag（prerelease）..."
                 & gh release create $Tag $stageApk --target main --prerelease --title "遥控 App $Version" --notes $Notes 2>&1 | ForEach-Object { "$_" }
-                if ($LASTEXITCODE -ne 0) { throw "gh release create 失败" }
+                if ($LASTEXITCODE -ne 0) { $ErrorActionPreference = "Stop"; throw "gh release create 失败" }
             }
             # 兜底：无论新建/已存在，再次强制 prerelease（防手滑把 latest 抢走）
             & gh release edit $Tag --prerelease 2>&1 | ForEach-Object { "$_" }
             if ($LASTEXITCODE -ne 0) { Warn "gh release edit --prerelease 未成功，请手动确认 $Tag 为 prerelease！" }
+            $ErrorActionPreference = "Stop"
             Ok "GitHub 附件就位：$githubDl"
         }
     }
 
-    # ══ 步骤 2B：Gitee Release 附件（API + curl multipart）══
+    # ══ 步骤 2B：Gitee Release 附件（.NET UTF-8 JSON / multipart，不经 curl 命令行）══
     if (-not $SkipGitee) {
         $apiBase = "https://gitee.com/api/v5/repos/$($gt.Owner)/$($gt.Repo)"
+        $q = "?access_token=$token"
         if ($DryRun) {
             Warn "[dry-run] Gitee: 建 Release $Tag + 上传 $ApkName 附件（access_token 走 GITEE_TOKEN）"
         } else {
-            # 查 tag 是否已有 Release
+            # 查 tag 是否已有 Release；tags 端点偶有不返 id，回退到列表检索
             $relId = $null
             try {
-                $resp = & curl.exe -s "$apiBase/releases/tags/$Tag`?access_token=$token"
-                $obj = $resp | ConvertFrom-Json
-                if ($obj -and $obj.id) { $relId = $obj.id }
+                $one = Invoke-GiteeJson -Method 'GET' -Uri "$apiBase/releases/tags/$Tag$q"
+                if ($one -and $one.id) { $relId = $one.id }
             } catch { }
+            if (-not $relId) {
+                $all = @(Invoke-GiteeJson -Method 'GET' -Uri "$apiBase/releases$q&per_page=100")
+                $hit = @($all) | Where-Object { $_.tag_name -eq $Tag } | Select-Object -First 1
+                if ($hit) { $relId = $hit.id }
+            }
 
             if (-not $relId) {
                 Info "创建 Gitee Release $Tag ..."
-                $resp = & curl.exe -s -X POST "$apiBase/releases" `
-                    --data-urlencode "access_token=$token" `
-                    --data-urlencode "tag_name=$Tag" `
-                    --data-urlencode "name=遥控 App $Version" `
-                    --data-urlencode "body=$Notes" `
-                    --data-urlencode "target_commitish=main"
-                $obj = $resp | ConvertFrom-Json
-                if (-not $obj -or -not $obj.id) { throw "Gitee 建 Release 失败：$resp" }
-                $relId = $obj.id
+                $created = Invoke-GiteeJson -Method 'POST' -Uri "$apiBase/releases$q" -Body @{
+                    tag_name         = $Tag
+                    name             = "遥控 App $Version"
+                    body             = $Notes
+                    target_commitish = 'main'
+                }
+                if (-not $created -or -not $created.id) { throw 'Gitee 建 Release 失败（响应无 id）' }
+                $relId = $created.id
             } else {
                 Info "Gitee Release 已存在（id=$relId），检查附件..."
             }
 
-            # 查该 Release 是否已含同名附件；有则不重复传（如需替换请先在网页删除该附件后重跑）
-            $assets = (& curl.exe -s "$apiBase/releases/$relId/attach_files?access_token=$token") | ConvertFrom-Json
-            $hasApk = $false
-            if ($assets) {
-                foreach ($a in @($assets)) { if ($a.name -eq $ApkName) { $hasApk = $true } }
-            }
+            # 已含同名附件则不重复传（如需替换请先在网页删除该附件后重跑）
+            $assets = @(Invoke-GiteeJson -Method 'GET' -Uri "$apiBase/releases/$relId/attach_files$q")
+            $hasApk = @($assets | Where-Object { $_.name -eq $ApkName }).Count -gt 0
             if ($hasApk) {
                 Warn "Gitee 附件 $ApkName 已存在 → 跳过上传。如需替换，请在 Gitee 网页删除该附件后重跑本步。"
             } else {
                 Info "上传 Gitee 附件 $ApkName ..."
-                $resp = & curl.exe -s -X POST -F "access_token=$token" -F "files[]=@$stageApk" "$apiBase/releases/$relId/attach_files"
-                if ($resp -notmatch $ApkName -and $resp -match 'error|message') { Warn "Gitee 附件响应需人工核对：$resp" }
+                $null = Send-GiteeAttachment -Uri "$apiBase/releases/$relId/attach_files$q" -FilePath $stageApk
             }
             Ok "Gitee 附件（预期直链）：$giteeDl"
+            Info "注：Gitee 的 API 读接口有缓存，页面即时生效，API 回读可能滞后几十秒。"
         }
     }
 
