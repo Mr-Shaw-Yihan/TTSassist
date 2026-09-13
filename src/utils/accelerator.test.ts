@@ -15,10 +15,8 @@ const ev = (key: string, m: Partial<{ ctrl: boolean; alt: boolean; shift: boolea
 });
 
 describe("mapKey", () => {
-  it("空格：单字符分支先命中，实际返回 \" \"（case \" \" 为死分支，钉现状不改，见报告可疑点）", () => {
-    // 任务书预期 " "→Space，但 key.length===1 分支提前 return，永远到不了 case " "。
-    // 按 §二.3 不改现有行为，测试记录实际产物。
-    expect(mapKey(" ")).toBe(" ");
+  it("空格映射为 Space（修复：特判须先于单字符分支，原 case 为死分支）", () => {
+    expect(mapKey(" ")).toBe("Space");
   });
 
   it("四个方向键映射为 Up/Down/Left/Right", () => {
@@ -77,8 +75,7 @@ describe("buildAccelerator", () => {
     expect(buildAccelerator(ev("+", { ctrl: true }))).toBe("Ctrl++");
   });
 
-  it("空格主键带修饰键拼出含空白的歧义串（钉现状不改，见报告可疑点）", () => {
-    // 同上：mapKey(" ") 返回 " "，拼出 "Ctrl+ "——绑定时会把空格当主键名传给后端
-    expect(buildAccelerator(ev(" ", { ctrl: true }))).toBe("Ctrl+ ");
+  it("空格主键带修饰键拼出 Ctrl+Space（修复后）", () => {
+    expect(buildAccelerator(ev(" ", { ctrl: true }))).toBe("Ctrl+Space");
   });
 });

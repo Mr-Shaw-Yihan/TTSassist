@@ -3,9 +3,10 @@
 
 /** 把键盘事件的特殊键名映射成加速键格式 */
 export function mapKey(key: string): string {
+  // 空格必须在单字符分支前判定（key.length===1 会提前 return，原来的 case " " 是死分支）
+  if (key === " ") return "Space";
   if (key.length === 1) return key.toUpperCase(); // 单字母转大写
   switch (key) {
-    case " ": return "Space";
     case "ArrowUp": return "Up";
     case "ArrowDown": return "Down";
     case "ArrowLeft": return "Left";
