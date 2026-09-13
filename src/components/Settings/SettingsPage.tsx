@@ -63,11 +63,13 @@ export function SettingsPage() {
   const [diagPhase, setDiagPhase] = useState<"idle" | "confirm" | "working" | "done" | "error">("idle");
   const [diagPath, setDiagPath] = useState("");
   const [diagError, setDiagError] = useState("");
+  // 「包含机器名」复选（默认不勾）：勾选才采集主机名/配对设备名
+  const [diagIncludeHost, setDiagIncludeHost] = useState(false);
 
   async function handleDiagExport() {
     setDiagPhase("working");
     try {
-      const r = await exportDiagnostics();
+      const r = await exportDiagnostics(diagIncludeHost);
       setDiagPath(r.path);
       setDiagPhase("done");
     } catch (e) {
@@ -417,6 +419,15 @@ export function SettingsPage() {
                       诊断包含你的声卡名称、局域网地址与最近日志，<span className="font-medium">不包含你合成或发送的文字</span>
                       ；导出只是在你电脑上生成一个文件，本软件不会上传任何内容。
                     </p>
+                    <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 text-[10px] text-[var(--ink-500)]">
+                      <input
+                        type="checkbox"
+                        checked={diagIncludeHost}
+                        onChange={(e) => setDiagIncludeHost(e.target.checked)}
+                        className="h-3 w-3 accent-[var(--amber-600)]"
+                      />
+                      包含机器名与设备名（排查局域网连接问题时勾选；默认不勾，日志中的主机名也会一并抹去）
+                    </label>
                     <div className="mt-2 flex items-center gap-2">
                       <button
                         type="button"

@@ -41,21 +41,45 @@ fn section(body: Vec<String>) -> String {
 // ── 版本节 ──────────────────────────────────────────
 
 /// OS 版本串：`cmd /c ver`（零依赖；无控制台黑框，见 proc::hidden_command）。
+/// 中文系统的 ver 输出是 GBK（如「版本」二字），UTF-8 解码后成乱码，
+/// 这里只提取形如 10.0.26100.3025 的数字版本号，其余丢弃。
 fn os_version_line() -> String {
     let out = crate::proc::hidden_command("cmd")
         .args(["/c", "ver"])
         .output();
     match out {
         Ok(o) => {
-            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            if s.is_empty() {
-                "unavailable: cmd ver 无输出".into()
-            } else {
-                s
+            let raw = String::from_utf8_lossy(&o.stdout);
+            match extract_version_numbers(&raw) {
+                Some(v) => format!("Windows {v}"),
+                None => "unavailable: ver 输出未解析出版本号".into(),
             }
         }
         Err(e) => format!("unavailable: {e}"),
     }
+}
+
+/// 从（可能被编码污染的）文本中提取最长的 `d+.d+.d+` 形态版本号（纯 ASCII 扫描）。
+fn extract_version_numbers(s: &str) -> Option<String> {
+    let valid = |cur: &str| {
+        cur.matches('.').count() >= 2 && cur.starts_with(|c: char| c.is_ascii_digit())
+    };
+    let mut best: Option<String> = None;
+    let mut cur = String::new();
+    for c in s.chars() {
+        if c.is_ascii_digit() || c == '.' {
+            cur.push(c);
+        } else {
+            if valid(&cur) && best.as_ref().map(|b| cur.len() > b.len()).unwrap_or(true) {
+                best = Some(cur.clone());
+            }
+            cur.clear();
+        }
+    }
+    if valid(&cur) && best.as_ref().map(|b| cur.len() > b.len()).unwrap_or(true) {
+        best = Some(cur);
+    }
+    best
 }
 
 /// 安装形态：在 Uninstall 注册表树里搜应用标识，命中即安装版，否则便携版。
@@ -178,7 +202,7 @@ fn render_plugins(app: &AppHandle) -> String {
 
 // ── 遥关节 ──────────────────────────────────────────
 
-fn render_remote(app: &AppHandle) -> String {
+fn render_remote(app: &AppHandle, include_host: bool) -> String {
     // 子进程/TCP 探测放当前命令线程即可（诊断为低频手动操作）
     let listening = crate::commands::remote::port_listening();
     let firewall = std::thread::spawn(crate::commands::remote::firewall_rule_present);
@@ -203,7 +227,12 @@ fn render_remote(app: &AppHandle) -> String {
             lines.push(format!(
                 "已连接设备: {}",
                 if info.connected {
-                    format!("有（对端 {}）", info.peer.as_deref().unwrap_or("unknown"))
+                    let peer = if include_host {
+                        format!("（对端 {}）", info.peer.as_deref().unwrap_or("unknown"))
+                    } else {
+                        "（对端信息未勾选包含，省略）".into()
+                    };
+                    format!("有{peer}")
                 } else {
                     "无".into()
                 }
@@ -211,7 +240,12 @@ fn render_remote(app: &AppHandle) -> String {
             lines.push(format!(
                 "配对: {}",
                 if info.paired {
-                    format!("已配对（{}）", info.device.as_deref().unwrap_or("未知设备名"))
+                    // 设备名（手机型号/用户命名）归「包含机器名」复选，默认不采
+                    match (&info.device, include_host) {
+                        (Some(_), true) => format!("已配对（{}）", info.device.as_deref().unwrap_or("未知设备名")),
+                        (Some(_), false) => "已配对（设备名未勾选包含，省略）".into(),
+                        (None, _) => "已配对".into(),
+                    }
                 } else {
                     "未配对".into()
                 }
@@ -344,15 +378,51 @@ fn render_settings_summary(state: &State<AppState>) -> String {
 
 const LOG_TAIL_LINES: usize = 200;
 
-fn render_log_tail() -> String {
+/// 收集候选主机名（COMPUTERNAME / HOSTNAME 及 mdns 实例名同源的 32 字符截断变体）。
+fn candidate_hostnames() -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for key in ["COMPUTERNAME", "HOSTNAME"] {
+        if let Ok(h) = std::env::var(key) {
+            let h = h.trim().to_string();
+            if !h.is_empty() {
+                out.push(h.clone());
+                let short: String = h.chars().take(32).collect();
+                if short != h {
+                    out.push(short);
+                }
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// 未勾选「包含机器名」时，把日志行中的主机名替换为占位符（防 mDNS 等行带出主机名）。
+fn scrub_hosts(line: String, hosts: &[String]) -> String {
+    let mut out = line;
+    for h in hosts {
+        if !h.is_empty() {
+            out = out.replace(h.as_str(), "<redacted-host>");
+        }
+    }
+    out
+}
+
+fn render_log_tail(include_host: bool) -> String {
     let mut lines = vec!["## 日志尾部".into()];
     match crate::logging::log_file_path().and_then(|p| std::fs::read_to_string(&p).ok()) {
         Some(content) => {
             let all: Vec<&str> = content.lines().collect();
             let start = all.len().saturating_sub(LOG_TAIL_LINES);
-            lines.push(format!("（最后 {} 行，已经脱敏 + 200 字符截断）", all.len() - start));
+            lines.push(format!(
+                "（最后 {} 行，已经脱敏 + 200 字符截断{}）",
+                all.len() - start,
+                if include_host { "" } else { "；主机名已替换" }
+            ));
+            let hosts = if include_host { Vec::new() } else { candidate_hostnames() };
             for l in &all[start..] {
-                lines.push(redact_line(l));
+                lines.push(scrub_hosts(redact_line(l), &hosts));
             }
         }
         None => lines.push("diagnostics log is off".into()),
@@ -363,18 +433,24 @@ fn render_log_tail() -> String {
 // ── 命令本体 ────────────────────────────────────────
 
 /// 采集 → 渲染 → save 面板选路径 → 落盘（UTF-8 无 BOM）→ 返回路径。
+/// `include_host`：是否包含机器名/设备名（归确认面板复选，默认 false）。
 /// 用户取消保存时返回 Err("已取消")，前端据此静默复位（不算失败态）。
 #[tauri::command]
-pub fn export_diagnostics(app: AppHandle, state: State<AppState>) -> Result<DiagExportResult, String> {
+pub fn export_diagnostics(
+    app: AppHandle,
+    state: State<AppState>,
+    include_host: Option<bool>,
+) -> Result<DiagExportResult, String> {
+    let include_host = include_host.unwrap_or(false);
     // 逐节采集（每节独立兜底）
     let versions = safe_section(|| render_versions(&app));
     let paths = safe_section(|| render_paths(&state));
     let audio = safe_section(render_audio);
     let plugins = safe_section(|| render_plugins(&app));
-    let remote = safe_section(|| render_remote(&app));
+    let remote = safe_section(|| render_remote(&app, include_host));
     let hotkeys = safe_section(|| render_hotkeys(&app, &state));
     let settings = safe_section(|| render_settings_summary(&state));
-    let log_tail = safe_section(render_log_tail);
+    let log_tail = safe_section(|| render_log_tail(include_host));
 
     let head = format!(
         "VoiceAssist 诊断信息（本文件仅存于你的电脑，导出过程没有任何上传）\n生成时间: {}\n\n",
@@ -425,10 +501,44 @@ mod tests {
         // 模拟有人把用户文本打进了日志（这正是二次防线要拦的）
         log_info!("合成完成 text=\"今天股票会涨吗救救我\" engine=mimo");
         log_info!("识别结果: 内容=请把空调打开一点");
-        let tail = render_log_tail();
+        let tail = render_log_tail(false);
         assert!(!tail.contains("股票"), "诊断包日志尾部不得含用户文本原词");
         assert!(!tail.contains("空调"), "诊断包日志尾部不得含用户文本原词");
         assert!(tail.contains("<redacted len="), "应出现脱敏占位");
-        assert!(tail.contains("redact_line") || tail.contains("合成完成"), "非敏感骨架行应保留");
+        assert!(tail.contains("合成完成"), "非敏感骨架行应保留");
+    }
+
+    #[test]
+    fn 版本号提取_兼容gbk乱码与英文输出() {
+        // 中文系统 cmd /c ver 的 GBK 输出经 from_utf8_lossy 后「版本」成替换符
+        assert_eq!(
+            extract_version_numbers("Microsoft Windows [\u{FFFD}\u{FFFD} 10.0.26100.3025]"),
+            Some("10.0.26100.3025".into())
+        );
+        assert_eq!(
+            extract_version_numbers("Microsoft Windows [Version 10.0.19045.4046]"),
+            Some("10.0.19045.4046".into())
+        );
+        // 纯点号串与单段数字不算版本号
+        assert_eq!(extract_version_numbers("... 123 ab"), None);
+        // 取最长匹配
+        assert_eq!(
+            extract_version_numbers("v1.2.3 tail 10.0.22631.1"),
+            Some("10.0.22631.1".into())
+        );
+    }
+
+    #[test]
+    fn 主机名替换_含截断变体与不误伤() {
+        let hosts = vec!["FISHAWDK".to_string(), "FISHAWDK-PC".to_string()];
+        let out = scrub_hosts(
+            "[remote] mDNS 广播已启动: _ttsassist-remote._tcp.local. FISHAWDK 192.168.1.188:45271".into(),
+            &hosts,
+        );
+        assert!(out.contains("<redacted-host>"));
+        assert!(!out.contains("FISHAWDK"));
+        // 不含主机名的行原样
+        let line2 = "[info] done=ok".to_string();
+        assert_eq!(scrub_hosts(line2.clone(), &hosts), line2);
     }
 }

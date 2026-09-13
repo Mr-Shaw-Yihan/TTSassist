@@ -615,9 +615,10 @@ export async function installVbCable(zipPath: string): Promise<string> {
 // ── 诊断（T1 诊断包）────────────────────────────
 
 /** 一键导出诊断包：save 面板选路径后落盘一个 .txt（不含用户文本，不上传）。
+ *  includeHost：是否包含机器名/设备名（确认面板复选，默认 false）。
  *  用户在保存面板点「取消」时后端返回 Err("已取消")，调用方可静默处理 */
-export async function exportDiagnostics(): Promise<{ path: string; bytes: number; sections: number }> {
-  return invoke<{ path: string; bytes: number; sections: number }>("export_diagnostics");
+export async function exportDiagnostics(includeHost: boolean): Promise<{ path: string; bytes: number; sections: number }> {
+  return invoke<{ path: string; bytes: number; sections: number }>("export_diagnostics", { includeHost });
 }
 
 // ── 性能（T2 埋点）──────────────────────────────
