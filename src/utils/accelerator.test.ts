@@ -71,8 +71,14 @@ describe("buildAccelerator", () => {
     expect(buildAccelerator(ev("Space"))).toBe("Space");
   });
 
-  it("主键本身是 + 时拼出歧义串 Ctrl++（钉住现状，不修，见交付报告可疑点）", () => {
-    expect(buildAccelerator(ev("+", { ctrl: true }))).toBe("Ctrl++");
+  it("主键为 + 时拒绑返回 null（T-C 裁决：分隔符冲突且 global-hotkey 无 Plus 键码）", () => {
+    expect(buildAccelerator(ev("+", { ctrl: true }))).toBeNull();
+    // Shift+= 产出的同样是 "+"，一并拒绑
+    expect(buildAccelerator(ev("+", { ctrl: true, shift: true }))).toBeNull();
+  });
+
+  it("Ctrl 与 = 组合正常产出 Ctrl+=（+ 键的替代绑定路径）", () => {
+    expect(buildAccelerator(ev("=", { ctrl: true }))).toBe("Ctrl+=");
   });
 
   it("空格主键带修饰键拼出 Ctrl+Space（修复后）", () => {

@@ -51,6 +51,13 @@ export function HotkeyRecorder({ value, onApply, hint }: Props) {
     function onKey(e: KeyboardEvent) {
       e.preventDefault();
       e.stopPropagation();
+      // `+` 主键拒绑（T-C）：buildAccelerator 对它返回 null，但仅修饰键也返回 null——
+      // 前者需要提示、后者应继续等待，这里按 key 区分，判断与 accelerator.ts 裁决同步。
+      // 复用既有 error 提示通道，不新造 UI 状态。
+      if (e.key === "+") {
+        setError("`+` 键无法单独绑定，请改用 Ctrl+=");
+        return;
+      }
       const accel = buildAccelerator(e as unknown as React.KeyboardEvent);
       if (accel) setPending(accel);
     }

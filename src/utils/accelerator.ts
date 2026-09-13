@@ -31,6 +31,10 @@ export function buildAccelerator(e: {
   const key = e.key;
   // 仅按下修饰键（还没按主键）→ 继续等待
   if (["Control", "Alt", "Shift", "Meta"].includes(key)) return null;
+  // `+` 是加速键分隔符，且 .cargo 里 global-hotkey 的 parse_key 没有 Plus 键码
+  // （第二轮任务书 T-C 裁决）：绑出来必然是 "Ctrl++" 这种必失败串，前端直接拒绑。
+  // 含 Shift+= 组合产出的 "+"。
+  if (key === "+") return null;
   const parts: string[] = [];
   if (e.ctrlKey) parts.push("Ctrl");
   if (e.altKey) parts.push("Alt");
