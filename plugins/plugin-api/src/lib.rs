@@ -47,6 +47,11 @@ pub const SYM_VOICE_UNINSTALL: &[u8] = b"va_voice_uninstall\0";
 pub const SYM_VOICE_PRELOAD: &[u8] = b"va_voice_preload\0";
 pub const SYM_VOICE_IMPORT: &[u8] = b"va_voice_import\0";
 
+// ── 效果器（audio_effect）插件导出符号 ──────────────────────
+pub const SYM_FX_LIST: &[u8] = b"va_fx_list\0";
+pub const SYM_FX_PROCESS: &[u8] = b"va_fx_process\0";
+pub const SYM_FX_FREE_PCM: &[u8] = b"va_fx_free_pcm\0";
+
 // ── 宿主能力桥（host bridge）─────────────────────────────
 //
 // 现有符号全部是宿主→插件单向调用；能力桥补上插件→宿主反向调用：
@@ -811,6 +816,265 @@ macro_rules! va_tts_plugin_voices {
 }
 
 
+// ── 效果器（audio_effect）类型与宏 ──────────────────────────
+//
+// 效果器插件只做 PCM → PCM 的 DSP 数学；编解码由宿主负责（rodio 解码 f32 传入，
+// hound 编码 WAV 落盘）。设计见 doc/语音效果器插件设计.md §四。
+
+/// 效果器可调参数声明（v1 仅作数据通道与占位，UI 不开放调节入口）
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FxParamItem {
+    /// 参数标识（效果内唯一）
+    pub key: String,
+    /// UI 标签
+    pub label: String,
+    pub min: f64,
+    pub max: f64,
+    pub default: f64,
+    /// 单位（如 "Hz"），可为空
+    #[serde(default)]
+    pub unit: String,
+}
+
+/// va_fx_list 返回的 JSON 即 Vec<FxEffectItem>。
+/// 全局全名 = "<manifest.id>:<id>"，宿主以此隔离不同插件的效果 id 撞名。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FxEffectItem {
+    /// 效果 id（ASCII 蛇形；传给 va_fx_process 的 effect_id）
+    pub id: String,
+    /// 展示名（人类可读中文短语）
+    pub label: String,
+    #[serde(default)]
+    pub description: String,
+    /// 可调参数声明（可为空数组）
+    #[serde(default)]
+    pub params: Vec<FxParamItem>,
+}
+
+/// 把效果器列表序列化为插件用的 JSON 字符串
+pub fn fx_effects_to_json(effects: &[FxEffectItem]) -> String {
+    serde_json::to_string(effects).unwrap_or_else(|_| "[]".to_string())
+}
+
+/// 返回效果器清单 JSON（静态字符串，宿主立即拷贝，无需释放）
+pub type VaFxListFn = unsafe extern "C" fn() -> *const c_char;
+
+/// 效果处理入参（宿主已保证 pcm.len() == frames × channels，channels ∈ {1,2}）
+pub struct FxProcessInput<'a> {
+    /// 交错 PCM（一帧 = channels 个采样）
+    pub pcm: &'a [f32],
+    pub frames: usize,
+    pub channels: u32,
+    pub sample_rate: u32,
+    /// 不带插件前缀的效果 id
+    pub effect_id: &'a str,
+    /// 参数 JSON 字符串（必传；空串/ "{}" = 全默认值）
+    pub params_json: &'a str,
+}
+
+/// 效果处理出参（宏会校验 pcm.len() == frames × channels，不符则报错不越界）
+pub struct FxProcessOutput {
+    pub pcm: Vec<f32>,
+    pub frames: usize,
+    pub channels: u32,
+}
+
+/// PCM → PCM 效果处理。
+/// pcm_in：交错 f32；params_json：NUL 结尾 UTF-8（必传，NULL 视为非法——
+/// 非法入参一律返回 VA_ERR，不做静默兜底，见设计 §十一测试钉）。
+/// 成功写 out_pcm/out_frames/out_channels（插件分配，宿主拷贝后调 va_fx_free_pcm 归还）。
+pub type VaFxProcessFn = unsafe extern "C" fn(
+    pcm_in: *const f32,
+    frames: usize,
+    channels: u32,
+    sample_rate: u32,
+    effect_id: *const c_char,
+    params_json: *const c_char,
+    out_pcm: *mut *mut f32,
+    out_frames: *mut usize,
+    out_channels: *mut u32,
+    out_err: *mut *mut c_char,
+) -> i32;
+
+/// 释放 va_fx_process 输出缓冲（ptr/frames/channels 三个参数必须原样传回，
+/// 是 Box<[T]> 泄漏语义「ptr+len 原样传回」规矩的延续）
+pub type VaFxFreePcmFn = unsafe extern "C" fn(ptr: *mut f32, frames: usize, channels: u32);
+
+/// 效果器插件侧一键生成全部 C ABI 导出函数。
+///
+/// 用法：
+/// ```ignore
+/// plugin_api::va_fx_plugin! {
+///     id: "builtin-fx",
+///     name: "内置效果器包",
+///     version: "1.0.0",
+///     effects_json: r#"[{"id":"electric","label":"电音","params":[]}]"#,
+///     process: my_process,
+/// }
+/// ```
+///
+/// - id/name/version/effects_json 必须是字符串字面量（生成 NUL 结尾静态串）；
+/// - process 是 `fn(&FxProcessInput) -> Result<FxProcessOutput, String>`
+///   （DSP 数学 / 中文错误消息），实现应纯同步、无阻塞 IO；
+/// - 宏内 catch_unwind 包裹，插件 panic 不跨 FFI 边界；
+/// - 宏校验入参合法性（frames=0 / channels∉{1,2} / NULL effect_id 或 params_json /
+///   输出长度与声明不符 → VA_ERR，不 panic）。
+#[macro_export]
+macro_rules! va_fx_plugin {
+    (
+        id: $id:literal,
+        name: $name:literal,
+        version: $version:literal,
+        effects_json: $effects:literal,
+        process: $process:expr $(,)?
+    ) => {
+        static VA__ID: &[u8] = concat!($id, "\0").as_bytes();
+        static VA__NAME: &[u8] = concat!($name, "\0").as_bytes();
+        static VA__VERSION: &[u8] = concat!($version, "\0").as_bytes();
+        static VA__FX: &[u8] = concat!($effects, "\0").as_bytes();
+
+        #[no_mangle]
+        pub extern "C" fn va_plugin_id() -> *const ::std::os::raw::c_char {
+            VA__ID.as_ptr() as *const ::std::os::raw::c_char
+        }
+
+        #[no_mangle]
+        pub extern "C" fn va_plugin_name() -> *const ::std::os::raw::c_char {
+            VA__NAME.as_ptr() as *const ::std::os::raw::c_char
+        }
+
+        #[no_mangle]
+        pub extern "C" fn va_plugin_version() -> *const ::std::os::raw::c_char {
+            VA__VERSION.as_ptr() as *const ::std::os::raw::c_char
+        }
+
+        #[no_mangle]
+        pub extern "C" fn va_fx_list() -> *const ::std::os::raw::c_char {
+            VA__FX.as_ptr() as *const ::std::os::raw::c_char
+        }
+
+        #[no_mangle]
+        pub unsafe extern "C" fn va_fx_process(
+            pcm_in: *const f32,
+            frames: usize,
+            channels: u32,
+            sample_rate: u32,
+            effect_id: *const ::std::os::raw::c_char,
+            params_json: *const ::std::os::raw::c_char,
+            out_pcm: *mut *mut f32,
+            out_frames: *mut usize,
+            out_channels: *mut u32,
+            out_err: *mut *mut ::std::os::raw::c_char,
+        ) -> i32 {
+            // ── 入参合法性：任何一条不满足直接 VA_ERR（不 panic、不静默兜底）──
+            if pcm_in.is_null()
+                || frames == 0
+                || frames > (1usize << 40)
+                || !matches!(channels, 1 | 2)
+                || sample_rate == 0
+                || effect_id.is_null()
+                || params_json.is_null()
+                || out_pcm.is_null()
+                || out_frames.is_null()
+                || out_channels.is_null()
+            {
+                return $crate::VA_ERR;
+            }
+            let total = frames * channels as usize;
+            let pcm = unsafe { ::std::slice::from_raw_parts(pcm_in, total) };
+            let effect = match unsafe { ::std::ffi::CStr::from_ptr(effect_id) }.to_str() {
+                Ok(s) if !s.is_empty() => s,
+                _ => return $crate::VA_ERR,
+            };
+            let params = match unsafe { ::std::ffi::CStr::from_ptr(params_json) }.to_str() {
+                Ok(s) => s,
+                Err(_) => return $crate::VA_ERR,
+            };
+
+            let f: fn(&$crate::FxProcessInput) -> Result<$crate::FxProcessOutput, String> =
+                $process;
+            let result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| {
+                f(&$crate::FxProcessInput {
+                    pcm,
+                    frames,
+                    channels,
+                    sample_rate,
+                    effect_id: effect,
+                    params_json: params,
+                })
+            }));
+
+            match result {
+                Ok(Ok(out)) => {
+                    if out.pcm.len() != out.frames * out.channels as usize {
+                        if !out_err.is_null() {
+                            let c = ::std::ffi::CString::new(
+                                "插件输出长度与声明的 frames×channels 不符",
+                            )
+                            .unwrap();
+                            unsafe { *out_err = c.into_raw(); }
+                        }
+                        return $crate::VA_ERR;
+                    }
+                    if !matches!(out.channels, 1 | 2) {
+                        if !out_err.is_null() {
+                            let c =
+                                ::std::ffi::CString::new("插件输出通道数必须是 1 或 2").unwrap();
+                            unsafe { *out_err = c.into_raw(); }
+                        }
+                        return $crate::VA_ERR;
+                    }
+                    // into_boxed_slice 保证容量==长度，释放侧按 (ptr, frames, channels) 精确重建
+                    let boxed = out.pcm.into_boxed_slice();
+                    let len = boxed.len();
+                    let ptr = Box::into_raw(boxed) as *mut f32;
+                    unsafe {
+                        *out_pcm = ptr;
+                        *out_frames = out.frames;
+                        *out_channels = out.channels;
+                    }
+                    let _ = len;
+                    $crate::VA_OK
+                }
+                Ok(Err(e)) => {
+                    if !out_err.is_null() {
+                        let c = ::std::ffi::CString::new(e)
+                            .unwrap_or_else(|_| ::std::ffi::CString::new("fx error").unwrap());
+                        unsafe { *out_err = c.into_raw(); }
+                    }
+                    $crate::VA_ERR
+                }
+                Err(_) => {
+                    if !out_err.is_null() {
+                        let c =
+                            ::std::ffi::CString::new("效果器插件内部崩溃（panic）").unwrap();
+                        unsafe { *out_err = c.into_raw(); }
+                    }
+                    $crate::VA_ERR
+                }
+            }
+        }
+
+        #[no_mangle]
+        pub extern "C" fn va_fx_free_pcm(ptr: *mut f32, frames: usize, channels: u32) {
+            if !ptr.is_null() {
+                let len = frames * channels as usize;
+                unsafe {
+                    let slice = ::std::slice::from_raw_parts_mut(ptr, len);
+                    drop(Box::from_raw(slice));
+                }
+            }
+        }
+
+        #[no_mangle]
+        pub extern "C" fn va_free_cstr(ptr: *mut ::std::os::raw::c_char) {
+            if !ptr.is_null() {
+                unsafe { drop(::std::ffi::CString::from_raw(ptr)); }
+            }
+        }
+    };
+}
+
 // ── 插件侧宿主桥安全包装 ──────────────────────────────
 //
 // va_host_bridge! 宏把宿主注入的能力表存进本 dll 内的静态槽，
@@ -1068,7 +1332,8 @@ mod tests {
             std::mem::size_of::<usize>(),
             "ctx 应紧跟 version 之后的指针对齐位置"
         );
-        // 12 个成员：version(+填充) + ctx + 10 个函数指针
-        assert_eq!(std::mem::size_of::<VaHostServices>(), (2 + 10) * std::mem::size_of::<usize>());
+        // 13 个成员：version(+填充) + ctx + 11 个函数指针
+        //（confirm_dialog 为 v2 新增，原断言漏记导致测试红）
+        assert_eq!(std::mem::size_of::<VaHostServices>(), (2 + 11) * std::mem::size_of::<usize>());
     }
 }
