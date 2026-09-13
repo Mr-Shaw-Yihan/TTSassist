@@ -69,10 +69,12 @@ pub struct Settings {
     pub theme: String,
     /// Moss-TTS API Key（Authorization: Bearer <key>）
     pub moss_api_key: String,
-    /// MiniMax TTS 国内版 API Key
+    /// 仅作 plugin_config 迁移读取源（见 storage/settings.rs 迁移块），两个版本后删除。
+    /// 前端不采集、不展示。
     #[serde(default)]
     pub minimax_api_key: String,
-    /// MiniMax TTS 国际版 API Key
+    /// 仅作 plugin_config 迁移读取源（见 storage/settings.rs 迁移块），两个版本后删除。
+    /// 前端不采集、不展示。
     #[serde(default)]
     pub minimax_global_api_key: String,
     /// MiniMax 国际版本地记录的克隆音色 id（克隆音色首次合成前 get_voice 查不到，本地保证下拉可用）

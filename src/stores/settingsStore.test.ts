@@ -15,10 +15,11 @@ import { updateSetting } from "../services/invoke";
 const mockedUpdate = vi.mocked(updateSetting);
 
 /** 前端权威（types/index.ts 的 Settings）字段镜像清单。
- *  注意：后端 storage/types.rs 还有 minimax_api_key / minimax_global_api_key 两个字段
- *  未出现在前端 types（历史遗留，见交付报告可疑点）——本清单以 types 为准，
+ *  口径说明（T-F 裁决）：后端 storage/types.rs 还有 minimax_api_key / minimax_global_api_key
+ *  两个字段未出现在前端 types——它们是「旧 settings → plugin_config」迁移的读取源
+ *  （见 storage/settings.rs 迁移块，两个版本后删除），**不属于前端字段漂移，勿补入本清单**。
  *  后端/前端任一侧加字段时同步这里，漏一处测试即红。 */
-const EXPECTED_KEYS: (keyof Settings)[] = [
+const EXPECTED_KEYS = [
   "tts_engine",
   "tts_model",
   "playback_volume",
@@ -65,7 +66,15 @@ const EXPECTED_KEYS: (keyof Settings)[] = [
   "subtitle_pause_hotkey",
   "subtitle_max_lines",
   "subtitle_fade_seconds",
-];
+] as const;
+
+// 穷举守卫（T-E）：EXPECTED_KEYS 漏掉任何 Settings 字段时，下面这行在编译期报错
+// （Exclude 出非 never 类型则赋值不合法）。注意 EXPECTED_KEYS 必须是 as const 字面量
+// 元组——若标回 (keyof Settings)[] 注解，typeof 会被磨平成全集，守卫永久失效。
+// 运行时的 length 双校验保留作双保险。
+type Unlisted = Exclude<keyof Settings, (typeof EXPECTED_KEYS)[number]>;
+const _exhaustive: Unlisted extends never ? true : never = true;
+void _exhaustive; // noUnusedLocals 豁免只对参数生效，变量需显式消费
 
 /** 完整构造（TS 编译期保证与 types/index.ts 一致）：漏字段/多字段这里就编译不过 */
 function makeSettings(): Settings {
