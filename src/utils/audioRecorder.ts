@@ -134,8 +134,8 @@ export class AudioRecorder {
   }
 }
 
-/** 线性降采样（块内平均，抑制混叠） */
-function downsample(buffer: Float32Array, inputRate: number, outputRate: number): Float32Array {
+/** 线性降采样（块内平均，抑制混叠）。export 仅供单测（T3 授权的可见性放宽，行为未改） */
+export function downsample(buffer: Float32Array, inputRate: number, outputRate: number): Float32Array {
   if (inputRate === outputRate) return buffer;
   const ratio = inputRate / outputRate;
   const newLength = Math.round(buffer.length / ratio);
@@ -154,8 +154,8 @@ function downsample(buffer: Float32Array, inputRate: number, outputRate: number)
   return result;
 }
 
-/** Float32 PCM → WAV 字节（44 字节 RIFF 头 + PCM16 数据） */
-function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array {
+/** Float32 PCM → WAV 字节（44 字节 RIFF 头 + PCM16 数据）。export 仅供单测（同上） */
+export function encodeWav(samples: Float32Array, sampleRate: number): Uint8Array {
   const buffer = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(buffer);
 
