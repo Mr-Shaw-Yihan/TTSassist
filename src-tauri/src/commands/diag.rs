@@ -111,7 +111,7 @@ fn render_versions(app: &AppHandle) -> String {
 
 // ── 路径节 ──────────────────────────────────────────
 
-fn render_paths(state: &State<AppState>) -> String {
+fn render_paths(data_dir: &std::path::Path) -> String {
     let log_line = match crate::logging::log_file_path() {
         Some(p) => {
             let (size, mtime) = match std::fs::metadata(&p) {
@@ -133,7 +133,7 @@ fn render_paths(state: &State<AppState>) -> String {
     };
     section(vec![
         "## 路径".into(),
-        format!("data_dir: {}", state.data_dir.display()),
+        format!("data_dir: {}", data_dir.display()),
         format!("日志文件: {log_line}"),
         format!("诊断日志开关: {}", if crate::logging::is_enabled() { "开启" } else { "关闭" }),
     ])
@@ -171,6 +171,22 @@ fn render_audio() -> String {
     }
     let has_cable = devices.iter().any(|d| d.is_virtual_cable);
     lines.push(format!("VB-CABLE 在场: {}", if has_cable { "是" } else { "否" }));
+    // 输入（录音）设备（T-B）：ASR「听不到/识别不了」类报障的关键信息
+    lines.push("### 输入设备（录音）".into());
+    match std::panic::catch_unwind(crate::commands::mic::list_input_devices) {
+        Ok(inputs) => {
+            if inputs.is_empty() {
+                lines.push("- (未检测到输入设备)".into());
+            }
+            for d in &inputs {
+                lines.push(format!(
+                    "- {} | default={} | vb-cable={}",
+                    d.name, d.is_default, d.is_virtual_cable
+                ));
+            }
+        }
+        Err(_) => lines.push("- unavailable: 输入设备枚举发生内部错误".into()),
+    }
     section(lines)
 }
 
@@ -374,55 +390,127 @@ fn render_settings_summary(state: &State<AppState>) -> String {
     section(lines)
 }
 
-// ── 日志尾部节 ──────────────────────────────────────
+// ── 身份标识脱敏（T-A：整份 body 统一 scrub）────────
+
+/// 收集身份候选，返回 (主机/机器名候选, 用户名候选)。
+/// 主机名（COMPUTERNAME / HOSTNAME 及 mdns 实例名同源的 32 字符截断变体）
+/// 受「包含机器名」复选控制；用户名（USERNAME / USERPROFILE 的用户目录段）
+/// **永远脱敏，不在复选范围内**（第一轮 §3.4 C 红线的用户名部分，T-A 收口）。
+fn candidate_identities() -> (Vec<String>, Vec<String>) {
+    let mut hosts: Vec<String> = Vec::new();
+    for key in ["COMPUTERNAME", "HOSTNAME"] {
+        if let Ok(h) = std::env::var(key) {
+            push_identity(&mut hosts, &h);
+        }
+    }
+    let mut users: Vec<String> = Vec::new();
+    if let Ok(u) = std::env::var("USERNAME") {
+        push_identity(&mut users, &u);
+    }
+    if let Ok(profile) = std::env::var("USERPROFILE") {
+        // C:\Users\<账户名>\... → 取用户目录名段
+        if let Some(seg) = std::path::Path::new(&profile).file_name() {
+            push_identity(&mut users, &seg.to_string_lossy());
+        }
+    }
+    (hosts, users)
+}
+
+fn push_identity(out: &mut Vec<String>, raw: &str) {
+    let h = raw.trim().to_string();
+    if !h.is_empty() {
+        out.push(h.clone());
+        // mdns 实例名与 COMPUTERNAME 同源，截断到 32 字符（对齐 remote/mdns.rs hostname()）
+        let short: String = h.chars().take(32).collect();
+        if short != h {
+            out.push(short);
+        }
+    }
+}
+
+/// 由候选生成替换清单：去重（大小写不敏感口径）、过滤空串与长度 <2 的候选，
+/// 按长度降序排列（长候选先替换，防止 "FISHAWDK" 先于 "FISHAWDK-PC" 替换留下 "-PC" 残尾）。
+/// 大小写变体（ABC/abc/AbC…）由 replace_ci 的大小写不敏感匹配统一覆盖，不再逐个展开
+/// 形态——那是任务书原定「三形态」方案的超集（三形态覆盖不了 AbC 混合写法）。
+/// 空串与长度 <2 的候选直接丢弃——`replace("", X)` 会在每个字符之间插 X，
+/// 把整份文本炸成不可读垃圾（T-A 实现红线）。
+fn identity_variants(cands: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for c in cands {
+        let c = c.trim();
+        if c.chars().count() < 2 {
+            continue;
+        }
+        if !out.iter().any(|v| v.eq_ignore_ascii_case(c)) {
+            out.push(c.to_string());
+        }
+    }
+    out.sort_by_key(|h| std::cmp::Reverse(h.chars().count()));
+    out
+}
+
+/// 大小写不敏感（ASCII 范围）的整串替换；中文等非 ASCII 字符按原样参与相等比较。
+/// needle 为空时原样返回（防逐字符插入污染）。零依赖手写扫描，不引 regex。
+fn replace_ci(haystack: &str, needle: &str, replacement: &str) -> String {
+    if needle.is_empty() {
+        return haystack.to_string();
+    }
+    let hay: Vec<char> = haystack.chars().collect();
+    let pat: Vec<char> = needle.chars().collect();
+    let mut out = String::with_capacity(haystack.len());
+    let mut i = 0;
+    while i < hay.len() {
+        if i + pat.len() <= hay.len()
+            && hay[i..i + pat.len()]
+                .iter()
+                .zip(pat.iter())
+                .all(|(a, b)| a.eq_ignore_ascii_case(b))
+        {
+            out.push_str(replacement);
+            i += pat.len();
+        } else {
+            out.push(hay[i]);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// 对整份诊断文本做身份脱敏：用户名候选无条件替换；主机名候选仅在
+/// 未勾选「包含机器名」（include_host = false）时替换。
+/// 统一挂在 export_diagnostics 的 body 汇总处——以后新增任何节都自动受管。
+fn scrub_body(
+    body: String,
+    include_host: bool,
+    host_cands: &[String],
+    user_cands: &[String],
+) -> String {
+    let mut out = body;
+    if !include_host {
+        for h in identity_variants(host_cands) {
+            out = replace_ci(&out, &h, "<redacted-host>");
+        }
+    }
+    for u in identity_variants(user_cands) {
+        out = replace_ci(&out, &u, "<redacted-host>");
+    }
+    out
+}
 
 const LOG_TAIL_LINES: usize = 200;
 
-/// 收集候选主机名（COMPUTERNAME / HOSTNAME 及 mdns 实例名同源的 32 字符截断变体）。
-fn candidate_hostnames() -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for key in ["COMPUTERNAME", "HOSTNAME"] {
-        if let Ok(h) = std::env::var(key) {
-            let h = h.trim().to_string();
-            if !h.is_empty() {
-                out.push(h.clone());
-                let short: String = h.chars().take(32).collect();
-                if short != h {
-                    out.push(short);
-                }
-            }
-        }
-    }
-    out.sort();
-    out.dedup();
-    out
-}
-
-/// 未勾选「包含机器名」时，把日志行中的主机名替换为占位符（防 mDNS 等行带出主机名）。
-fn scrub_hosts(line: String, hosts: &[String]) -> String {
-    let mut out = line;
-    for h in hosts {
-        if !h.is_empty() {
-            out = out.replace(h.as_str(), "<redacted-host>");
-        }
-    }
-    out
-}
-
-fn render_log_tail(include_host: bool) -> String {
+fn render_log_tail() -> String {
     let mut lines = vec!["## 日志尾部".into()];
     match crate::logging::log_file_path().and_then(|p| std::fs::read_to_string(&p).ok()) {
         Some(content) => {
             let all: Vec<&str> = content.lines().collect();
             let start = all.len().saturating_sub(LOG_TAIL_LINES);
             lines.push(format!(
-                "（最后 {} 行，已经脱敏 + 200 字符截断{}）",
-                all.len() - start,
-                if include_host { "" } else { "；主机名已替换" }
+                "（最后 {} 行，已经脱敏 + 200 字符截断；身份标识在整份汇总时统一脱敏）",
+                all.len() - start
             ));
-            let hosts = if include_host { Vec::new() } else { candidate_hostnames() };
             for l in &all[start..] {
-                lines.push(scrub_hosts(redact_line(l), &hosts));
+                lines.push(redact_line(l));
             }
         }
         None => lines.push("diagnostics log is off".into()),
@@ -433,7 +521,8 @@ fn render_log_tail(include_host: bool) -> String {
 // ── 命令本体 ────────────────────────────────────────
 
 /// 采集 → 渲染 → save 面板选路径 → 落盘（UTF-8 无 BOM）→ 返回路径。
-/// `include_host`：是否包含机器名/设备名（归确认面板复选，默认 false）。
+/// `include_host`：是否包含机器名（归确认面板复选，默认 false）；
+/// 用户名不受该复选控制，永远脱敏。
 /// 用户取消保存时返回 Err("已取消")，前端据此静默复位（不算失败态）。
 #[tauri::command]
 pub fn export_diagnostics(
@@ -442,21 +531,24 @@ pub fn export_diagnostics(
     include_host: Option<bool>,
 ) -> Result<DiagExportResult, String> {
     let include_host = include_host.unwrap_or(false);
+    let (host_cands, user_cands) = candidate_identities();
     // 逐节采集（每节独立兜底）
     let versions = safe_section(|| render_versions(&app));
-    let paths = safe_section(|| render_paths(&state));
+    let paths = safe_section(|| render_paths(&state.data_dir));
     let audio = safe_section(render_audio);
     let plugins = safe_section(|| render_plugins(&app));
     let remote = safe_section(|| render_remote(&app, include_host));
     let hotkeys = safe_section(|| render_hotkeys(&app, &state));
     let settings = safe_section(|| render_settings_summary(&state));
-    let log_tail = safe_section(|| render_log_tail(include_host));
+    let log_tail = safe_section(render_log_tail);
 
     let head = format!(
         "VoiceAssist 诊断信息（本文件仅存于你的电脑，导出过程没有任何上传）\n生成时间: {}\n\n",
         chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
     );
     let body = format!("{head}{versions}{paths}{audio}{plugins}{remote}{hotkeys}{settings}{log_tail}");
+    // 整份统一身份脱敏（T-A）：用户名永远替换；主机名按复选
+    let body = scrub_body(body, include_host, &host_cands, &user_cands);
     let sections: u32 = 8;
 
     // 默认文件名：va-diag-<版本>-<yyyyMMdd-HHmmss>.txt；默认落「下载」目录
@@ -479,7 +571,12 @@ pub fn export_diagnostics(
     let bytes = body.as_bytes().len() as u64;
     std::fs::write(&path, body.as_bytes()).map_err(|e| format!("写入诊断文件失败: {e}"))?;
 
-    log_info!("[diag] 诊断包已导出: {}（{bytes} bytes，{sections} 节）", path.display());
+    // 自指导（T-A #5）：只打文件名——完整路径含账户名，下一次导出的日志尾部会把它带进诊断包
+    let fname = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| default_name.clone());
+    log_info!("[diag] 诊断包已导出: {fname}（{bytes} bytes，{sections} 节）");
     Ok(DiagExportResult {
         path: path.to_string_lossy().into_owned(),
         bytes,
@@ -501,7 +598,7 @@ mod tests {
         // 模拟有人把用户文本打进了日志（这正是二次防线要拦的）
         log_info!("合成完成 text=\"今天股票会涨吗救救我\" engine=mimo");
         log_info!("识别结果: 内容=请把空调打开一点");
-        let tail = render_log_tail(false);
+        let tail = render_log_tail();
         assert!(!tail.contains("股票"), "诊断包日志尾部不得含用户文本原词");
         assert!(!tail.contains("空调"), "诊断包日志尾部不得含用户文本原词");
         assert!(tail.contains("<redacted len="), "应出现脱敏占位");
@@ -531,14 +628,127 @@ mod tests {
     #[test]
     fn 主机名替换_含截断变体与不误伤() {
         let hosts = vec!["FISHAWDK".to_string(), "FISHAWDK-PC".to_string()];
-        let out = scrub_hosts(
+        let out = scrub_body(
             "[remote] mDNS 广播已启动: _ttsassist-remote._tcp.local. FISHAWDK 192.168.1.188:45271".into(),
+            false,
             &hosts,
+            &[],
         );
-        assert!(out.contains("<redacted-host>"));
-        assert!(!out.contains("FISHAWDK"));
+        assert_eq!(
+            out,
+            "[remote] mDNS 广播已启动: _ttsassist-remote._tcp.local. <redacted-host> 192.168.1.188:45271"
+        );
         // 不含主机名的行原样
         let line2 = "[info] done=ok".to_string();
-        assert_eq!(scrub_hosts(line2.clone(), &hosts), line2);
+        assert_eq!(scrub_body(line2.clone(), false, &hosts, &[]), line2);
+    }
+
+    // ── T-A 七条 + 全链路共八条：身份标识收口（逐条独立，不许合并）──────
+
+    #[test]
+    fn 用户名从路径节被脱敏() {
+        let paths = render_paths(std::path::Path::new(
+            "C:\\Users\\unituser\\AppData\\Roaming\\com.voiceassist.app",
+        ));
+        let scrubbed = scrub_body(paths, false, &[], &["unituser".to_string()]);
+        let data_line = scrubbed
+            .lines()
+            .find(|l| l.starts_with("data_dir:"))
+            .expect("路径节必有 data_dir 行");
+        assert_eq!(
+            data_line,
+            "data_dir: C:\\Users\\<redacted-host>\\AppData\\Roaming\\com.voiceassist.app"
+        );
+        assert!(!scrubbed.contains("unituser"));
+    }
+
+    #[test]
+    fn 用户名经真实环境候选被脱敏() {
+        // 全链路：candidate_identities() 读真实环境 → scrub 真实账户名。
+        // USERNAME 与 USERPROFILE 段在标准 Windows 上同值（双来源冗余，单一来源
+        // 被移除不致漏脱敏）；反测需同时移除两个来源才会变红。
+        let user = std::env::var("USERNAME").unwrap_or_default();
+        if user.trim().chars().count() < 2 {
+            // 环境无用户名（极端 CI），本测试无从验证，静默通过
+            return;
+        }
+        let dir = format!("C:\\Users\\{user}\\AppData\\Roaming\\com.voiceassist.app");
+        let paths = render_paths(std::path::Path::new(&dir));
+        let (hosts, users) = candidate_identities();
+        let scrubbed = scrub_body(paths, false, &hosts, &users);
+        let data_line = scrubbed
+            .lines()
+            .find(|l| l.starts_with("data_dir:"))
+            .expect("路径节必有 data_dir 行");
+        assert_eq!(
+            data_line,
+            "data_dir: C:\\Users\\<redacted-host>\\AppData\\Roaming\\com.voiceassist.app"
+        );
+        assert!(!scrubbed.contains(&user));
+    }
+
+    #[test]
+    fn 主机名大小写三形态均被替换() {
+        let body = "行一 host=ABC\n行二 host=abc\n行三 host=AbC".to_string();
+        let out = scrub_body(body, false, &["ABC".to_string()], &[]);
+        assert_eq!(
+            out,
+            "行一 host=<redacted-host>\n行二 host=<redacted-host>\n行三 host=<redacted-host>"
+        );
+    }
+
+    #[test]
+    fn 长候选优先于短候选() {
+        let cands = vec!["FISHAWDK".to_string(), "FISHAWDK-PC".to_string()];
+        let out = scrub_body("dev=FISHAWDK-PC".into(), false, &cands, &[]);
+        assert_eq!(out, "dev=<redacted-host>");
+        assert!(!out.contains("-PC"), "不得留 -PC 残尾");
+    }
+
+    #[test]
+    fn 设备名含账户名时被脱敏() {
+        let body = "  - unituser 的麦克风 | default=false | vb-cable=false".to_string();
+        let out = scrub_body(body, false, &[], &["unituser".to_string()]);
+        assert_eq!(out, "  - <redacted-host> 的麦克风 | default=false | vb-cable=false");
+    }
+
+    #[test]
+    fn 勾选包含机器名时不脱敏() {
+        // 主机名受复选控制：勾选后原样保留；用户名不在复选范围，永远替换
+        let body = "host=FISHAWDK user=unituser".to_string();
+        let out = scrub_body(
+            body,
+            true,
+            &["FISHAWDK".to_string()],
+            &["unituser".to_string()],
+        );
+        assert_eq!(out, "host=FISHAWDK user=<redacted-host>");
+    }
+
+    #[test]
+    fn 空候选不会污染文本() {
+        // replace("", X) 会逐字符插 X；空候选必须在收集/变体阶段被丢弃
+        let src = "abcdef 身份行".to_string();
+        let out = scrub_body(src.clone(), false, &["".to_string()], &["".to_string()]);
+        assert_eq!(out, src);
+    }
+
+    #[test]
+    fn 脱敏幂等() {
+        let body = "host=FISHAWDK-PC user=unituser dev=unituser 的麦克风".to_string();
+        let once = scrub_body(body.clone(), false, &["FISHAWDK-PC".to_string()], &["unituser".to_string()]);
+        let twice = scrub_body(once.clone(), false, &["FISHAWDK-PC".to_string()], &["unituser".to_string()]);
+        assert_eq!(once, twice);
+    }
+
+    // ── T-B：输入设备小节 ──────────────────────────────
+
+    #[test]
+    fn 音频节含输入设备标题且不panic() {
+        // 真实环境枚举（CI/无设备环境也应正常返回空列表而非 panic）
+        let out = std::panic::catch_unwind(render_audio)
+            .expect("render_audio 不得 panic（分节兜底风格）");
+        let has_title = out.lines().any(|l| l == "### 输入设备（录音）");
+        assert!(has_title, "音频节必须含输入设备小节标题行");
     }
 }

@@ -232,6 +232,26 @@ pub fn list_output_devices() -> Vec<AudioDevice> {
         .unwrap_or_default()
 }
 
+/// 输入（录音）设备枚举，字段口径与 list_output_devices 完全一致。
+/// 唯一消费方：诊断包「音频」节（T-B）；前端不加 UI。
+pub fn list_input_devices() -> Vec<AudioDevice> {
+    let host = cpal::default_host();
+    let default_name = host.default_input_device().and_then(|d| d.name().ok());
+    host.input_devices()
+        .map(|iter| {
+            iter.filter_map(|d| {
+                let name = d.name().ok()?;
+                Some(AudioDevice {
+                    is_virtual_cable: is_vb_cable(&name),
+                    is_default: default_name.as_deref() == Some(name.as_str()),
+                    name,
+                })
+            })
+            .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn is_vb_cable(name: &str) -> bool {
     let lower = name.to_lowercase();
     lower.contains("cable") || lower.contains("vb-audio") || lower.contains("vb audio")
@@ -239,6 +259,7 @@ fn is_vb_cable(name: &str) -> bool {
 
 // ── Tauri 命令 ──
 
+/// 命名历史遗留：本命令返回的是输出设备（语音发往哪个设备），输入设备枚举见 list_input_devices。
 #[tauri::command]
 pub fn list_mic_devices() -> Vec<AudioDevice> {
     list_output_devices()
