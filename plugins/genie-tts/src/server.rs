@@ -40,6 +40,7 @@ pub fn ensure_server(ctx: &Ctx) -> Result<u16, String> {
         if crate::client::health(state.port) {
             return Ok(state.port);
         }
+        // allowlog: 仅固定文案（服务看门狗重启提示），无任何用户数据
         eprintln!("[genie-tts] 服务进程失联，准备重启");
         if let Some(mut old) = guard.take() {
             let _ = old.child.kill();
@@ -75,6 +76,7 @@ pub fn ensure_server(ctx: &Ctx) -> Result<u16, String> {
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
 
+    // allowlog: 仅输出端口号，无任何用户数据
     eprintln!("[genie-tts] 启动 Genie 服务（端口 {port}）");
     let child = cmd
         .spawn()

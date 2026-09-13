@@ -117,6 +117,7 @@ impl GenieConfig {
             if let Ok(cfg) = serde_json::from_str::<GenieConfig>(raw.trim_start_matches('\u{FEFF}')) {
                 return cfg;
             }
+            // allowlog: 仅固定文案（配置解析失败提示），无任何用户数据
             eprintln!("genie-config.json 解析失败，使用默认配置");
         }
         let cfg = GenieConfig {

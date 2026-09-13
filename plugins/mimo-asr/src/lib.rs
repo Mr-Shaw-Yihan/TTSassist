@@ -134,7 +134,8 @@ async fn call_mimo_asr(
         if status.as_u16() == 429 {
             return Err("MiMo ASR 请求过于频繁（429）：已触发限流，请稍后重试".to_string());
         }
-        return Err(format!("MiMo ASR 返回 {status}: {text}"));
+        // 只保留状态码与响应体长度——响应体原文可能含用户语音转写内容，不进任何输出
+        return Err(format!("MiMo ASR 返回 {status}（响应 {} 字节）", text.chars().count()));
     }
 
     // 解析 OpenAI 兼容响应：choices[0].message.content
@@ -210,10 +211,9 @@ mod tests {
             .unwrap_or_else(|e| panic!("读取测试音频失败: {} ({e})", audio_path.display()));
 
         let result = transcribe(&audio, Some("zh"));
-        println!("转写结果: {:?}", result);
         assert!(result.is_ok(), "转写失败: {:?}", result.err());
         let text = result.unwrap();
         assert!(!text.is_empty(), "转写结果为空");
-        println!("识别文本: {text}");
+        // T-D：识别文本（= 用户说话内容）不再 println 到 stdout
     }
 }

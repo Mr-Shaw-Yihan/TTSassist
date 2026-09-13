@@ -80,6 +80,7 @@ pub fn uninstall_voice(voice_id: &str) -> Result<String, String> {
     // 服务在跑就先卸载内存中的权重（尽力而为：失败不阻塞文件删除）
     if let Some(port) = crate::server::running_port() {
         if let Err(e) = crate::client::unload_character(port, voice_id) {
+            // allowlog: 仅插件内部错误消息 {e}，不含用户文本/音频内容
             eprintln!("[genie-tts] 卸载内存音色失败（不影响删文件）: {e}");
         }
     }
