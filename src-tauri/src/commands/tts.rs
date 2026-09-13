@@ -104,6 +104,8 @@ impl Drop for SynthesizingFlag {
 /// 读设置 → 引擎分发合成 → 写消息记录 → 广播 → 开关开启时发虚拟麦克风。
 /// 扬声器播放由调用方负责（前端命令路径自行播放；桥路径经 playback:play 事件触发）。
 pub async fn generate_tts_impl(app: &AppHandle, text: &str) -> Result<Message, String> {
+    // [perf] T2 埋点：tts_first_audio 起点（命令进入）
+    let t0 = std::time::Instant::now();
     let state = app.state::<AppState>();
     let mic = app.state::<crate::commands::mic::MicPlayback>();
     let plugins = app.state::<PluginManager>();
@@ -174,6 +176,23 @@ pub async fn generate_tts_impl(app: &AppHandle, text: &str) -> Result<Message, S
             engine.generate(params).await.map_err(|e| format!("{e}"))?
         }
     };
+
+    // [perf] T2 埋点：引擎返回 = 音频文件已写完可播放（不含播放设备缓冲延迟）。
+    // cache 恒为 miss：当前 generate_tts 无缓存/收藏复用路径（收藏播放由前端直播已有
+    // 音频文件，不进本命令）；保留该字段，防止将来引入缓存后两条路径的数字被混读。
+    // 只记长度不记内容（隐私规则 §3.4）。
+    log_info!(
+        "{}",
+        crate::perf::perf_line(
+            "tts_first_audio",
+            t0.elapsed().as_millis() as u64,
+            &[
+                ("engine", tts_engine.as_str()),
+                ("cache", "miss"),
+                ("len", &text.chars().count().to_string()),
+            ],
+        )
+    );
 
     // 3. 保存消息记录
     let message = Message {

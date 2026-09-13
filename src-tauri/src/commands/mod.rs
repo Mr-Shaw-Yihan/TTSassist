@@ -13,6 +13,7 @@ pub mod floating_ball;
 pub mod message;
 pub mod mic;
 pub mod minimax_clone;
+pub mod perf;
 pub mod plugins;
 pub mod remote;
 pub mod settings;

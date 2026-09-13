@@ -37,6 +37,7 @@ import {
   stopMic,
   listPlugins,
   promptEngineWarmup,
+  perfStartupDone,
 } from "./services/invoke";
 import type { Message, Favorite, PluginSetupProgress } from "./types";
 
@@ -101,6 +102,8 @@ function App() {
 
   // 启动时：加载设置 + 加载最近一页消息 + 收藏
   useEffect(() => {
+    // [perf] main 窗口前端首帧回执（后端只记第一次；失败静默，不影响业务）
+    void perfStartupDone().catch(() => {});
     (async () => {
       try {
         const s = await getSettings();

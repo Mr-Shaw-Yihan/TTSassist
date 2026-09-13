@@ -9,6 +9,7 @@ pub mod audio_capture;
 pub mod commands;
 pub mod diag_redact;
 pub mod hotkey;
+pub mod perf;
 pub mod plugins;
 pub mod proc;
 pub mod remote;
@@ -89,6 +90,8 @@ fn show_main_window(app: tauri::AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // [perf] startup 起点（T2）：run() 进入 → 前端首帧（perf_startup_done 命令回执）
+    let _ = crate::perf::START.set(std::time::Instant::now());
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // 已有实例被再次启动：把已存在的主窗拉前台
@@ -319,6 +322,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             crate::commands::tts::generate_tts,
+            crate::commands::perf::perf_startup_done,
             crate::commands::diag::export_diagnostics,
             crate::commands::plugins::list_plugins,
             crate::commands::plugins::uninstall_plugin,

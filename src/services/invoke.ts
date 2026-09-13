@@ -619,3 +619,10 @@ export async function installVbCable(zipPath: string): Promise<string> {
 export async function exportDiagnostics(): Promise<{ path: string; bytes: number; sections: number }> {
   return invoke<{ path: string; bytes: number; sections: number }>("export_diagnostics");
 }
+
+// ── 性能（T2 埋点）──────────────────────────────
+
+/** main 窗口首帧回执：记录 run() 进入 → 前端首帧的 startup 耗时（后端只记第一次） */
+export async function perfStartupDone(): Promise<void> {
+  return invoke<void>("perf_startup_done");
+}
