@@ -7,6 +7,7 @@ pub mod logging;
 pub mod asr;
 pub mod audio_capture;
 pub mod commands;
+pub mod diag_redact;
 pub mod hotkey;
 pub mod plugins;
 pub mod proc;
@@ -318,6 +319,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             crate::commands::tts::generate_tts,
+            crate::commands::diag::export_diagnostics,
             crate::commands::plugins::list_plugins,
             crate::commands::plugins::uninstall_plugin,
             crate::commands::plugins::get_plugin_config,

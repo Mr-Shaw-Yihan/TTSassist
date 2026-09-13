@@ -611,3 +611,11 @@ export async function downloadVbCable(): Promise<string> {
 export async function installVbCable(zipPath: string): Promise<string> {
   return invoke<string>("install_vb_cable", { zipPath });
 }
+
+// ── 诊断（T1 诊断包）────────────────────────────
+
+/** 一键导出诊断包：save 面板选路径后落盘一个 .txt（不含用户文本，不上传）。
+ *  用户在保存面板点「取消」时后端返回 Err("已取消")，调用方可静默处理 */
+export async function exportDiagnostics(): Promise<{ path: string; bytes: number; sections: number }> {
+  return invoke<{ path: string; bytes: number; sections: number }>("export_diagnostics");
+}

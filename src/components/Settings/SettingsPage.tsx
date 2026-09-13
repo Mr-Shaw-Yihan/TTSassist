@@ -4,10 +4,10 @@
 
 import { useState, useEffect } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "../../stores/updateStore";
-import { listPlugins, setHotkey, setVoiceInputHotkey, setPlayLastHotkey, setMicToggleHotkey } from "../../services/invoke";
+import { listPlugins, setHotkey, setVoiceInputHotkey, setPlayLastHotkey, setMicToggleHotkey, exportDiagnostics } from "../../services/invoke";
 import { resetFloatingBallPos } from "../../services/invoke";
 import type { PluginInfo } from "../../types";
 import { HotkeyRecorder } from "./HotkeyRecorder";
@@ -16,6 +16,7 @@ import { PluginConfigPanel } from "./PluginConfigPanel";
 import { Section } from "../common/SettingsSection";
 import { AppUpdater } from "../common/AppUpdater";
 import { CopyableGroupId } from "../common/CopyableGroupId";
+import { TexIcon } from "../icons/TexIcon";
 
 const THEMES = [
   { id: "light", label: "安墨（浅色）", desc: "宣纸暖白 · 墨色 · 暖琥珀" },
@@ -57,6 +58,29 @@ export function SettingsPage() {
   useEffect(() => {
     listPlugins().then(setPlugins).catch(() => {});
   }, []);
+
+  // 诊断包导出：idle →（点按钮）confirm →（确认）working → done / error
+  const [diagPhase, setDiagPhase] = useState<"idle" | "confirm" | "working" | "done" | "error">("idle");
+  const [diagPath, setDiagPath] = useState("");
+  const [diagError, setDiagError] = useState("");
+
+  async function handleDiagExport() {
+    setDiagPhase("working");
+    try {
+      const r = await exportDiagnostics();
+      setDiagPath(r.path);
+      setDiagPhase("done");
+    } catch (e) {
+      const msg = String(e);
+      if (msg.includes("取消")) {
+        // 用户在保存面板点取消：静默复位，不算失败态
+        setDiagPhase("idle");
+        return;
+      }
+      setDiagError(msg);
+      setDiagPhase("error");
+    }
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -350,6 +374,99 @@ export function SettingsPage() {
                 <div className="mt-1 text-[10px] leading-relaxed text-[var(--ink-300)]">
                   开启后会把运行日志额外保存到本地 <span className="font-mono">…/logs/app.log</span>，仅用于排查问题；日志不含你合成的文本，也不会上传。反馈问题时把该文件发给开发者即可。
                 </div>
+              </div>
+
+              {/* 导出诊断信息（T1）：确认面板 → 采集 → 落盘 .txt（不上传、不含用户文本） */}
+              <div className="mt-3 rounded-lg border border-[var(--ink-200)] bg-[var(--ink-100)]/40 px-3 py-2">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-[11px] font-medium text-[var(--ink-600)]">导出诊断信息</div>
+                    <div className="mt-1 text-[10px] leading-relaxed text-[var(--ink-300)]">
+                      一键收集版本、声卡、插件、防火墙等排障信息，生成一个文本文件发给开发者。
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDiagPhase(diagPhase === "confirm" ? "idle" : "confirm")}
+                    aria-pressed={diagPhase === "confirm"}
+                    disabled={diagPhase === "working"}
+                    className={[
+                      "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium transition-colors disabled:opacity-50",
+                      diagPhase === "confirm"
+                        ? "bg-[var(--amber-500)] text-[var(--paper)]"
+                        : "border border-[var(--ink-200)] text-[var(--ink-400)] hover:text-[var(--ink-700)]",
+                    ].join(" ")}
+                  >
+                    <TexIcon name="copy" size={13} className="[--lnw:1.5]" />
+                    {diagPhase === "working" ? "采集中…" : "导出诊断信息"}
+                  </button>
+                </div>
+
+                {/* 确认面板：逐节列明内容 + 隐私说明（文案写死，不走 i18n） */}
+                {diagPhase === "confirm" && (
+                  <div className="mt-2 rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/20 px-3 py-2">
+                    <div className="text-[11px] leading-relaxed text-[var(--ink-600)]">将采集以下信息：</div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {["版本", "路径", "音频", "插件", "遥控", "快捷键", "设置摘要", "日志尾部（已脱敏）"].map((s) => (
+                        <span key={s} className="rounded-md bg-[var(--paper-card)] px-1.5 py-0.5 text-[10px] text-[var(--ink-500)]">
+                          {s}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="mt-2 text-[10px] leading-relaxed text-[var(--ink-500)]">
+                      诊断包含你的声卡名称、局域网地址与最近日志，<span className="font-medium">不包含你合成或发送的文字</span>
+                      ；导出只是在你电脑上生成一个文件，本软件不会上传任何内容。
+                    </p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { void handleDiagExport(); }}
+                        className="rounded-full bg-[var(--amber-500)] px-3 py-1 text-[11px] font-medium text-[var(--paper)] transition-colors hover:bg-[var(--amber-600)]"
+                      >
+                        确认导出
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDiagPhase("idle")}
+                        className="rounded-full border border-[var(--ink-200)] px-3 py-1 text-[11px] text-[var(--ink-400)] transition-colors hover:text-[var(--ink-700)]"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* 成功：显示文件名 + 打开所在文件夹 */}
+                {diagPhase === "done" && (
+                  <div className="mt-2 rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2">
+                    <div className="text-[11px] text-[var(--ink-600)]">
+                      已导出：<span className="font-mono text-[10px]">{diagPath.split(/[\\/]/).pop()}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { void revealItemInDir(diagPath).catch(() => {}); }}
+                      className="mt-1.5 rounded-full border border-[var(--ink-200)] px-2.5 py-1 text-[10px] text-[var(--ink-500)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)]"
+                    >
+                      打开所在文件夹
+                    </button>
+                  </div>
+                )}
+
+                {/* 失败：callout 风格错误文案（不 alert） */}
+                {diagPhase === "error" && (
+                  <div className="mt-2">
+                    <div className="rounded-lg border border-[var(--seal)]/40 bg-[var(--seal)]/5 px-3 py-2 text-[11px] leading-relaxed text-[var(--seal)]">
+                      导出失败：{diagError}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setDiagPhase("idle")}
+                      className="mt-1.5 rounded-full border border-[var(--ink-200)] px-2.5 py-1 text-[10px] text-[var(--ink-400)] transition-colors hover:text-[var(--ink-700)]"
+                    >
+                      返回
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* 免责声明 */}

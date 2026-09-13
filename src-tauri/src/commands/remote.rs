@@ -154,14 +154,16 @@ pub struct LanIp {
 }
 
 /// 本机对外局域网 IP（UDP connect 技巧，取默认路由出口，无实际流量）
-fn egress_ip() -> Option<std::net::IpAddr> {
+// pub(crate)：诊断包（commands/diag.rs）复用，见任务书 §一 可见性授权
+pub(crate) fn egress_ip() -> Option<std::net::IpAddr> {
     let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     sock.connect("8.8.8.8:80").ok()?;
     Some(sock.local_addr().ok()?.ip())
 }
 
 /// 端口是否可连（原生 TCP 连回环，绕开 PowerShell/cmdlet 依赖，最稳）
-fn port_listening() -> bool {
+// pub(crate)：诊断包（commands/diag.rs）复用，见任务书 §一 可见性授权
+pub(crate) fn port_listening() -> bool {
     use std::io::ErrorKind;
     use std::net::{TcpStream, ToSocketAddrs};
     use std::time::Duration;
@@ -176,7 +178,8 @@ fn port_listening() -> bool {
 }
 
 /// 防火墙是否已放行 TCP 45271（netsh 输出含本规则 ASCII 名即认为存在，跨语言稳健）
-fn firewall_rule_present() -> bool {
+// pub(crate)：诊断包（commands/diag.rs）复用，见任务书 §一 可见性授权
+pub(crate) fn firewall_rule_present() -> bool {
     const RULE: &str = "VoiceAssist Remote TCP 45271";
     // 走 hidden_command：本函数在每次进入「遥控」页时被调用，
     // 直接派生 netsh 会闪一个控制台黑框（GUI 进程无控制台，子进程会被临时分配一个）。

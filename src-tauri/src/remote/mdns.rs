@@ -5,6 +5,22 @@
 // App 仍可手动填 IP:端口 连接。原 lan-remote 插件 mdns_adv.rs 迁入本体。
 
 use std::net::{IpAddr, ToSocketAddrs, UdpSocket};
+use std::sync::Mutex;
+
+/// mDNS 注册状态（诊断包查询用）：None = 广播线程尚未尝试；
+/// Some(Ok) = 已成功注册；Some(Err) = 尝试过的失败原因。
+static REGISTRATION: Mutex<Option<Result<(), String>>> = Mutex::new(None);
+
+/// 诊断包读取注册状态（remote/mod.rs spawn 之后才会被填充）。
+pub(crate) fn registration_state() -> Option<Result<(), String>> {
+    REGISTRATION.lock().ok().and_then(|g| g.clone())
+}
+
+fn set_registration(state: Result<(), String>) {
+    if let Ok(mut g) = REGISTRATION.lock() {
+        *g = Some(state);
+    }
+}
 
 /// 是否为可用作局域网地址的私网 IPv4（RFC1918：10/8、172.16/12、192.168/16）
 fn is_private_v4(ip: &IpAddr) -> bool {
@@ -57,6 +73,7 @@ pub fn spawn_broadcast(port: u16) {
         .name("remote-mdns".into())
         .spawn(move || {
             let Some(ip) = local_lan_ip() else {
+                set_registration(Err("未探测到局域网 IP，未广播".into()));
                 log_warn!("[remote] 未探测到局域网 IP，跳过 mDNS 广播（App 可手动填 IP 连接）");
                 return;
             };
@@ -78,6 +95,7 @@ pub fn spawn_broadcast(port: u16) {
                     match info {
                         Ok(info) => match daemon.register(info) {
                             Ok(_receiver) => {
+                                set_registration(Ok(()));
                                 log_info!(
                                     "[remote] mDNS 广播已启动: {service_type} {instance} {ip}:{port}"
                                 );
@@ -85,15 +103,18 @@ pub fn spawn_broadcast(port: u16) {
                                 std::thread::park();
                             }
                             Err(e) => {
+                                set_registration(Err(format!("注册失败: {e}")));
                                 log_error!("[remote] mDNS 注册失败: {e}");
                             }
                         },
                         Err(e) => {
+                            set_registration(Err(format!("服务信息构造失败: {e}")));
                             log_error!("[remote] mDNS 服务信息构造失败: {e}");
                         }
                     }
                 }
                 Err(e) => {
+                    set_registration(Err(format!("mDNS 守护进程创建失败: {e}")));
                     log_error!("[remote] mDNS 守护进程创建失败: {e}");
                 }
             }

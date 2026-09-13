@@ -569,6 +569,38 @@ impl PluginManager {
         result
     }
 
+    /// 诊断快照（只读）：每个注册表插件的 (id, 注册表版本, 是否加载成功, 失败原因)。
+    /// 与 list() 的区别：不触发任何插件 FFI 实时查询（音色表/环境状态），
+    /// 诊断导出不应产生网络请求或插件调用。仅读注册表与内存状态。
+    pub(crate) fn diag_state(&self) -> Vec<(String, String, bool, Option<String>)> {
+        let reg = registry::load_registry(&self.plugins_root);
+        reg.plugins
+            .iter()
+            .map(|e| {
+                let loaded = self
+                    .loaded
+                    .read()
+                    .ok()
+                    .map(|m| m.contains_key(&e.id))
+                    .unwrap_or(false)
+                    || self
+                        .loaded_asr
+                        .read()
+                        .ok()
+                        .map(|m| m.contains_key(&e.id))
+                        .unwrap_or(false)
+                    || self
+                        .loaded_service
+                        .read()
+                        .ok()
+                        .map(|m| m.contains_key(&e.id))
+                        .unwrap_or(false);
+                let error = self.failed.read().ok().and_then(|m| m.get(&e.id).cloned());
+                (e.id.clone(), e.version.clone(), loaded, error)
+            })
+            .collect()
+    }
+
     /// 卸载插件：注册表移除 + 删除目录。
     /// dll 运行期不卸载（常驻约束）：已加载的插件本次会话内仍可用，重启后彻底消失。
     /// 若目录因 dll 被占用删不掉（Windows 特性），留给下次启动的孤儿清理。
