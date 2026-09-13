@@ -22,6 +22,10 @@
 - 设计先行：每个开发阶段先写设计进 `../doc/开发记录.md`（阶段编号递增），
   用户确认后再编码，完成后回写完成情况
 - cargo 构建/测试需 `CARGO_HTTP_CHECK_REVOKE=false`（本机证书吊销检查会失败）
+- 要验证/发布 release 必须用 `npm run tauri build`，**不得拿 `cargo build --release` 代替**：
+  后者出的 exe 不嵌前端资源（体积少约 0.19MB），后端能正常起但窗口白屏去连 devUrl
+  `localhost:1420`；app.log 特征是**没有 `[perf] startup=` 行**（前端未挂载）。
+  真机验证前端相关改动时先看这一行在不在，别等用户报界面异常
 - 版本号三处同步：`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`、`package.json`
 - PowerShell 5.1 陷阱：写 JSON 用 `UTF8Encoding($false)`（无 BOM）；
   含中文的 .ps1 脚本本身必须存为**带 BOM** 的 UTF-8；
