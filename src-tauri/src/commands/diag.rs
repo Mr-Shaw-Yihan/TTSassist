@@ -156,7 +156,9 @@ fn render_audio() -> String {
     if devices.is_empty() {
         lines.push("输出设备列表: unavailable: 枚举为空".into());
     } else {
-        lines.push(format!("输出设备列表（{} 个，输出/输入均指 playback 设备，mic.rs 仅提供输出枚举）:", devices.len()));
+        // 第一轮遗留文案订正：本节下面就有「### 输入设备（录音）」小节，
+        // 「mic.rs 仅提供输出枚举」已不成立，会误导读包的人。
+        lines.push(format!("输出设备列表（{} 个，playback 设备）:", devices.len()));
         for d in &devices {
             let mut tag = Vec::new();
             if d.is_default {
@@ -377,15 +379,20 @@ fn render_settings_summary(state: &State<AppState>) -> String {
     lines.push(format!("  - diagnostics_log_enabled: {}", s.diagnostics_log_enabled));
     lines.push(format!("  - subtitle_enabled: {}", s.subtitle_enabled));
     lines.push(format!("  - subtitle_always_on_top: {}", s.subtitle_always_on_top));
-    // 插件音色选择（id → id，排障必需；不含音色显示名）
+    // 插件音色选择（T-A 追加收口）：**只报哪些引擎配了音色，不报值**。
+    // 值是用户自由文本——MinimaxVoicePanel 把用户自命名的克隆音色名直接写进
+    // plugin_voices（实测导出包出现过 `doorman0816`），等于从侧门把用户文本带进诊断包，
+    // 违反本函数开头「克隆音色名一律不采集」的声明。排障只需知道"有没有配"。
     if s.plugin_voices.is_empty() {
         lines.push("  - plugin_voices: （无）".into());
     } else {
         let mut keys: Vec<&String> = s.plugin_voices.keys().collect();
         keys.sort();
-        for k in keys {
-            lines.push(format!("  - plugin_voices[{}]: {}", k, s.plugin_voices[k]));
-        }
+        let ids: Vec<&str> = keys.iter().map(|k| k.as_str()).collect();
+        lines.push(format!(
+            "  - plugin_voices 已配置引擎: {}（音色值可能为用户自命名，一律省略）",
+            ids.join(", ")
+        ));
     }
     section(lines)
 }
@@ -396,7 +403,10 @@ fn render_settings_summary(state: &State<AppState>) -> String {
 /// 主机名（COMPUTERNAME / HOSTNAME 及 mdns 实例名同源的 32 字符截断变体）
 /// 受「包含机器名」复选控制；用户名（USERNAME / USERPROFILE 的用户目录段）
 /// **永远脱敏，不在复选范围内**（第一轮 §3.4 C 红线的用户名部分，T-A 收口）。
-fn candidate_identities() -> (Vec<String>, Vec<String>) {
+/// `data_dir` 的用户段是第三重来源：env 在异常环境（服务化、精简会话）可能读不到，
+/// 那时 USERNAME/USERPROFILE 双双落空会让整条用户名防线**静默失效**，而诊断包里的
+/// 路径节必然含 `...\Users\<账户名>\...`——它才是最可靠的候选来源。
+fn candidate_identities(data_dir: &std::path::Path) -> (Vec<String>, Vec<String>) {
     let mut hosts: Vec<String> = Vec::new();
     for key in ["COMPUTERNAME", "HOSTNAME"] {
         if let Ok(h) = std::env::var(key) {
@@ -413,7 +423,31 @@ fn candidate_identities() -> (Vec<String>, Vec<String>) {
             push_identity(&mut users, &seg.to_string_lossy());
         }
     }
+    if let Some(seg) = users_dir_segment(data_dir) {
+        push_identity(&mut users, &seg);
+    }
     (hosts, users)
+}
+
+/// 取路径中 `Users\<段>` 或 `home/<段>` 的那一段（Windows 与 Linux/macOS 双口径）。
+/// 找不到返回 None，绝不 panic——非标准安装目录（`D:\App\data`）是常态。
+fn users_dir_segment(path: &std::path::Path) -> Option<String> {
+    let mut comps = path.components();
+    while let Some(c) = comps.next() {
+        if let std::path::Component::Normal(seg) = c {
+            if seg.to_string_lossy().eq_ignore_ascii_case("users")
+                || seg.to_string_lossy().eq_ignore_ascii_case("home")
+            {
+                return match comps.next() {
+                    Some(std::path::Component::Normal(next)) => {
+                        Some(next.to_string_lossy().into_owned())
+                    }
+                    _ => None,
+                };
+            }
+        }
+    }
+    None
 }
 
 fn push_identity(out: &mut Vec<String>, raw: &str) {
@@ -449,8 +483,13 @@ fn identity_variants(cands: &[String]) -> Vec<String> {
     out
 }
 
-/// 大小写不敏感（ASCII 范围）的整串替换；中文等非 ASCII 字符按原样参与相等比较。
+/// 大小写不敏感（ASCII 范围）的**整词**替换；中文等非 ASCII 字符按原样参与相等比较。
 /// needle 为空时原样返回（防逐字符插入污染）。零依赖手写扫描，不引 regex。
+/// 词边界（T-A 追加加固）：账户名常常只有 2~3 个字符，无边界子串替换会把
+/// `plugin_id`、`subtitle_max_lines` 这类报障要看的关键字打糊成垃圾。
+/// 因此命中片段两侧不得是单词字符（ASCII 字母数字与 `_`）；`\` `/` `-` `.` `=` 空格
+/// 中文等都算分隔符——路径 `C:\Users\<NAME>\`、设备名 `<NAME> 的麦克风`、主机名
+/// `HOST-PC` 三类真实形态仍然照常命中。
 fn replace_ci(haystack: &str, needle: &str, replacement: &str) -> String {
     if needle.is_empty() {
         return haystack.to_string();
@@ -460,12 +499,12 @@ fn replace_ci(haystack: &str, needle: &str, replacement: &str) -> String {
     let mut out = String::with_capacity(haystack.len());
     let mut i = 0;
     while i < hay.len() {
-        if i + pat.len() <= hay.len()
+        let hit = i + pat.len() <= hay.len()
             && hay[i..i + pat.len()]
                 .iter()
                 .zip(pat.iter())
-                .all(|(a, b)| a.eq_ignore_ascii_case(b))
-        {
+                .all(|(a, b)| a.eq_ignore_ascii_case(b));
+        if hit && word_bounded(&hay, i, pat.len()) {
             out.push_str(replacement);
             i += pat.len();
         } else {
@@ -474,6 +513,18 @@ fn replace_ci(haystack: &str, needle: &str, replacement: &str) -> String {
         }
     }
     out
+}
+
+fn is_word_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || c == '_'
+}
+
+/// 命中片段 [start, start+len) 的两侧是否为词边界（串首/串尾算边界）。
+fn word_bounded(hay: &[char], start: usize, len: usize) -> bool {
+    let before_ok = start == 0 || !is_word_char(hay[start - 1]);
+    let after = start + len;
+    let after_ok = after == hay.len() || !is_word_char(hay[after]);
+    before_ok && after_ok
 }
 
 /// 对整份诊断文本做身份脱敏：用户名候选无条件替换；主机名候选仅在
@@ -531,7 +582,7 @@ pub fn export_diagnostics(
     include_host: Option<bool>,
 ) -> Result<DiagExportResult, String> {
     let include_host = include_host.unwrap_or(false);
-    let (host_cands, user_cands) = candidate_identities();
+    let (host_cands, user_cands) = candidate_identities(&state.data_dir);
     // 逐节采集（每节独立兜底）
     let versions = safe_section(|| render_versions(&app));
     let paths = safe_section(|| render_paths(&state.data_dir));
@@ -674,7 +725,7 @@ mod tests {
         }
         let dir = format!("C:\\Users\\{user}\\AppData\\Roaming\\com.voiceassist.app");
         let paths = render_paths(std::path::Path::new(&dir));
-        let (hosts, users) = candidate_identities();
+        let (hosts, users) = candidate_identities(std::path::Path::new(&dir));
         let scrubbed = scrub_body(paths, false, &hosts, &users);
         let data_line = scrubbed
             .lines()
@@ -739,6 +790,67 @@ mod tests {
         let once = scrub_body(body.clone(), false, &["FISHAWDK-PC".to_string()], &["unituser".to_string()]);
         let twice = scrub_body(once.clone(), false, &["FISHAWDK-PC".to_string()], &["unituser".to_string()]);
         assert_eq!(once, twice);
+    }
+
+    // ── T-A 追加加固：词边界 + 第三重用户名来源 ──────────
+
+    #[test]
+    fn 短账户名不打糊英文键名() {
+        // 2~3 字符账户名是真实现实（本仓库开发者本人即 3 字符）：无边界子串替换
+        // 会把 subtitle_max_lines / plugin_id 等报障要看的关键字打糊。
+        let src = "  - plugin_id: x\n  - subtitle_max_lines: 3\n  - user_name: y\n  - min_app_version: 1.8".to_string();
+        for cand in ["li", "max", "name", "id", "app", "min"] {
+            let out = scrub_body(src.clone(), false, &[], &[cand.to_string()]);
+            assert_eq!(out, src, "候选 {cand} 不得改动键名文本");
+        }
+        // 同一候选在真分隔符下仍须生效：证明不是一刀切失效造成的假绿
+        assert_eq!(
+            scrub_body("path=C:\\Users\\li\\x".into(), false, &[], &["li".to_string()]),
+            "path=C:\\Users\\<redacted-host>\\x"
+        );
+    }
+
+    #[test]
+    fn 数据目录用户段提取与平台兼容() {
+        assert_eq!(
+            users_dir_segment(std::path::Path::new(
+                "C:\\Users\\unituser\\AppData\\Roaming\\com.voiceassist.app"
+            ))
+            .as_deref(),
+            Some("unituser")
+        );
+        assert_eq!(
+            users_dir_segment(std::path::Path::new(
+                "/home/unituser/.local/share/com.voiceassist.app"
+            ))
+            .as_deref(),
+            Some("unituser")
+        );
+        // 段名大小写不敏感（Windows 习惯大写 Users）
+        assert_eq!(
+            users_dir_segment(std::path::Path::new("c:\\users\\UNITUSER\\x")).as_deref(),
+            Some("UNITUSER")
+        );
+        // 非标准安装目录无用户段：返回 None 而非 panic
+        assert_eq!(users_dir_segment(std::path::Path::new("D:\\App\\data")), None);
+        assert_eq!(users_dir_segment(std::path::Path::new("")), None);
+        // 路径以 Users 结尾（无下一段）也不得 panic
+        assert_eq!(users_dir_segment(std::path::Path::new("C:\\Users")), None);
+    }
+
+    #[test]
+    fn 环境变量缺失时由数据目录兜底() {
+        // 不依赖真实 env：只要 data_dir 带用户段，候选集必须含它（env 双落空时的唯一防线）
+        let probe = std::path::Path::new("C:\\Users\\probeuserxyz\\AppData\\Roaming\\com.voiceassist.app");
+        let (_, users) = candidate_identities(probe);
+        assert!(
+            users.iter().any(|u| u == "probeuserxyz"),
+            "data_dir 用户段必须成为用户名候选，实际: {users:?}"
+        );
+        // 且不因 env 是否存在而改变结果：同一 data_dir 能独立支撑脱敏
+        let body = "data_dir: C:\\Users\\probeuserxyz\\AppData".to_string();
+        let out = scrub_body(body, false, &[], &users);
+        assert_eq!(out, "data_dir: C:\\Users\\<redacted-host>\\AppData");
     }
 
     // ── T-B：输入设备小节 ──────────────────────────────
