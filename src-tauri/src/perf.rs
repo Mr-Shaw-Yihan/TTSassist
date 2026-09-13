@@ -15,6 +15,25 @@ pub static START: OnceLock<Instant> = OnceLock::new();
 /// startup 是否已上报（只记首次，防多窗口/重渲染重复打点）
 static STARTUP_LOGGED: OnceLock<()> = OnceLock::new();
 
+/// startup 暂存（T-G 分支 2 最小改动）：release 下前端首帧早于 logging::init
+/// （实验实测早 ~234ms），emit 时落盘未就绪则暂存这里，init 完成后由
+/// drain_startup_pending 补写。OnceLock 单值，不用队列/Vec/定时任务。
+static PENDING_STARTUP: OnceLock<u64> = OnceLock::new();
+
+/// 路由决策（纯函数，可测）：落盘就绪 → 立即发射；否则 → 暂存待 drain。
+pub enum StartupRoute {
+    Emit(u64),
+    Pending(u64),
+}
+
+fn route_startup(ms: u64, file_enabled: bool, has_path: bool) -> StartupRoute {
+    if file_enabled && has_path {
+        StartupRoute::Emit(ms)
+    } else {
+        StartupRoute::Pending(ms)
+    }
+}
+
 /// 格式化一行性能日志：`[perf] <name>=<ms>ms k1=v1 k2=v2…`
 /// fields 按传入顺序拼接，不做转义（字段值来自受控枚举/整数，无空格）。
 pub fn perf_line(name: &str, ms: u64, fields: &[(&str, &str)]) -> String {
@@ -36,7 +55,24 @@ pub fn startup_done() {
     }
     if let Some(t0) = START.get() {
         let ms = t0.elapsed().as_millis() as u64;
-        log_info!("{}", perf_line("startup", ms, &[]));
+        match route_startup(
+            ms,
+            crate::logging::is_enabled(),
+            crate::logging::log_file_path().is_some(),
+        ) {
+            StartupRoute::Emit(ms) => log_info!("{}", perf_line("startup", ms, &[])),
+            StartupRoute::Pending(ms) => {
+                let _ = PENDING_STARTUP.set(ms);
+            }
+        }
+    }
+}
+
+/// logging::init 完成后调用（lib.rs setup 内）：把暂存的 startup 补写进日志。
+/// 暂存为空（dev 下通常已直接发射）则无事发生。
+pub fn drain_startup_pending() {
+    if let Some(ms) = PENDING_STARTUP.get() {
+        log_info!("{}", perf_line("startup", *ms, &[]));
     }
 }
 
@@ -59,5 +95,34 @@ mod tests {
     fn 零与大数值正常() {
         assert_eq!(perf_line("x", 0, &[("n", "0")]), "[perf] x=0ms n=0");
         assert_eq!(perf_line("y", u64::MAX, &[]), "[perf] y=18446744073709551615ms");
+    }
+
+    // ── T-G 分支 2：drain 前后行为 ─────────────────────
+
+    #[test]
+    fn startup路由_落盘未就绪时暂存不发射() {
+        // 开关未开 / 日志路径未定（release 下前端首帧早于 logging::init 的真实场景），
+        // 都走暂存而不是立即发射——drain 前 startup 行不应出现在日志流
+        assert!(matches!(
+            route_startup(659, false, false),
+            StartupRoute::Pending(659)
+        ));
+        assert!(matches!(
+            route_startup(659, true, false),
+            StartupRoute::Pending(659)
+        ));
+        assert!(matches!(
+            route_startup(659, false, true),
+            StartupRoute::Pending(659)
+        ));
+    }
+
+    #[test]
+    fn startup路由_就绪时立即发射() {
+        // 落盘开关开且路径已定 → 直接发射，无需 drain
+        assert!(matches!(
+            route_startup(659, true, true),
+            StartupRoute::Emit(659)
+        ));
     }
 }

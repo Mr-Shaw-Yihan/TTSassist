@@ -121,6 +121,8 @@ pub fn run() {
                     .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
                     .unwrap_or(false);
                 logging::init(&data_dir.join("logs"), settings.diagnostics_log_enabled || env_on);
+                // T-G：release 下前端首帧早于本 init，startup 埋点若已暂存则在此补写落盘
+                crate::perf::drain_startup_pending();
             }
 
             // ASR 插件需要 API Key：通过环境变量传递（插件加载时读取）
