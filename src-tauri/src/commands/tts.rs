@@ -180,8 +180,9 @@ pub async fn generate_tts_impl(app: &AppHandle, text: &str) -> Result<Message, S
     // [perf] T2 埋点：引擎返回 = 音频文件已写完可播放（不含播放设备缓冲延迟）。
     // cache 恒为 miss：当前 generate_tts 无缓存/收藏复用路径（收藏播放由前端直播已有
     // 音频文件，不进本命令）；保留该字段，防止将来引入缓存后两条路径的数字被混读。
-    // 只记长度不记内容（隐私规则 §3.4）。
+    // 只记长度不记内容（隐私规则 §3.4）
     log_info!(
+        // allowlog: 参数只取 text.chars().count() 的字符数（len 字段），文本内容不进日志
         "{}",
         crate::perf::perf_line(
             "tts_first_audio",

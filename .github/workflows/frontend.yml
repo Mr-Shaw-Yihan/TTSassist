@@ -1,0 +1,32 @@
+# 前端 CI（T4.C）：push/PR 到 main 时跑构建与单测。
+# 注意：有意不加 Linux 上的 cargo test job——tauri 在 ubuntu 需要装大量系统库，
+# 且本仓大量 #[cfg(windows)] 代码在 Linux 下编译不过，会产出常红假信号；
+# Rust 测试结果以交付报告中的本地输出为准。
+
+name: frontend
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (tsc + vite)
+        run: npm run build
+
+      - name: Unit tests
+        run: npm run test:run
