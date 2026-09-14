@@ -755,3 +755,212 @@ impl LoadedServicePlugin {
         }))
     }
 }
+
+// ── 效果器插件加载（type = audio_effect）─────────────────
+
+/// va_fx_process 的宿主侧结果：拷贝到宿主内存后的 PCM（交错 f32）
+pub struct FxProcessedPcm {
+    pub pcm: Vec<f32>,
+    pub frames: usize,
+    pub channels: u32,
+}
+
+/// 一个已加载的效果器插件（manifest.type = "audio_effect"）。
+///
+/// 效果器插件只做 PCM → PCM 的 DSP；编解码由宿主负责（rodio 解码 → f32 进插件，
+/// 处理结果 hound 编码 WAV 落盘）。不需要宿主能力桥（manifest 层已拒绝声明）。
+pub struct LoadedFxPlugin {
+    /// 清单
+    pub manifest: PluginManifest,
+    /// dll 自报的 id（加载时已校验与 manifest.id 一致）
+    pub dll_id: String,
+    /// va_fx_list 返回的 JSON（加载时已拷贝；实时重查用 query_effects_json）
+    pub effects_json: String,
+    /// 保持 dll 句柄存活
+    _lib: Arc<libloading::Library>,
+    f_fx_list: plugin_api::VaFxListFn,
+    f_process: plugin_api::VaFxProcessFn,
+    f_free_pcm: plugin_api::VaFxFreePcmFn,
+    f_free_cstr: plugin_api::VaFreeCstrFn,
+}
+
+unsafe impl Send for LoadedFxPlugin {}
+unsafe impl Sync for LoadedFxPlugin {}
+
+impl LoadedFxPlugin {
+    /// 加载一个效果器插件目录（内含 manifest.json 与 dll）。
+    /// 校验链路与 TTS/ASR 相同：清单 → checksum → 符号 → id 一致。
+    pub fn load(plugin_dir: &Path, app_version: &str) -> Result<Arc<Self>, PluginError> {
+        // 1. 读清单 + 校验（类型必须是 audio_effect，防其它加载器误收）
+        let manifest = PluginManifest::load(plugin_dir)?;
+        if manifest.plugin_type != "audio_effect" {
+            return Err(PluginError::Unsupported(format!(
+                "效果器插件加载器收到 type「{}」（应为 audio_effect）",
+                manifest.plugin_type
+            )));
+        }
+        manifest.validate(app_version)?;
+
+        // 2. 数据目录环境变量（与其它类型同约定；效果器通常用不到，保持一致性）
+        let data_dir = plugin_dir.join("data");
+        if let Err(e) = std::fs::create_dir_all(&data_dir) {
+            log_warn!("提示：插件「{}」数据目录创建失败: {e}", manifest.id);
+        }
+        let env_key = format!(
+            "VA_PLUGIN_DATA_DIR_{}",
+            manifest.id.to_ascii_uppercase().replace('-', "_")
+        );
+        std::env::set_var(&env_key, &data_dir);
+
+        // 3. SHA-256 校验 dll
+        let dll_path = plugin_dir.join(&manifest.entry);
+        if !dll_path.exists() {
+            return Err(PluginError::NotFound(format!(
+                "插件动态库不存在: {}",
+                dll_path.display()
+            )));
+        }
+        let actual = sha256_file(&dll_path)?;
+        if !actual.eq_ignore_ascii_case(manifest.checksum.trim()) {
+            return Err(PluginError::Checksum {
+                expected: manifest.checksum.clone(),
+                actual,
+            });
+        }
+
+        // 4. 加载 dll 取符号
+        let lib = unsafe { libloading::Library::new(&dll_path) }
+            .map_err(|e| PluginError::DlOpen(format!("加载 {} 失败: {e}", manifest.entry)))?;
+        let (f_fx_list, f_process, f_free_pcm, f_free_cstr, dll_id, name, version, effects_json) = unsafe {
+            let fx_list = get_sym::<plugin_api::VaFxListFn>(&lib, plugin_api::SYM_FX_LIST)?;
+            let process = get_sym::<plugin_api::VaFxProcessFn>(&lib, plugin_api::SYM_FX_PROCESS)?;
+            let free_pcm =
+                get_sym::<plugin_api::VaFxFreePcmFn>(&lib, plugin_api::SYM_FX_FREE_PCM)?;
+            let free_cstr = get_sym::<plugin_api::VaFreeCstrFn>(&lib, plugin_api::SYM_FREE_CSTR)?;
+            let f_id = get_sym::<plugin_api::VaStrFn>(&lib, plugin_api::SYM_PLUGIN_ID)?;
+            let f_name = get_sym::<plugin_api::VaStrFn>(&lib, plugin_api::SYM_PLUGIN_NAME)?;
+            let f_version = get_sym::<plugin_api::VaStrFn>(&lib, plugin_api::SYM_PLUGIN_VERSION)?;
+
+            // 5. 立即拷贝元信息
+            (
+                fx_list,
+                process,
+                free_pcm,
+                free_cstr,
+                read_cstr(f_id())?,
+                read_cstr(f_name())?,
+                read_cstr(f_version())?,
+                read_cstr(fx_list())?,
+            )
+        };
+
+        // 6. dll 自报 id 必须与清单一致；版本不一致仅记录（清单为准）
+        if dll_id != manifest.id {
+            return Err(PluginError::Unsupported(format!(
+                "dll 自报 id「{dll_id}」与清单 id「{}」不一致，拒绝加载",
+                manifest.id
+            )));
+        }
+        if version != manifest.version {
+            log_warn!(
+                "提示：插件「{}」dll 版本 {version} 与清单版本 {} 不一致（以清单为准）",
+                manifest.id, manifest.version
+            );
+        }
+        let _ = name;
+
+        Ok(Arc::new(Self {
+            manifest,
+            dll_id,
+            effects_json,
+            _lib: Arc::new(lib),
+            f_fx_list,
+            f_process,
+            f_free_pcm,
+            f_free_cstr,
+        }))
+    }
+
+    /// 实时重查效果器清单（调 va_fx_list 并立即拷贝；失败回退加载时缓存）
+    pub fn query_effects_json(&self) -> String {
+        let ptr = unsafe { (self.f_fx_list)() };
+        match unsafe { read_cstr(ptr) } {
+            Ok(s) => s,
+            Err(_) => self.effects_json.clone(),
+        }
+    }
+
+    /// 安全封装的效果处理：交错 f32 PCM → 处理后 PCM。
+    /// 阻塞调用，需在 blocking 线程执行（调用方负责 spawn_blocking 与超时）。
+    /// params_json：必传（空串/"{}" = 全默认值）。
+    pub fn process_pcm(
+        &self,
+        pcm: &[f32],
+        frames: usize,
+        channels: u32,
+        sample_rate: u32,
+        effect_id: &str,
+        params_json: &str,
+    ) -> Result<FxProcessedPcm, PluginError> {
+        if !matches!(channels, 1 | 2) {
+            return Err(PluginError::Synthesize(format!(
+                "非法通道数 {channels}（只支持 1/2）"
+            )));
+        }
+        if pcm.len() != frames * channels as usize {
+            return Err(PluginError::Synthesize(
+                "PCM 长度与 frames×channels 不符".into(),
+            ));
+        }
+        let c_effect = CString::new(effect_id)
+            .map_err(|_| PluginError::Synthesize("效果 id 含非法字符（NUL）".into()))?;
+        let c_params = CString::new(params_json)
+            .map_err(|_| PluginError::Synthesize("参数 JSON 含非法字符（NUL）".into()))?;
+
+        let mut out_pcm: *mut f32 = std::ptr::null_mut();
+        let mut out_frames: usize = 0;
+        let mut out_channels: u32 = 0;
+        let mut out_err: *mut std::ffi::c_char = std::ptr::null_mut();
+
+        let code = unsafe {
+            (self.f_process)(
+                pcm.as_ptr(),
+                frames,
+                channels,
+                sample_rate,
+                c_effect.as_ptr(),
+                c_params.as_ptr(),
+                &mut out_pcm,
+                &mut out_frames,
+                &mut out_channels,
+                &mut out_err,
+            )
+        };
+
+        if code == plugin_api::VA_OK {
+            if out_pcm.is_null() || out_frames == 0 {
+                unsafe { (self.f_free_pcm)(out_pcm, out_frames, out_channels) };
+                return Err(PluginError::Synthesize("插件返回成功但未给出 PCM".into()));
+            }
+            let len = out_frames * out_channels as usize;
+            let copied = unsafe { std::slice::from_raw_parts(out_pcm, len) }.to_vec();
+            unsafe { (self.f_free_pcm)(out_pcm, out_frames, out_channels) };
+            Ok(FxProcessedPcm {
+                pcm: copied,
+                frames: out_frames,
+                channels: out_channels,
+            })
+        } else {
+            let msg = if !out_err.is_null() {
+                let s = unsafe { CStr::from_ptr(out_err) }
+                    .to_string_lossy()
+                    .into_owned();
+                unsafe { (self.f_free_cstr)(out_err) };
+                s
+            } else {
+                format!("效果处理失败（错误码 {code}）")
+            };
+            Err(PluginError::Synthesize(msg))
+        }
+    }
+}

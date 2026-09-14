@@ -17,7 +17,9 @@ pub mod manifest;
 pub mod registry;
 
 pub use bridge::HostBridge;
-pub use loader::{LoadedAsrPlugin, LoadedPlugin, LoadedServicePlugin, PluginEngine};
+pub use loader::{
+    LoadedAsrPlugin, LoadedFxPlugin, LoadedPlugin, LoadedServicePlugin, PluginEngine,
+};
 pub use manager::{InstallOutcome, PluginInfo, PluginManager};
 pub use manifest::PluginManifest;
 

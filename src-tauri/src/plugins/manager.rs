@@ -8,7 +8,9 @@ use std::sync::{Arc, RwLock};
 
 use super::bridge::HostBridge;
 use super::config;
-use super::loader::{LoadedAsrPlugin, LoadedPlugin, LoadedServicePlugin, PluginEngine};
+use super::loader::{
+    LoadedAsrPlugin, LoadedFxPlugin, LoadedPlugin, LoadedServicePlugin, PluginEngine,
+};
 use super::manifest::{PluginConfigDecl, PluginManifest};
 use super::registry;
 use super::PluginError;
@@ -67,6 +69,8 @@ pub struct PluginManager {
     loaded_asr: RwLock<HashMap<String, Arc<LoadedAsrPlugin>>>,
     /// 服务插件（type = service，不参与合成/识别）
     loaded_service: RwLock<HashMap<String, Arc<LoadedServicePlugin>>>,
+    /// 效果器插件（type = audio_effect，PCM → PCM 处理）
+    loaded_fx: RwLock<HashMap<String, Arc<LoadedFxPlugin>>>,
     /// id → 失败原因
     failed: RwLock<HashMap<String, String>>,
     /// 宿主能力桥注入用的 AppHandle（测试/无 Tauri 环境为 None，不注入）
@@ -89,6 +93,7 @@ impl PluginManager {
             loaded: RwLock::new(HashMap::new()),
             loaded_asr: RwLock::new(HashMap::new()),
             loaded_service: RwLock::new(HashMap::new()),
+            loaded_fx: RwLock::new(HashMap::new()),
             failed: RwLock::new(HashMap::new()),
             bridge_app: app.cloned(),
             pending_bridges: RwLock::new(Vec::new()),
@@ -238,7 +243,7 @@ impl PluginManager {
         &self.plugins_root
     }
 
-    /// 插件是否已加载可用（TTS / ASR / 服务三个注册表都要查）
+    /// 插件是否已加载可用（TTS / ASR / 服务 / 效果器四个注册表都要查）
     pub fn is_loaded(&self, id: &str) -> bool {
         let tts = self
             .loaded
@@ -255,7 +260,12 @@ impl PluginManager {
             .read()
             .map(|map| map.contains_key(id))
             .unwrap_or(false);
-        tts || asr || service
+        let fx = self
+            .loaded_fx
+            .read()
+            .map(|map| map.contains_key(id))
+            .unwrap_or(false);
+        tts || asr || service || fx
     }
 
     /// 插件是否已安装（注册表中有记录，含加载失败的）
@@ -304,6 +314,25 @@ impl PluginManager {
                     }
                     Err(e) => {
                         log_error!("ASR 插件加载失败 [{id}]: {e}");
+                        if let Ok(mut map) = self.failed.write() {
+                            map.insert(id.to_string(), e.to_string());
+                        }
+                    }
+                }
+            }
+            "audio_effect" => {
+                if self.reject_env_conflict(id, &manifest) {
+                    return;
+                }
+                match LoadedFxPlugin::load(&dir, APP_VERSION) {
+                    Ok(plugin) => {
+                        log_info!("效果器插件已加载: {id} v{}", plugin.manifest.version);
+                        if let Ok(mut map) = self.loaded_fx.write() {
+                            map.insert(id.to_string(), plugin);
+                        }
+                    }
+                    Err(e) => {
+                        log_error!("效果器插件加载失败 [{id}]: {e}");
                         if let Ok(mut map) = self.failed.write() {
                             map.insert(id.to_string(), e.to_string());
                         }
@@ -436,6 +465,11 @@ impl PluginManager {
                 out.push((id.clone(), p.manifest.clone()));
             }
         }
+        if let Ok(map) = self.loaded_fx.read() {
+            for (id, p) in map.iter() {
+                out.push((id.clone(), p.manifest.clone()));
+            }
+        }
         out
     }
 
@@ -453,6 +487,9 @@ impl PluginManager {
             return Some(p.manifest.clone());
         }
         if let Some(p) = self.get_service(id) {
+            return Some(p.manifest.clone());
+        }
+        if let Some(p) = self.get_fx(id) {
             return Some(p.manifest.clone());
         }
         PluginManifest::load(&self.plugins_root.join(id)).ok()
@@ -481,6 +518,19 @@ impl PluginManager {
         self.loaded_service.read().ok()?.get(id).cloned()
     }
 
+    /// 取已加载的效果器插件（type = audio_effect）
+    pub fn get_fx(&self, id: &str) -> Option<Arc<LoadedFxPlugin>> {
+        self.loaded_fx.read().ok()?.get(id).cloned()
+    }
+
+    /// 全部已加载效果器插件（id → 插件），供效果器清单合并
+    pub fn loaded_fx_all(&self) -> Vec<(String, Arc<LoadedFxPlugin>)> {
+        self.loaded_fx
+            .read()
+            .map(|map| map.iter().map(|(k, v)| (k.clone(), Arc::clone(v))).collect())
+            .unwrap_or_default()
+    }
+
     /// 把插件包装成 TTS 引擎；插件未加载返回 None
     pub fn build_engine(&self, id: &str, data_dir: &Path) -> Option<PluginEngine> {
         self.get(id).map(|p| PluginEngine::new(p, data_dir.to_path_buf()))
@@ -497,9 +547,10 @@ impl PluginManager {
             let manifest = PluginManifest::load(&dir).ok();
 
             let loaded_plugin = self.get(&entry.id);
-            // ASR / 服务插件存在单独的注册表，加载状态三边都要查
+            // ASR / 服务 / 效果器插件存在单独的注册表，加载状态四边都要查
             let loaded_asr = self.get_asr(&entry.id);
             let loaded_service = self.get_service(&entry.id);
+            let loaded_fx = self.get_fx(&entry.id);
             let error = self
                 .failed
                 .read()
@@ -552,7 +603,10 @@ impl PluginManager {
                 name,
                 version,
                 description,
-                loaded: loaded_plugin.is_some() || loaded_asr.is_some() || loaded_service.is_some(),
+                loaded: loaded_plugin.is_some()
+                    || loaded_asr.is_some()
+                    || loaded_service.is_some()
+                    || loaded_fx.is_some(),
                 error,
                 voices,
                 audio_format,
@@ -591,6 +645,12 @@ impl PluginManager {
                         .unwrap_or(false)
                     || self
                         .loaded_service
+                        .read()
+                        .ok()
+                        .map(|m| m.contains_key(&e.id))
+                        .unwrap_or(false)
+                    || self
+                        .loaded_fx
                         .read()
                         .ok()
                         .map(|m| m.contains_key(&e.id))
@@ -690,8 +750,12 @@ impl PluginManager {
         registry::save_registry(&self.plugins_root, &reg)?;
 
         self.load_one(&id);
-        // ASR / 服务插件加载后进各自注册表，三个注册表都要查（只查 loaded 会误报失败）
-        if self.get(&id).is_none() && self.get_asr(&id).is_none() && self.get_service(&id).is_none() {
+        // ASR / 服务 / 效果器插件加载后进各自注册表，四个注册表都要查（只查 loaded 会误报失败）
+        if self.get(&id).is_none()
+            && self.get_asr(&id).is_none()
+            && self.get_service(&id).is_none()
+            && self.get_fx(&id).is_none()
+        {
             let reason = self
                 .failed
                 .read()
