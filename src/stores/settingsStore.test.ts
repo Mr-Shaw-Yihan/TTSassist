@@ -66,6 +66,9 @@ const EXPECTED_KEYS = [
   "subtitle_pause_hotkey",
   "subtitle_max_lines",
   "subtitle_fade_seconds",
+  "fx_preset",
+  "fx_order",
+  "fx_params",
 ] as const;
 
 // 穷举守卫（T-E）：EXPECTED_KEYS 漏掉任何 Settings 字段时，下面这行在编译期报错
@@ -125,6 +128,9 @@ function makeSettings(): Settings {
     subtitle_pause_hotkey: "Alt+M",
     subtitle_max_lines: 3,
     subtitle_fade_seconds: 15,
+    fx_preset: "off",
+    fx_order: [],
+    fx_params: {},
   };
 }
 

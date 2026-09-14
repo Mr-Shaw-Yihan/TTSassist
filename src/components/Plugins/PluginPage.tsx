@@ -278,6 +278,8 @@ export function PluginPage() {
   // 服务插件（type=service）：不参与合成/识别的后台能力（如手机遥控），
   // 只展示已装卡片（内置/在线索引暂不提供 service 候选）
   const installedService = plugins.filter((p) => typeOf(p) === "service");
+  // 效果器插件（type=audio_effect）：插件页照常可见与可卸载（管理/排序在语音中心）
+  const installedFx = plugins.filter((p) => typeOf(p) === "audio_effect");
 
   // 在线条目类型：新索引自带 plugin_type；旧索引无此字段时回退到同 id 的内置条目，再无则按 TTS
   const typeOfOnline = (id: string): string => {
@@ -293,13 +295,16 @@ export function PluginPage() {
   const candidatesAsr = mergeCandidates(bundled, index ?? [], "asr_engine", typeOfOnline).filter(
     (c) => !plugins.some((p) => p.id === c.id)
   );
+  const candidatesFx = mergeCandidates(bundled, index ?? [], "audio_effect", typeOfOnline).filter(
+    (c) => !plugins.some((p) => p.id === c.id)
+  );
 
   // 索引获取结果提示用：可更新插件数 + 可新装条目数（避免「获取成功但无变化」的困惑）
   const updateCount = plugins.filter((p) => {
     const o = onlineEntryOf(p.id);
     return o && isNewer(o.version, p.version);
   }).length;
-  const freshCount = candidatesTts.length + candidatesAsr.length;
+  const freshCount = candidatesTts.length + candidatesAsr.length + candidatesFx.length;
 
   // ── 卡片与条目渲染 ─────────────────────────────────────────────
 
@@ -744,6 +749,15 @@ export function PluginPage() {
               installed={installedAsr}
               candidates={candidatesAsr}
               emptyHint="尚未安装语音输入引擎插件，安装后即可用快捷键说话转文字"
+            />
+
+            {/* ── 语音效果器（audio_effect） ── */}
+            <CategorySection
+              title="语音效果器"
+              subtitle="给合成语音套预设声线；选择与排序在设置-语音合成的效果器分区"
+              installed={installedFx}
+              candidates={candidatesFx}
+              emptyHint="尚未安装效果器插件，内置效果器包会在安装包内自动出现"
             />
 
             {/* ── 服务插件（type=service，仅已装展示） ── */}

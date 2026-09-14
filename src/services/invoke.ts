@@ -3,7 +3,7 @@
 
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry, BundledPluginInfo, UpdateInfo, DownloadedInfo, AsrPluginInfo, PluginConfigInfo, AudioProcess, SubtitleSession, SubtitleStatus } from "../types";
+import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry, BundledPluginInfo, UpdateInfo, DownloadedInfo, AsrPluginInfo, FxPresetInfo, PluginConfigInfo, AudioProcess, SubtitleSession, SubtitleStatus } from "../types";
 
 // ── TTS ──────────────────────────────────────────
 
@@ -446,7 +446,14 @@ export async function getSettings(): Promise<Settings> {
 
 export async function updateSetting(
   key: string,
-  value: string | number | boolean | string[] | MossVoice[] | Record<string, string>,
+  value:
+    | string
+    | number
+    | boolean
+    | string[]
+    | MossVoice[]
+    | Record<string, string>
+    | Record<string, Record<string, string>>,
 ): Promise<Settings> {
   return invoke<Settings>("update_setting", { key, value });
 }
@@ -466,18 +473,21 @@ export async function getAudioUrl(relPath: string): Promise<string> {
 
 /**
  * 拿音频的本地绝对路径（不经 convertFileSrc），供 revealItemInDir 等需要路径的场景用。
+ *
+ * `applyFx`：缺省 true（经效果器咽喉解析）；「打开位置」必须传 false——
+ * 资源管理器要落在原文件而不是 .fx 效果缓存。
  */
-export async function getAudioAbsPath(relPath: string): Promise<string> {
-  return invoke<string>("resolve_audio_url", { relPath });
+export async function getAudioAbsPath(relPath: string, applyFx?: boolean): Promise<string> {
+  return invoke<string>("resolve_audio_url", { relPath, applyFx });
 }
 
 // ── 打开文件位置 ──────────────────────────────────
 
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
-/** 在系统资源管理器中定位并选中该音频文件。 */
+/** 在系统资源管理器中定位并选中该音频文件（定位到原文件，非效果缓存）。 */
 export async function revealAudio(relPath: string): Promise<void> {
-  const abs = await getAudioAbsPath(relPath);
+  const abs = await getAudioAbsPath(relPath, false);
   await revealItemInDir(abs);
 }
 
@@ -626,4 +636,10 @@ export async function exportDiagnostics(includeHost: boolean): Promise<{ path: s
 /** main 窗口首帧回执：记录 run() 进入 → 前端首帧的 startup 耗时（后端只记第一次） */
 export async function perfStartupDone(): Promise<void> {
   return invoke<void>("perf_startup_done");
+}
+// ── 语音效果器 ──────────────────────────────────
+
+/** 已安装并加载成功的 audio_effect 插件提供的全部预设（一维扁平；「原声」由 UI 固定渲染首项） */
+export async function listFxPresets(): Promise<FxPresetInfo[]> {
+  return invoke<FxPresetInfo[]>("list_fx_presets");
 }

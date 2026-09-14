@@ -11,7 +11,14 @@ interface SettingsState {
   /** 增量更新一个键；返回后端写入后的完整 settings */
   patch: (
     key: keyof Settings,
-    value: string | number | boolean | string[] | MossVoice[] | Record<string, string>,
+    value:
+      | string
+      | number
+      | boolean
+      | string[]
+      | MossVoice[]
+      | Record<string, string>
+      | Record<string, Record<string, string>>,
   ) => Promise<void>;
 }
 

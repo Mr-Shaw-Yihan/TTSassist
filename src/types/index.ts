@@ -109,6 +109,13 @@ export interface Settings {
   subtitle_max_lines: number;
   /** 字幕自动淡出秒数 */
   subtitle_fade_seconds: number;
+  // ── 语音效果器 ──
+  /** 当前效果器预设："off"（原声）或 "<plugin_id>:<effect_id>"；非法值播放侧 fail-open 视同 off */
+  fx_preset: string;
+  /** 预设显示顺序（预设 key 列表；未列出的新预设排末尾按字典序稳定） */
+  fx_order: string[];
+  /** 各预设参数记忆（预设 key → 参数 key → 值；v1 仅后端通道，UI 不开放调节） */
+  fx_params: Record<string, Record<string, string>>;
 }
 
 /** 通用插件配置：manifest 的 config 声明 */
@@ -289,6 +296,32 @@ export interface AsrPluginInfo {
   loaded: boolean;
   /** 支持语言 JSON 字符串，如 [{"code":"zh","label":"中文"}] */
   languages: string;
+}
+
+/** 语音效果器可调参数声明（v1 仅占位，UI 不开放调节） */
+export interface FxParamInfo {
+  key: string;
+  label: string;
+  min: number;
+  max: number;
+  default: number;
+  unit: string;
+}
+
+/** 语音效果器预设（list_fx_presets 返回条目；「原声 off」固定首项，不来自插件） */
+export interface FxPresetInfo {
+  /** 全名 "<plugin_id>:<effect_id>"（fx_preset 存的就是它） */
+  key: string;
+  /** 展示名（中文短语） */
+  name: string;
+  description: string;
+  /** 所属插件 id */
+  plugin: string;
+  /** 所属插件展示名 */
+  plugin_name: string;
+  /** 插件内效果 id（ASCII 蛇形） */
+  effect_id: string;
+  params: FxParamInfo[];
 }
 
 /** 音频输出设备 */
