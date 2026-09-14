@@ -48,3 +48,9 @@ plugins/hojo-tts/Cargo.lock
 
 # 离线资源包分发产物（793MB，传网盘/群文件，不入仓）
 dist-resources/
+plugins/builtin-fx/target/
+plugins/builtin-fx/dist/
+plugins/builtin-fx/Cargo.lock
+plugins/test-fx-plugin/target/
+plugins/test-fx-plugin/dist/
+plugins/test-fx-plugin/Cargo.lock
