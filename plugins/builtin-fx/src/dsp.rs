@@ -260,3 +260,145 @@ mod tests {
         }
     }
 }
+
+/// granular 音高移位（变调不变速）：重叠加窗（hann，75% overlap）+ 变步长读指针。
+/// semitones：正=升调（花栗鼠），负=降调（低音炮）。输出长度与输入严格一致；
+/// 纯正弦输入不产生直流漂移（两钉见测试）。
+pub fn pitch_shift(pcm: &mut [f32], channels: u32, sample_rate: u32, semitones: f32) {
+    if semitones.abs() < 1e-3 || channels == 0 {
+        return;
+    }
+    let ratio = 2f32.powf(semitones / 12.0);
+    let ch = channels as usize;
+    let frames = pcm.len() / ch;
+    if frames == 0 {
+        return;
+    }
+    // grain ≈ 46ms（按采样率自适应），hop = grain/4（hann 75% overlap 满足 COLA）
+    let n = ((sample_rate as f64 * 0.046) as usize).clamp(128, 8192);
+    let hop = (n / 4).max(1);
+    let win: Vec<f32> = (0..n)
+        .map(|i| {
+            let t = i as f32 / (n - 1).max(1) as f32;
+            0.5 - 0.5 * (2.0 * std::f32::consts::PI * t).cos()
+        })
+        .collect();
+
+    for c in 0..ch {
+        let mut out = vec![0f32; frames];
+        let mut norm = vec![0f32; frames];
+        let mut read = 0f32; // 本 grain 的输入起点（帧号）；与输出同步推进 → 时长不变
+        let mut grain_out = 0usize;
+        while grain_out < frames {
+            for i in 0..n {
+                let o = grain_out + i;
+                if o >= frames {
+                    break;
+                }
+                let r = read + i as f32 * ratio; // grain 内以 ratio 读 → 音高 ×ratio
+                let ri = r.floor();
+                if ri >= 0.0 {
+                    let ri = ri as usize;
+                    if ri + 1 < frames {
+                        let frac = r - ri as f32;
+                        let s = pcm[ri * ch + c] * (1.0 - frac) + pcm[(ri + 1) * ch + c] * frac;
+                        out[o] += s * win[i];
+                    }
+                }
+                norm[o] += win[i];
+            }
+            grain_out += hop;
+            read += hop as f32;
+        }
+        // 窗和归一：消除 OLA 幅度纹波；未覆盖区（头尾）静音
+        for f in 0..frames {
+            pcm[f * ch + c] = if norm[f] > 1e-6 { out[f] / norm[f] } else { 0.0 };
+        }
+    }
+}
+
+#[cfg(test)]
+mod pitch_tests {
+    use super::*;
+
+    fn sine(n: usize, freq: f32, fs: u32, amp: f32) -> Vec<f32> {
+        (0..n)
+            .map(|i| amp * (2.0 * std::f32::consts::PI * freq * i as f32 / fs as f32).sin())
+            .collect()
+    }
+
+    /// 数过零点估频率（整段）
+    fn zero_cross_freq(pcm: &[f32], fs: u32) -> f32 {
+        let mut crossings = 0usize;
+        for w in pcm.windows(2) {
+            if w[0] < 0.0 && w[1] >= 0.0 {
+                crossings += 1;
+            }
+        }
+        crossings as f32 * fs as f32 / pcm.len() as f32
+    }
+
+    #[test]
+    fn 钉一_输出长度与输入一致() {
+        for &semis in &[4.0f32, -4.0, 7.0, -1.0] {
+            let mut x = sine(48_000, 440.0, 24_000, 0.5);
+            let n = x.len();
+            pitch_shift(&mut x, 1, 24_000, semis);
+            assert_eq!(x.len(), n, "semitones={semis} 长度不得变化");
+        }
+    }
+
+    #[test]
+    fn 钉二_纯正弦无直流漂移() {
+        for &semis in &[4.0f32, -4.0] {
+            let mut x = sine(48_000, 440.0, 24_000, 0.5);
+            pitch_shift(&mut x, 1, 24_000, semis);
+            let mean = x.iter().sum::<f32>() / x.len() as f32;
+            assert!(mean.abs() < 0.01, "semitones={semis} 直流漂移 {mean}");
+        }
+    }
+
+    #[test]
+    fn 变调方向正确_过零率验证() {
+        let fs = 24_000u32;
+        let mut up = sine(fs as usize, 440.0, fs, 0.5);
+        pitch_shift(&mut up, 1, fs, 4.0);
+        let f_up = zero_cross_freq(&up[2_000..fs as usize - 2_000], fs);
+        assert!(
+            (f_up - 440.0 * 2f32.powf(4.0 / 12.0)).abs() < 55.0,
+            "+4 半音应为 ~554Hz，实测 {f_up}"
+        );
+        let mut down = sine(fs as usize, 440.0, fs, 0.5);
+        pitch_shift(&mut down, 1, fs, -4.0);
+        let f_down = zero_cross_freq(&down[2_000..fs as usize - 2_000], fs);
+        assert!(
+            (f_down - 440.0 * 2f32.powf(-4.0 / 12.0)).abs() < 45.0,
+            "-4 半音应为 ~349Hz，实测 {f_down}"
+        );
+    }
+
+    #[test]
+    fn 静音入静音出_峰值有界() {
+        let mut silent = vec![0.0f32; 24_000];
+        pitch_shift(&mut silent, 1, 24_000, 4.0);
+        assert!(silent.iter().all(|s| *s == 0.0));
+        let mut x = sine(24_000, 440.0, 24_000, 0.5);
+        pitch_shift(&mut x, 1, 24_000, 4.0);
+        assert!(x.iter().all(|s| s.abs() <= 1.0));
+    }
+
+    #[test]
+    fn 立体声_长度与通道一致() {
+        let fs = 24_000u32;
+        let mono = sine(9_600, 440.0, fs, 0.5);
+        let mut stereo: Vec<f32> = mono.iter().flat_map(|s| [*s, *s]).collect();
+        pitch_shift(&mut stereo, 2, fs, 4.0);
+        assert_eq!(stereo.len(), 9_600 * 2);
+        for f in 4_800..9_600 {
+            assert!(
+                (stereo[f * 2] - stereo[f * 2 + 1]).abs() < 1e-5,
+                "同源双通道输出应一致"
+            );
+        }
+    }
+}

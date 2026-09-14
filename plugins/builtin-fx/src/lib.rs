@@ -22,6 +22,13 @@ plugin_api::va_fx_plugin! {
             {"key":"carrier","label":"载波频率","min":40,"max":120,"default":65,"unit":"Hz"},
             {"key":"mix","label":"调制深度","min":0,"max":1,"default":0.65,"unit":""}
         ]},
+        {"id":"chipmunk","label":"花栗鼠","description":"音高上移的欢快细声","params":[
+            {"key":"semitones","label":"升调半音","min":1,"max":8,"default":4,"unit":"st"}
+        ]},
+        {"id":"bass_boost","label":"低音炮","description":"音高下移加低通的浑厚恶魔声","params":[
+            {"key":"semitones","label":"降调半音","min":-8,"max":-1,"default":-4,"unit":"st"},
+            {"key":"lowpass","label":"低通截止","min":800,"max":4000,"default":2000,"unit":"Hz"}
+        ]},
         {"id":"distorted","label":"失真电子声","description":"削波失真的电子嗓音","params":[
             {"key":"drive","label":"失真强度","min":1.5,"max":8,"default":5,"unit":""}
         ]},
@@ -44,6 +51,21 @@ fn process(input: &FxProcessInput) -> Result<FxProcessOutput, String> {
         }
         "telephone" => {
             dsp::telephone(&mut pcm, input.channels, input.sample_rate);
+        }
+        "chipmunk" => {
+            let semis = dsp::param_f64(input.params_json, "semitones", 4.0) as f32;
+            dsp::pitch_shift(&mut pcm, input.channels, input.sample_rate, semis);
+            dsp::normalize(&mut pcm, 0.9);
+        }
+        "bass_boost" => {
+            let semis = dsp::param_f64(input.params_json, "semitones", -4.0) as f32;
+            let lowpass = dsp::param_f64(input.params_json, "lowpass", 2_000.0) as f32;
+            dsp::pitch_shift(&mut pcm, input.channels, input.sample_rate, semis);
+            let mut lp = dsp::Biquad::lowpass(input.sample_rate, lowpass, 0.707);
+            for c in 0..input.channels as usize {
+                lp.process_channel(&mut pcm, input.channels, c);
+            }
+            dsp::normalize(&mut pcm, 0.9);
         }
         other => return Err(format!("未知效果「{other}」")),
     }
