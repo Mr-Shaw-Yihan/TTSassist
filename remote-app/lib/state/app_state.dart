@@ -36,6 +36,10 @@ class AppState extends ChangeNotifier {
   RemoteState? state;
   List<FavoriteItem> favorites = [];
   List<DiscoveredPc> discovered = [];
+  /// 效果器预设（RC-1；null = 未拉到或老宿主不支持 → UI 隐藏效果器控件）
+  List<FxPresetItem>? fxPresets;
+  /// 当前效果器预设 key（"off" / "<plugin>:<effect>"；与 state.fx 同步）
+  String? get fxCurrent => state?.fx;
   bool needsPairing = false;
   /// 已发 pair_request，等 PC 弹窗确认中（超时/被拒回退配对码 UI）
   bool waitingConfirm = false;
@@ -77,8 +81,9 @@ class AppState extends ChangeNotifier {
       needsPairing = false;
       waitingConfirm = false;
       _confirmTimer?.cancel();
-      // 鉴权成功后服务端会立即推一帧 state；收藏主动拉一次
+      // 鉴权成功后服务端会立即推一帧 state；收藏主动拉一次；效果器清单主动拉一次
       session.client.listFavorites().catchError((_) {});
+      session.client.listFx().catchError((_) {}); // 老宿主超时/错误 → fxPresets 保持 null，控件隐藏
       discovery.stop(); // 已连上，释放 mDNS
     } else if (p == ConnPhase.awaitingAuth) {
       // 无 token 的新连接 → 自动发免码配对请求（PC 弹窗确认）
@@ -111,6 +116,9 @@ class AppState extends ChangeNotifier {
         break;
       case 'favorites':
         favorites = m.items ?? const [];
+        break;
+      case 'fx_list':
+        fxPresets = m.fxPresets ?? const [];
         break;
       case 'event':
         // 收藏变化 → 重拉列表；settings/playback 变化 → 服务端随后推 state 帧
@@ -191,6 +199,16 @@ class AppState extends ChangeNotifier {
   Future<void> refreshFavorites() async {
     try {
       await session.client.listFavorites();
+    } catch (e) {
+      showToast('$e');
+    }
+  }
+
+  /// 切换效果器预设（RC-1 set_fx；PC 端经 settings_changed 事件广播回推 state 跟随）
+  Future<void> setFx(String key) async {
+    try {
+      final ack = await session.client.setFx(key);
+      if (!ack.ok) showToast(ack.err ?? '切换失败');
     } catch (e) {
       showToast('$e');
     }

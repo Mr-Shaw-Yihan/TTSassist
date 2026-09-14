@@ -76,6 +76,10 @@ class _MainPageState extends State<MainPage> {
                       context: context,
                       builder: (_) => const UpdateDialog()),
                 ),
+              // 效果器选择条（RC-4）：老宿主（state 无 fx 字段）或无预设时整条隐藏
+              if (app.fxCurrent != null &&
+                  (app.fxPresets?.isNotEmpty ?? false))
+                _fxBar(app),
               const SizedBox(height: 12),
               Expanded(child: _list(app)),
               _bottomBar(app),
@@ -190,6 +194,49 @@ class _MainPageState extends State<MainPage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  // ── 效果器选择条：横向 chips（原声固定首项；当前项黑底高亮）──
+
+  Widget _fxBar(AppState app) {
+    final entries = [
+      const FxPresetItem(key: 'off', name: '原声'),
+      ...?app.fxPresets,
+    ];
+    return SizedBox(
+      height: 42,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: entries.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final fx = entries[i];
+          final on = app.fxCurrent == fx.key;
+          return PressScale(
+            onTap: () {
+              if (!on) app.setFx(fx.key);
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: on ? RT.btnBlack : Colors.white.withOpacity(.55),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(
+                fx.name,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: on ? FontWeight.w500 : FontWeight.w300,
+                  color: on ? RT.onBlack : RT.ink,
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

@@ -31,6 +31,14 @@ class S2C {
       ?.map((e) => FavoriteItem.fromJson((e as Map).cast<String, dynamic>()))
       .toList();
 
+  /// 效果器预设清单（RC-1 fx_list；仅新宿主下发）
+  List<FxPresetItem>? get fxPresets => (raw['presets'] as List?)
+      ?.map((e) => FxPresetItem.fromJson((e as Map).cast<String, dynamic>()))
+      .toList();
+
+  /// 效果器当前预设 key（RC-1 fx_list.current）
+  String? get fxCurrent => raw['current'] as String?;
+
   /// event.type：favorites_changed / settings_changed / playback_changed
   String? get eventType =>
       (raw['event'] as Map?)?.cast<String, dynamic>()['type'] as String?;
@@ -42,16 +50,43 @@ class RemoteState {
     this.micSend = false,
     this.playingId,
     this.synthesizing = false,
+    this.fx,
   });
 
   final bool micSend;
   final String? playingId;
   final bool synthesizing;
+  /// 当前效果器预设（"off" / "<plugin>:<effect>"）。
+  /// RC-2 双向兼容：老宿主 state 无该字段 → 保持 null → App 隐藏效果器控件。
+  final String? fx;
 
   factory RemoteState.fromJson(Map<String, dynamic> j) => RemoteState(
         micSend: j['mic_send'] as bool? ?? false,
         playingId: j['playing_id'] as String?,
         synthesizing: j['synthesizing'] as bool? ?? false,
+        fx: j['fx'] as String?,
+      );
+}
+
+/// 效果器预设（RC-1 fx_list.presets 条目；「原声 off」由 App 固定渲染首项）
+class FxPresetItem {
+  const FxPresetItem({
+    required this.key,
+    required this.name,
+    this.plugin,
+    this.effectId,
+  });
+
+  final String key;
+  final String name;
+  final String? plugin;
+  final String? effectId;
+
+  factory FxPresetItem.fromJson(Map<String, dynamic> j) => FxPresetItem(
+        key: j['key'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+        plugin: j['plugin'] as String?,
+        effectId: j['effect_id'] as String?,
       );
 }
 

@@ -207,6 +207,13 @@ class RemoteClient {
 
   Future<S2C> playLast() => command('play_last');
 
+  /// 效果器预设清单（RC-1；仅新宿主支持，失败静默降级）
+  Future<void> listFx() async {
+    await command('list_fx'); // 清单经 s2c fx_list 帧上抛
+  }
+
+  Future<S2C> setFx(String key) => command('set_fx', extra: {'key': key});
+
   /// 主动断开（用户切换 PC / 退出）
   Future<void> close() async {
     final ch = _channel;

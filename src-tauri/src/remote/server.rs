@@ -23,7 +23,8 @@ use tokio_tungstenite::tungstenite::Message;
 use super::pairing::Pairing;
 use super::SessionInfo;
 use crate::plugins::bridge::{
-    native_list_favorites, native_play_last, native_stop_playback, native_synthesize,
+    current_fx_preset, native_list_favorites, native_list_fx_presets, native_play_last,
+    native_set_fx_preset, native_stop_playback, native_synthesize,
     native_toggle_mic, play_favorite_by_id, state_json,
 };
 
@@ -542,7 +543,38 @@ async fn handle_message(
                 Ok(())
             });
         }
+        // 效果器预设清单（RC-1）：presets 一维扁平 + 当前选择；老 App 不发此消息不受影响
+        "list_fx" => {
+            let out = out.clone();
+            let app = shared.app.clone();
+            let app2 = shared.app.clone();
+            tokio::spawn(async move {
+                let presets = tokio::task::spawn_blocking(move || native_list_fx_presets(&app))
+                    .await
+                    .unwrap_or_default();
+                let current = tokio::task::spawn_blocking(move || current_fx_preset(&app2))
+                    .await
+                    .unwrap_or_else(|_| "off".to_string());
+                let _ = out.send(
+                    serde_json::json!({ "t": "fx_list", "presets": presets, "current": current })
+                        .to_string(),
+                );
+            });
+        }
+        // 切换效果器预设（RC-1 set_fx）：走 update_setting 白名单写入，不绕过校验
+        "set_fx" => {
+            let key = msg
+                .get("key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            spawn_blocking_ack(shared.app.clone(), out.clone(), ref_id, move |app| {
+                native_set_fx_preset(app, &key)
+            });
+        }
         _ => {
+            // 未知消息类型：回错误且不关闭连接（对齐 pair/refresh_code 之外的一贯处理，
+            // 老协议客户端 / 新消息类型双向兼容）
             let _ = out.send(err_msg(&format!("未知消息类型「{t}」")));
         }
     }

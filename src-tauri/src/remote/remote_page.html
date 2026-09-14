@@ -75,6 +75,15 @@
   .toprow { display: flex; gap: 10px; margin-top: 8px; }
   .tile { flex: 1; aspect-ratio: 1; border-radius: 18px; display: flex; align-items: center; justify-content: center; }
 
+  /* 效果器选择条（fx_list 有数据且宿主支持时显示；新 App/网页看 state.fx 判定，老宿主隐藏） */
+  .fxbar { display: none; gap: 8px; overflow-x: auto; margin: 12px 0 0; padding: 2px; -webkit-overflow-scrolling: touch; }
+  .fxbar.on { display: flex; }
+  .fxchip {
+    flex: none; padding: 9px 16px; border-radius: 16px; font-size: 13px; cursor: pointer;
+    color: var(--ink); background: rgba(255,255,255,.55); border: 1px solid rgba(255,255,255,.5);
+  }
+  .fxchip.on { background: var(--btn-black); color: var(--on-black); font-weight: 500; border-color: var(--btn-black); }
+
   /* 收藏列表 */
   .list { flex: 1; overflow-y: auto; margin: 12px 0 10px; padding-bottom: 4px; }
   .fav {
@@ -229,7 +238,9 @@
       <div class="tile fbk press" id="playlast-tile"><span class="gicon" style="--m:url('data:image/svg+xml;utf8,__PLAY_LAST__')"></span></div>
     </div>
 
-    <div class="list" id="list"></div>
+    <div class="fxbar" id="fxbar"></div>
+
+    <div class="list" id="list" style="margin-top:12px"></div>
 
     <div class="bottombar glass">
       <input id="msg" placeholder="发消息 或 输入文字">
@@ -256,6 +267,7 @@
 var S = {
   ws: null, phase: 'disconnected', token: null, host: null,
   mic: false, playingId: null, synthesizing: false, favorites: [],
+  fxPresets: null, fxCurrent: null,
   refSeq: 0, pending: {}, reconnectMs: 0, reconnectTimer: null,
   userClosed: false, pairWaitTimer: null, everConnected: false, failCount: 0,
 };
@@ -364,7 +376,15 @@ function onMessage(m) {
       onAuthed(); break;
     case 'state':
       if (m.state) { S.mic = !!m.state.mic_send; S.playingId = m.state.playing_id || null;
-        S.synthesizing = !!m.state.synthesizing; renderAll(); }
+        S.synthesizing = !!m.state.synthesizing;
+        // RC-2 双向兼容：state 带 fx 字段 = 新宿主；undefined = 老宿主（fxCurrent 保持 null，控件隐藏）
+        if (m.state.fx !== undefined) S.fxCurrent = m.state.fx || 'off';
+        renderAll(); }
+      break;
+    case 'fx_list':
+      S.fxPresets = m.presets || [];
+      if (m.current !== undefined) S.fxCurrent = m.current || 'off';
+      renderFx();
       break;
     case 'favorites':
       S.favorites = m.items || []; renderList(); break;
@@ -394,6 +414,7 @@ function onAuthed() {
   setLed('on', '已连接', 'led-label2', 'led2');
   $('orb').classList.remove('sleep');
   command('list_favorites', null, 15000).catch(function () {});
+  command('list_fx').then(function () { renderFx(); }).catch(function () {});
   startPing();
 }
 var pingTimer = null;
@@ -403,7 +424,27 @@ function startPing() {
 }
 
 // ── 渲染 ──
-function renderAll() { renderMic(); renderList(); renderInput(); }
+function renderAll() { renderMic(); renderList(); renderInput(); renderFx(); }
+function renderFx() {
+  var bar = $('fxbar');
+  // 老宿主（state 无 fx 字段）或无可用预设：整条隐藏
+  if (S.fxCurrent === null || !S.fxPresets || !S.fxPresets.length) { bar.classList.remove('on'); return; }
+  bar.classList.add('on');
+  bar.innerHTML = '';
+  var entries = [{ key: 'off', name: '原声' }].concat(S.fxPresets);
+  entries.forEach(function (fx) {
+    var chip = document.createElement('div');
+    chip.className = 'fxchip press' + (S.fxCurrent === fx.key ? ' on' : '');
+    chip.textContent = fx.name;
+    chip.addEventListener('click', function () {
+      if (S.fxCurrent === fx.key) return;
+      command('set_fx', { key: fx.key })
+        .then(function () { S.fxCurrent = fx.key; renderFx(); })
+        .catch(function (e) { toast(e.message || String(e)); });
+    });
+    bar.appendChild(chip);
+  });
+}
 function renderMic() {
   // MIC_ON/MIC_OFF 已是 percent-encoded 裸串（服务端替换），不再二次编码
   $('mic-icon').style.setProperty('--m', 'url("data:image/svg+xml,' +

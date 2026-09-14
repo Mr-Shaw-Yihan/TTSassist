@@ -26,9 +26,9 @@ pub struct FxPresetInfo {
     pub params: Vec<plugin_api::FxParamItem>,
 }
 
-/// 已安装并加载成功的 audio_effect 插件提供的全部预设，按 key 字典序稳定输出。
-#[tauri::command]
-pub fn list_fx_presets(plugins: State<'_, PluginManager>) -> Vec<FxPresetInfo> {
+/// 收集全部已加载效果器插件的预设，按 key 字典序稳定输出。
+/// Tauri 命令与遥控 native 能力（bridge::native_list_fx_presets）共用，单一事实源。
+pub fn collect_fx_presets(plugins: &PluginManager) -> Vec<FxPresetInfo> {
     let mut out: Vec<FxPresetInfo> = Vec::new();
     for (plugin_id, plugin) in plugins.loaded_fx_all() {
         let json = plugin.query_effects_json();
@@ -51,4 +51,10 @@ pub fn list_fx_presets(plugins: State<'_, PluginManager>) -> Vec<FxPresetInfo> {
     }
     out.sort_by(|a, b| a.key.cmp(&b.key));
     out
+}
+
+/// 已安装并加载成功的 audio_effect 插件提供的全部预设（一维扁平）。
+#[tauri::command]
+pub fn list_fx_presets(plugins: State<'_, PluginManager>) -> Vec<FxPresetInfo> {
+    collect_fx_presets(&plugins)
 }
