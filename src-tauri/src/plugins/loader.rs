@@ -759,6 +759,7 @@ impl LoadedServicePlugin {
 // ── 效果器插件加载（type = audio_effect）─────────────────
 
 /// va_fx_process 的宿主侧结果：拷贝到宿主内存后的 PCM（交错 f32）
+#[derive(Debug, Clone)]
 pub struct FxProcessedPcm {
     pub pcm: Vec<f32>,
     pub frames: usize,

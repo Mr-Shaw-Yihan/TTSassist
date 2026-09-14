@@ -1174,4 +1174,202 @@ mod tests {
         let bytes = std::fs::read(&abs).unwrap();
         assert!(bytes.starts_with(b"FAKE_AUDIO|"));
     }
+
+    /// 编译效果器测试桩插件，返回 dll 路径
+    fn build_test_fx_dll() -> PathBuf {
+        use std::sync::OnceLock;
+        static RESULT: OnceLock<PathBuf> = OnceLock::new();
+        RESULT
+            .get_or_init(|| {
+                let src_tauri = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+                let manifest = src_tauri.join("../plugins/test-fx-plugin/Cargo.toml");
+                let target_dir = src_tauri.join("../plugins/target-test");
+                let status = std::process::Command::new("cargo")
+                    .args(["build", "--manifest-path"])
+                    .arg(&manifest)
+                    .arg("--target-dir")
+                    .arg(&target_dir)
+                    .status()
+                    .expect("无法启动 cargo（编译效果器测试插件）");
+                assert!(status.success(), "编译效果器测试插件失败");
+                target_dir.join("debug/test_fx_plugin.dll")
+            })
+            .clone()
+    }
+
+    /// 在临时目录布置一个可加载的 test-fx-plugin（type = audio_effect）
+    fn install_test_fx_plugin(data_dir: &Path) {
+        use crate::plugins::loader::sha256_file;
+        use crate::plugins::registry::{Registry, RegistryEntry};
+
+        let dll_src = build_test_fx_dll();
+        let plugin_dir = data_dir.join("plugins/test-fx-plugin");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::copy(&dll_src, plugin_dir.join("plugin.dll")).unwrap();
+
+        let checksum = sha256_file(&dll_src).unwrap();
+        let manifest = serde_json::json!({
+            "id": "test-fx-plugin",
+            "name": "效果器测试桩",
+            "version": "0.1.0",
+            "type": "audio_effect",
+            "platform": ["windows"],
+            "entry": "plugin.dll",
+            "min_app_version": "1.0.0",
+            "checksum": checksum,
+            "description": "效果器加载全链路测试"
+        });
+        std::fs::write(
+            plugin_dir.join("manifest.json"),
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let reg = Registry {
+            plugins: vec![RegistryEntry {
+                id: "test-fx-plugin".into(),
+                version: "0.1.0".into(),
+                installed_at: "2026-09-14T10:00:00+08:00".into(),
+                pending_zip: None,
+            }],
+        };
+        registry::save_registry(&data_dir.join("plugins"), &reg).unwrap();
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn 效果器插件加载清单处理释放全链路() {
+        let dir = tempfile::tempdir().unwrap();
+        install_test_fx_plugin(dir.path());
+
+        let pm = PluginManager::load_all(&dir.path().join("plugins"), None);
+        let plugin = pm.get_fx("test-fx-plugin").expect("效果器插件应加载成功");
+        assert_eq!(plugin.dll_id, "test-fx-plugin");
+
+        // 清单：va_fx_list 静态 JSON 可解析
+        let effects: Vec<plugin_api::FxEffectItem> =
+            serde_json::from_str(&plugin.effects_json).expect("清单应为合法 JSON");
+        assert_eq!(effects.len(), 2);
+        assert!(effects.iter().any(|e| e.id == "gain_half"));
+
+        // is_loaded / list 四边查覆盖
+        assert!(pm.is_loaded("test-fx-plugin"));
+        let infos = pm.list();
+        assert!(infos.iter().any(|i| i.id == "test-fx-plugin" && i.loaded));
+
+        // 处理：gain_half 确定性 ×0.5；输入限幅（长/采样率/通道数保持）
+        let input = vec![0.25f32, -0.5, 0.8, -1.0, 0.0];
+        let out = plugin
+            .process_pcm(&input, 5, 1, 24_000, "gain_half", "{}")
+            .expect("处理应成功");
+        assert_eq!(out.frames, 5);
+        assert_eq!(out.channels, 1);
+        let expect = [0.125f32, -0.25, 0.4, -0.5, 0.0];
+        for (a, b) in out.pcm.iter().zip(expect.iter()) {
+            assert!((a - b).abs() < 1e-6);
+        }
+
+        // 错误链路：插件主动报错 → 中文错误
+        let err = plugin
+            .process_pcm(&input, 5, 1, 24_000, "error_effect", "{}")
+            .unwrap_err();
+        assert!(err.to_string().contains("测试桩主动报错"));
+
+        // 未知效果 → 错误
+        assert!(plugin
+            .process_pcm(&input, 5, 1, 24_000, "不存在", "{}")
+            .is_err());
+
+        // 释放路径（宏内 free）：上面每次调用均已拷贝归还，无崩溃即通过
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn 效果器FFI非法输入返回错误不panic() {
+        use std::ffi::CString;
+        use std::sync::Arc;
+
+        let dir = tempfile::tempdir().unwrap();
+        install_test_fx_plugin(dir.path());
+        PluginManager::load_all(&dir.path().join("plugins"), None);
+
+        // 直接取 FFI 符号绕过宿主侧预校验，验证宏层对非法入参的防御
+        let lib: Arc<libloading::Library> = unsafe {
+            Arc::new(
+                libloading::Library::new(
+                    dir.path().join("plugins/test-fx-plugin/plugin.dll"),
+                )
+                .unwrap(),
+            )
+        };
+        let f_process: libloading::Symbol<
+            unsafe extern "C" fn(
+                *const f32,
+                usize,
+                u32,
+                u32,
+                *const std::ffi::c_char,
+                *const std::ffi::c_char,
+                *mut *mut f32,
+                *mut usize,
+                *mut u32,
+                *mut *mut std::ffi::c_char,
+            ) -> i32,
+        > = unsafe { lib.get(plugin_api::SYM_FX_PROCESS).unwrap() };
+
+        let pcm = [0.5f32, -0.5];
+        let effect = CString::new("gain_half").unwrap();
+        let params = CString::new("{}").unwrap();
+        let mut out_pcm: *mut f32 = std::ptr::null_mut();
+        let mut out_frames: usize = 0;
+        let mut out_channels: u32 = 0;
+        let mut out_err: *mut std::ffi::c_char = std::ptr::null_mut();
+
+        // frames = 0
+        let code = unsafe {
+            f_process(
+                pcm.as_ptr(), 0, 1, 24_000, effect.as_ptr(), params.as_ptr(),
+                &mut out_pcm, &mut out_frames, &mut out_channels, &mut out_err,
+            )
+        };
+        assert_ne!(code, plugin_api::VA_OK, "frames=0 必须报错");
+        // channels = 3
+        let code = unsafe {
+            f_process(
+                pcm.as_ptr(), 1, 3, 24_000, effect.as_ptr(), params.as_ptr(),
+                &mut out_pcm, &mut out_frames, &mut out_channels, &mut out_err,
+            )
+        };
+        assert_ne!(code, plugin_api::VA_OK, "channels=3 必须报错");
+        // NULL params_json
+        let code = unsafe {
+            f_process(
+                pcm.as_ptr(), 1, 1, 24_000, effect.as_ptr(), std::ptr::null(),
+                &mut out_pcm, &mut out_frames, &mut out_channels, &mut out_err,
+            )
+        };
+        assert_ne!(code, plugin_api::VA_OK, "NULL params_json 必须报错");
+        // NULL effect_id
+        let code = unsafe {
+            f_process(
+                pcm.as_ptr(), 1, 1, 24_000, std::ptr::null(), params.as_ptr(),
+                &mut out_pcm, &mut out_frames, &mut out_channels, &mut out_err,
+            )
+        };
+        assert_ne!(code, plugin_api::VA_OK, "NULL effect_id 必须报错");
+
+        // 合法入参全链路仍可用（确认上面的拒绝不是全局性损坏）
+        let code = unsafe {
+            f_process(
+                pcm.as_ptr(), 1, 1, 24_000, effect.as_ptr(), params.as_ptr(),
+                &mut out_pcm, &mut out_frames, &mut out_channels, &mut out_err,
+            )
+        };
+        assert_eq!(code, plugin_api::VA_OK);
+        assert_eq!(out_frames, 1);
+        // 释放
+        let f_free: libloading::Symbol<unsafe extern "C" fn(*mut f32, usize, u32)> =
+            unsafe { lib.get(plugin_api::SYM_FX_FREE_PCM).unwrap() };
+        unsafe { f_free(out_pcm, out_frames, out_channels) };
+    }
 }
