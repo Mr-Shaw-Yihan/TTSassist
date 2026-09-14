@@ -179,6 +179,17 @@ pub struct Settings {
     /// 字幕自动淡出秒数（默认 15）
     #[serde(default = "default_subtitle_fade_seconds")]
     pub subtitle_fade_seconds: u32,
+    // ── 语音效果器设置 ──────────────────────────
+    /// 当前效果器预设："off"（原声，固定保留值）或 "<plugin_id>:<effect_id>"。
+    /// 指向已卸载插件/不存在效果时播放侧 fail-open 视同 "off"（静默直通）。
+    #[serde(default)]
+    pub fx_preset: String,
+    /// 预设显示顺序（预设 key 列表；未列出的新预设排末尾，按字典序稳定）
+    #[serde(default)]
+    pub fx_order: Vec<String>,
+    /// 各预设的参数记忆（预设 key → 参数 key → 值；v1 仅作后端通道，UI 不开放调节）
+    #[serde(default)]
+    pub fx_params: HashMap<String, HashMap<String, String>>,
 }
 
 impl Default for Settings {
@@ -235,6 +246,9 @@ impl Default for Settings {
             subtitle_pause_hotkey: default_subtitle_hotkey(),
             subtitle_max_lines: default_subtitle_max_lines(),
             subtitle_fade_seconds: default_subtitle_fade_seconds(),
+            fx_preset: "off".to_string(),
+            fx_order: Vec::new(),
+            fx_params: HashMap::new(),
         }
     }
 }

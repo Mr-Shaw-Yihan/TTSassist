@@ -211,7 +211,16 @@ pub async fn generate_tts_impl(app: &AppHandle, text: &str) -> Result<Message, S
 
     // 5. 全局开关开启且配置了麦克风设备 → 同时发到虚拟麦克风（扬声器播放由前端负责）
     if mic_send_enabled && !mic_device.is_empty() {
-        let abs = data_dir.join(&result.audio_path);
+        // 效果器解析（阻塞活丢 blocking 线程；fail-open 直通原声，内部自带 10s 超时）
+        let fallback_abs = data_dir.join(&result.audio_path);
+        let app2 = app.clone();
+        let rel = result.audio_path.clone();
+        let mic_dir = data_dir.clone();
+        let abs = tauri::async_runtime::spawn_blocking(move || {
+            crate::fx::resolve_for_mic(&app2, &mic_dir, &rel)
+        })
+        .await
+        .unwrap_or(fallback_abs);
         mic.play(abs, mic_device, mic_volume);
     }
 

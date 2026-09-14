@@ -8,6 +8,7 @@ pub mod asr;
 pub mod audio_capture;
 pub mod commands;
 pub mod diag_redact;
+pub mod fx;
 pub mod hotkey;
 pub mod perf;
 pub mod plugins;
@@ -362,6 +363,7 @@ pub fn run() {
             crate::commands::settings::get_settings,
             crate::commands::settings::update_setting,
             crate::commands::audio::resolve_audio_url,
+            crate::commands::fx::list_fx_presets,
             crate::commands::clone_voice::import_clone_voice,
             crate::commands::clone_voice::remove_clone_voice,
             crate::commands::mic::list_mic_devices,

@@ -56,6 +56,38 @@ pub fn uninstall_plugin(
         notify_changed(&app, EVENT_SETTINGS_CHANGED);
     }
 
+    // 效果器卸载联动：清 fx_params/fx_order 中该插件前缀的残留项，当前选中回退「原声」
+    //（防「选了个已删除的效果器」——播放侧 fail-open 会直通，但设置里残留脏数据）
+    let is_fx = manifest
+        .as_ref()
+        .map(|m| m.plugin_type == "audio_effect")
+        .unwrap_or(false);
+    if is_fx {
+        let prefix = format!("{id}:");
+        let cleaned = {
+            let mut settings = state
+                .settings
+                .write()
+                .map_err(|e| format!("读取设置失败: {e}"))?;
+            settings.fx_params.retain(|k, _| !k.starts_with(&prefix));
+            settings.fx_order.retain(|k| !k.starts_with(&prefix));
+            if settings.fx_preset.starts_with(&prefix) {
+                settings.fx_preset = "off".to_string();
+            }
+            true
+        };
+        if cleaned {
+            let settings = state
+                .settings
+                .read()
+                .map_err(|e| format!("读取设置失败: {e}"))?
+                .clone();
+            crate::storage::settings::save_settings(&state.data_dir, &settings)
+                .map_err(|e| format!("保存设置失败: {e}"))?;
+            notify_changed(&app, EVENT_SETTINGS_CHANGED);
+        }
+    }
+
     plugins.uninstall(&id).map_err(|e| e.to_string())
 }
 

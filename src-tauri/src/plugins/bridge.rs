@@ -220,7 +220,9 @@ pub fn play_favorite_by_id(app: &AppHandle, id: &str) -> Result<(), String> {
     };
     if enabled && !device.is_empty() {
         if let Some(mic) = app.try_state::<MicPlayback>() {
-            mic.play(state.data_dir.join(&fav.audio_path), device, volume);
+            // 效果器解析（fail-open 直通原声，内部自带 10s 超时）
+            let abs = crate::fx::resolve_for_mic(app, &state.data_dir, &fav.audio_path);
+            mic.play(abs, device, volume);
         }
     }
     // emit 事件让前端主窗播扬声器

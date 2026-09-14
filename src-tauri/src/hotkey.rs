@@ -243,13 +243,14 @@ fn register_favorite_hotkey(app: &AppHandle, hotkey: &str, audio_path: String) -
             }
             // 发麦克风（若全局开关开启且配置了设备）
             if let Some(state) = app.try_state::<AppState>() {
-                let abs = state.data_dir.join(&audio_path);
                 let (enabled, device, volume) = match state.settings.read() {
                     Ok(s) => (s.mic_send_enabled, s.mic_output_device.clone(), s.mic_playback_volume),
                     Err(_) => (false, String::new(), 1.0),
                 };
                 if enabled && !device.is_empty() {
                     if let Some(mic) = app.try_state::<MicPlayback>() {
+                        // 效果器解析（fail-open 直通原声，内部自带 10s 超时）
+                        let abs = crate::fx::resolve_for_mic(app, &state.data_dir, &audio_path);
                         mic.play(abs, device, volume);
                     }
                 }

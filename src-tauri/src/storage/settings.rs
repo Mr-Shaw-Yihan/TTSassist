@@ -86,6 +86,13 @@ pub fn load_settings(data_dir: &Path) -> Settings {
             subtitle_pause_hotkey: v.get("subtitle_pause_hotkey").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.subtitle_pause_hotkey),
             subtitle_max_lines: v.get("subtitle_max_lines").and_then(|x| x.as_u64()).map(|x| x as u32).unwrap_or(default.subtitle_max_lines),
             subtitle_fade_seconds: v.get("subtitle_fade_seconds").and_then(|x| x.as_u64()).map(|x| x as u32).unwrap_or(default.subtitle_fade_seconds),
+            fx_preset: v.get("fx_preset").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.fx_preset),
+            fx_order: v.get("fx_order")
+                .and_then(|x| serde_json::from_value::<Vec<String>>(x.clone()).ok())
+                .unwrap_or(default.fx_order),
+            fx_params: v.get("fx_params")
+                .and_then(|x| serde_json::from_value::<std::collections::HashMap<String, std::collections::HashMap<String, String>>>(x.clone()).ok())
+                .unwrap_or(default.fx_params),
         },
         Err(_) => default,
     };
@@ -198,6 +205,10 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "subtitle_pause_hotkey" => if let Some(v) = value.as_str() { s.subtitle_pause_hotkey = v.to_string() },
         "subtitle_max_lines" => if let Some(v) = value.as_f64() { s.subtitle_max_lines = v as u32 },
         "subtitle_fade_seconds" => if let Some(v) = value.as_f64() { s.subtitle_fade_seconds = v as u32 },
+        // 语音效果器：预设选择与排序、参数记忆（v1 参数只做通道，UI 不开放调节）
+        "fx_preset" => if let Some(v) = value.as_str() { s.fx_preset = v.to_string() },
+        "fx_order" => if let Ok(list) = serde_json::from_value::<Vec<String>>(value.clone()) { s.fx_order = list },
+        "fx_params" => if let Ok(map) = serde_json::from_value::<std::collections::HashMap<String, std::collections::HashMap<String, String>>>(value.clone()) { s.fx_params = map },
         _ => {} // 未知键忽略
     }
     save_settings(data_dir, &s)?;
