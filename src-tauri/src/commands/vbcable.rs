@@ -116,6 +116,41 @@ pub async fn download_vb_cable(app: tauri::AppHandle) -> Result<String, String> 
     Ok(zip_path.to_string_lossy().to_string())
 }
 
+/// 在解压目录中递归查找安装程序（优先 x64）。
+///
+/// 下载的 zip 内所有文件嵌套在顶层子目录 `VBCABLE_Driver_Pack45/` 下，
+/// 因此不能只在解压根目录查找，需递归遍历整棵目录树。
+fn find_setup_exe(dir: &std::path::Path) -> Option<PathBuf> {
+    let mut x64: Option<PathBuf> = None;
+    let mut plain: Option<PathBuf> = None;
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        if let Ok(entries) = std::fs::read_dir(&current) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else {
+                    match path.file_name().and_then(|n| n.to_str()) {
+                        Some("VBCABLE_Setup_x64.exe") => {
+                            if x64.is_none() {
+                                x64 = Some(path);
+                            }
+                        }
+                        Some("VBCABLE_Setup.exe") => {
+                            if plain.is_none() {
+                                plain = Some(path);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    x64.or(plain)
+}
+
 /// 解压已下载的 VB-CABLE 驱动包并以管理员权限启动安装程序。
 ///
 /// 流程：解压 zip → 找到 VBCABLE_Setup_x64.exe → 以管理员身份运行。
@@ -159,17 +194,11 @@ pub async fn install_vb_cable(zip_path: String) -> Result<String, String> {
         }
     }
 
-    // 查找安装程序（优先 x64）
-    let setup = extract_dir.path().join("VBCABLE_Setup_x64.exe");
-    let setup = if setup.exists() {
-        setup
-    } else {
-        extract_dir.path().join("VBCABLE_Setup.exe")
+    // 查找安装程序（zip 内文件嵌套在顶层子目录，需递归查找，优先 x64）
+    let setup = match find_setup_exe(extract_dir.path()) {
+        Some(s) => s,
+        None => return Err("在压缩包中找不到安装程序".into()),
     };
-
-    if !setup.exists() {
-        return Err("在压缩包中找不到安装程序".into());
-    }
 
     // 以管理员权限启动安装程序（弹出 UAC 对话框）
     let setup_str = setup.to_string_lossy().replace('/', "\\");
@@ -192,5 +221,99 @@ pub async fn install_vb_cable(zip_path: String) -> Result<String, String> {
         } else {
             Err(format!("启动安装程序失败: {}", stderr.trim()))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 与 install_vb_cable 中一致的内联解压逻辑，供测试复用
+    fn unzip_all(zip: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
+        let f = std::fs::File::open(zip).map_err(|e| e.to_string())?;
+        let mut archive = zip::ZipArchive::new(f).map_err(|e| e.to_string())?;
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+            let name = entry.name().to_string();
+            if name.contains("..") {
+                continue;
+            }
+            let out = dest.join(&name);
+            if entry.is_dir() {
+                std::fs::create_dir_all(&out).ok();
+            } else {
+                if let Some(p) = out.parent() {
+                    std::fs::create_dir_all(p).ok();
+                }
+                let mut o = std::fs::File::create(&out).map_err(|e| e.to_string())?;
+                std::io::copy(&mut entry, &mut o).map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn find_setup_locates_nested_x64() {
+        // 模拟 zip 内所有文件嵌套在顶层子目录的情况
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("VBCABLE_Driver_Pack45");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("VBCABLE_Setup.exe"), b"x").unwrap();
+        std::fs::write(nested.join("VBCABLE_Setup_x64.exe"), b"x").unwrap();
+
+        let found = find_setup_exe(dir.path()).expect("应能在嵌套子目录中找到安装程序");
+        assert_eq!(found.file_name().unwrap(), "VBCABLE_Setup_x64.exe");
+        assert_eq!(
+            found.parent().unwrap().file_name().unwrap(),
+            "VBCABLE_Driver_Pack45"
+        );
+    }
+
+    #[test]
+    fn find_setup_prefers_x64_and_falls_back() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("VBCABLE_Setup.exe"), b"x").unwrap();
+        // 只有 32 位时回退
+        assert_eq!(
+            find_setup_exe(dir.path()).unwrap().file_name().unwrap(),
+            "VBCABLE_Setup.exe"
+        );
+        // 加入 x64 后优先选 x64
+        std::fs::write(dir.path().join("VBCABLE_Setup_x64.exe"), b"x").unwrap();
+        assert_eq!(
+            find_setup_exe(dir.path()).unwrap().file_name().unwrap(),
+            "VBCABLE_Setup_x64.exe"
+        );
+    }
+
+    #[test]
+    fn find_setup_returns_none_when_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("readme.txt"), b"x").unwrap();
+        assert!(find_setup_exe(dir.path()).is_none());
+    }
+
+    #[test]
+    fn extract_real_zip_then_find_setup() {
+        // 针对真实 VBCABLE_Driver_Pack45.zip 走一遍解压 + 定位（若本机存在该文件）
+        let zip = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("VBCABLE_Driver_Pack45.zip");
+        if !zip.exists() {
+            eprintln!("跳过：未找到真实 zip {:?}", zip);
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        unzip_all(&zip, dir.path()).unwrap();
+
+        let found = find_setup_exe(dir.path()).expect("真实 zip 解压后应能定位安装程序");
+        assert_eq!(found.file_name().unwrap(), "VBCABLE_Setup_x64.exe");
+        assert_eq!(
+            found.parent().unwrap().file_name().unwrap(),
+            "VBCABLE_Driver_Pack45",
+            "安装程序应位于嵌套子目录内，实际：{:?}",
+            found
+        );
     }
 }
