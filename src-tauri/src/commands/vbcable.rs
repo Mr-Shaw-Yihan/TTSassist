@@ -10,6 +10,12 @@ use tauri::{Emitter, Manager};
 const VBCABLE_DOWNLOAD_URL: &str =
     "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/download/v1.1.0/VBCABLE_Driver_Pack45.zip";
 
+/// 权威发布资源的 SHA-256。下载/复用缓存/提权安装前均校验，防中间人或 release 资源
+/// 被替换后以管理员权限执行被篡改的驱动。真值经本地包与 v1.1.0 release 资源双端比对
+/// 确认（大小 1,236,661 字节）。GitHub release 资源不可变，除非删重传，故此固定值稳定。
+const VBCABLE_ZIP_SHA256: &str =
+    "62c38a27e2bf0dd972c34e084c3d3f4e60bac9bdfc2cac36e750a772b01fea3e";
+
 /// 下载进度事件名（前端 listen 该事件获取进度）
 pub const VBCABLE_PROGRESS_EVENT: &str = "vbcable:download-progress";
 
@@ -26,6 +32,35 @@ struct DownloadProgress {
     error: Option<String>,
 }
 
+/// 计算文件 SHA-256（十六进制小写）。
+fn sha256_file(path: &std::path::Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut f = std::fs::File::open(path).map_err(|e| format!("打开文件失败: {e}"))?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = f.read(&mut buf).map_err(|e| format!("读取文件失败: {e}"))?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// 校验文件 SHA-256 是否等于权威固定值（大小写不敏感）。
+fn verify_pinned_sha256(path: &std::path::Path) -> Result<(), String> {
+    let actual = sha256_file(path)?;
+    if actual.eq_ignore_ascii_case(VBCABLE_ZIP_SHA256) {
+        Ok(())
+    } else {
+        Err(format!(
+            "驱动包完整性校验失败：SHA-256 不匹配（期望 {VBCABLE_ZIP_SHA256}，实际 {actual}），已拒绝使用以防提权执行被篡改的程序"
+        ))
+    }
+}
+
 /// 下载 VB-CABLE 驱动包到应用数据目录。
 ///
 /// 下载过程通过 `vbcable:download-progress` 事件实时推送进度。
@@ -38,17 +73,23 @@ pub async fn download_vb_cable(app: tauri::AppHandle) -> Result<String, String> 
         .map_err(|e| format!("创建下载目录失败: {e}"))?;
     let zip_path = download_dir.join("VBCABLE_Driver_Pack45.zip");
 
-    // 如果已下载过且文件完整（>1MB），跳过重复下载
+    // 如果已下载过且文件完整（>1MB），先校验 SHA-256 再决定是否复用缓存；
+    // 命中缓存但校验不过（被篡改/损坏/投毒）则删除重下，绝不复用未验证的包。
     if zip_path.exists() {
         let meta = std::fs::metadata(&zip_path).ok();
-        if meta.as_ref().map_or(false, |m| m.len() > 1_000_000) {
+        let big = meta.as_ref().map_or(false, |m| m.len() > 1_000_000);
+        if big && verify_pinned_sha256(&zip_path).is_ok() {
+            let len = meta.unwrap().len();
             let _ = app.emit(VBCABLE_PROGRESS_EVENT, DownloadProgress {
                 stage: "done".into(),
-                downloaded: meta.as_ref().unwrap().len(),
-                total: meta.unwrap().len(),
+                downloaded: len,
+                total: len,
                 error: None,
             });
             return Ok(zip_path.to_string_lossy().to_string());
+        }
+        if big {
+            let _ = std::fs::remove_file(&zip_path);
         }
     }
 
@@ -106,6 +147,18 @@ pub async fn download_vb_cable(app: tauri::AppHandle) -> Result<String, String> 
     }
     drop(file);
 
+    // 下载完成：校验 SHA-256，不符则删除并报错（拒绝把可疑包交给后续提权安装）
+    if let Err(e) = verify_pinned_sha256(&zip_path) {
+        let _ = std::fs::remove_file(&zip_path);
+        let _ = app.emit(VBCABLE_PROGRESS_EVENT, DownloadProgress {
+            stage: "error".into(),
+            downloaded,
+            total,
+            error: Some(e.clone()),
+        });
+        return Err(e);
+    }
+
     let _ = app.emit(VBCABLE_PROGRESS_EVENT, DownloadProgress {
         stage: "done".into(),
         downloaded,
@@ -161,6 +214,9 @@ pub async fn install_vb_cable(zip_path: String) -> Result<String, String> {
     if !zip_path.exists() {
         return Err("驱动包不存在，请先下载".into());
     }
+
+    // 纵深防御：解压/提权前再校验一次完整性（防止绕过 download 直接传入被替换的包）
+    verify_pinned_sha256(&zip_path)?;
 
     // 解压到临时目录
     let extract_dir = tempfile::tempdir()
@@ -315,5 +371,53 @@ mod tests {
             "安装程序应位于嵌套子目录内，实际：{:?}",
             found
         );
+    }
+}
+
+#[cfg(test)]
+mod integrity_tests {
+    use super::*;
+
+    #[test]
+    fn pinned_sha256_is_well_formed() {
+        // pin 应为 64 位小写 hex
+        assert_eq!(VBCABLE_ZIP_SHA256.len(), 64);
+        assert!(VBCABLE_ZIP_SHA256
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)));
+    }
+
+    #[test]
+    fn sha256_file_matches_known_vector() {
+        // 空输入的 SHA-256 固定值，验证实现无字节序/格式化错误
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("empty");
+        std::fs::write(&f, b"").unwrap();
+        assert_eq!(
+            sha256_file(&f).unwrap(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn verify_detects_tampered_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("evil.zip");
+        std::fs::write(&f, b"not the real driver pack").unwrap();
+        assert!(verify_pinned_sha256(&f).is_err(), "内容不符必须判失败");
+    }
+
+    #[test]
+    fn verify_accepts_real_release_zip_when_present() {
+        // 若本机存在真实 VBCABLE_Driver_Pack45.zip（仓库根），端到端验证 pin 与实际资源一致
+        let zip = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("VBCABLE_Driver_Pack45.zip");
+        if !zip.exists() {
+            eprintln!("跳过：未找到真实 zip {:?}", zip);
+            return;
+        }
+        verify_pinned_sha256(&zip).expect("真实 release zip 应通过 SHA-256 校验");
     }
 }
