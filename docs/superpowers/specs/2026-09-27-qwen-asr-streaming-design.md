@@ -1,6 +1,13 @@
 # 千问 ASR 接入 + 字幕流式改造 · 设计
 
-日期：2026-09-27 · 状态：已批准待实施 · 目标版本：本体 v1.9.0 / 新插件 qwen-asr 0.1.0
+日期：2026-09-27 · 状态：设计已定稿，待用户复核 → 转实施计划
+
+- **实施基线**：本地 `main`（`fbb0bfa`）新建 `feat/qwen-asr` 分支 + 独立 worktree。
+  选它的证据：字幕链路文件（`audio_capture/`、`commands/subtitle.rs`、`asr/`）与
+  `chore/plugins-cleanup` 分支**逐字节相同**（`git diff --stat` 为空）；main 另含 8 个
+  未推送的已验收修复（asset scope/CSP、VB-CABLE SHA-256、插件配置并发、遥控重连）。
+- **目标版本**：本体 **v1.9.0** / 新插件 qwen-asr 0.1.0。注意 `v1.8.8` 已被占用且属
+  「仅存档未发布」（见 §10），**不可复用该号**。
 
 ## 1. 背景与目标
 
@@ -108,6 +115,11 @@ unsafe extern "C" fn(handle: *mut c_void);
 
 约束（写进文档注释）：
 
+- **不动 `VaHostServices`**。本次只新增插件导出符号，不往宿主能力桥里加字段。
+  原因：`audio_effect` 那条线已在改 `plugin-api` 里的
+  `assert_eq!(size_of::<VaHostServices>(), (2 + 10) * size_of::<usize>())`；两边都改这个结构体
+  就会造成语义冲突（不只是文本冲突）。已核实那条线没动 ASR 相关符号
+  （`git diff main...chore/plugins-cleanup` 中 `va_asr`/`ASR_` 新增行 = 0），保持互不侵犯。
 - **同一 handle 的 feed/poll/finish/close 由宿主在同一线程串行调用**（会话线程），
   插件据此不必为 handle 加锁。
 - 全部函数体 `catch_unwind(AssertUnwindSafe(..))` 包裹，panic 转 VA_ERR + 中文错误串；
@@ -241,10 +253,18 @@ F7 表明 3.1 的润色**没有文档化的关闭参数**。因此不能凭空�
 
 ## 10. 发布
 
+**版本号前提（核实于 2026-09-29）**：最新**已发布**版本仍是 **v1.8.7**。
+`v1.8.8` 是一个附注 tag，指向 `fb35892`，tag 正文自己写「v1.8.8 存档快照（未发布）……
+仅存档，未走 tauri build 发布流程，应用版本号仍为 1.8.7」——即 **1.8.8 这个号已被 tag 占用但从未发过包**。
+因此本次不能拿 1.8.8 当目标版本（tag 名冲突），也不适合改叫 1.8.9（本次是 ABI 变更 + 新插件，
+不是补丁级）→ 直接用 **v1.9.0**，并在新 Release 时保持 tag 名与包版本一致。
+
 - 本体 **v1.9.0**（ABI 与字幕行为变更，必须升本体版本；插件独立分发不能覆盖本体改动）
 - `qwen-asr-0.1.0.zip` 进 `plugins-index.json`，`min_app_version = "1.9.0"`，
   双通道分发复用现有 `gitee-release.ps1`
 - 本体默认引擎、默认字幕设置**一律不改**（决策 #2）
+- 开工前需确认的一件事：本地 `main` 比 `origin/main`/`gitee/main` 领先 8 个提交（未推送）。
+  本次不依赖推送，但发 v1.9.0 前必须先补推送两端，否则 Release 基线与 tag 会对不上。
 
 ## 11. 明确不做
 
