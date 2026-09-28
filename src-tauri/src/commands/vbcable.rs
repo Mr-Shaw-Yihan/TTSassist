@@ -218,9 +218,19 @@ pub async fn install_vb_cable(zip_path: String) -> Result<String, String> {
     // 纵深防御：解压/提权前再校验一次完整性（防止绕过 download 直接传入被替换的包）
     verify_pinned_sha256(&zip_path)?;
 
-    // 解压到临时目录
-    let extract_dir = tempfile::tempdir()
-        .map_err(|e| format!("创建临时目录失败: {e}"))?;
+    // 解压到「持久」目录而非 tempfile::tempdir()：VBCABLE_Setup_x64.exe 不是自包含
+    // 安装器，用户点"install"时才从自身所在目录加载 .inf/.sys/.cat。若用临时目录，
+    // 本函数异步拉起安装器后立即返回、临时目录随之销毁，安装器届时找不到驱动文件，
+    // 报 -106 LOADDRV: The path does not exist。
+    let extract_root = zip_path
+        .parent()
+        .map(|p| p.join("VBCABLE_setup"))
+        .unwrap_or_else(|| PathBuf::from("VBCABLE_setup"));
+    if extract_root.exists() {
+        let _ = std::fs::remove_dir_all(&extract_root);
+    }
+    std::fs::create_dir_all(&extract_root)
+        .map_err(|e| format!("创建解压目录失败: {e}"))?;
 
     let file = std::fs::File::open(&zip_path)
         .map_err(|e| format!("打开 zip 失败: {e}"))?;
@@ -236,7 +246,7 @@ pub async fn install_vb_cable(zip_path: String) -> Result<String, String> {
             continue;
         }
 
-        let out_path = extract_dir.path().join(&name);
+        let out_path = extract_root.join(&name);
         if entry.is_dir() {
             std::fs::create_dir_all(&out_path).ok();
         } else {
@@ -251,16 +261,22 @@ pub async fn install_vb_cable(zip_path: String) -> Result<String, String> {
     }
 
     // 查找安装程序（zip 内文件嵌套在顶层子目录，需递归查找，优先 x64）
-    let setup = match find_setup_exe(extract_dir.path()) {
+    let setup = match find_setup_exe(&extract_root) {
         Some(s) => s,
         None => return Err("在压缩包中找不到安装程序".into()),
     };
 
-    // 以管理员权限启动安装程序（弹出 UAC 对话框）
+    // 以管理员权限启动安装程序（弹出 UAC 对话框）。
+    // 关键：显式设置 -WorkingDirectory 为安装程序所在目录，避免提权后进程 CWD 落到
+    // System32 导致安装器按相对路径找不到同级驱动文件。
     let setup_str = setup.to_string_lossy().replace('/', "\\");
+    let workdir = setup
+        .parent()
+        .map(|p| p.to_string_lossy().replace('/', "\\"))
+        .unwrap_or_default();
     let ps_cmd = format!(
-        "Start-Process -FilePath '{}' -Verb RunAs",
-        setup_str
+        "Start-Process -FilePath '{}' -WorkingDirectory '{}' -Verb RunAs",
+        setup_str, workdir
     );
 
     let output = crate::proc::hidden_command("powershell")
