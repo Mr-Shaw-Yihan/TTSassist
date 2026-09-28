@@ -85,9 +85,11 @@ impl AsyncWrite for PrefixedIo {
 /// Web 遥控页面 HTTP 响应（单文件，随请求即答即关）
 async fn serve_http(stream: &mut TcpStream, first: &[u8]) -> Result<(), String> {
     let text = String::from_utf8_lossy(first);
-    let path = text.split_whitespace().nth(1).unwrap_or("/");
+    let target = text.split_whitespace().nth(1).unwrap_or("/");
+    // 路由只看 path：剥掉 query/fragment，避免 ?v=cache-buster 落到 404 兜底文本
+    let path = target.split(['?', '#']).next().unwrap_or("/");
     let (status, ctype, body) = super::web::http_response(path);
-    log_info!("[remote] Web 遥控页面请求: {path} → {status}");
+    log_info!("[remote] Web 请求: {target} → {status}");
     let head = format!(
         "HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",
         body.len()
@@ -330,6 +332,11 @@ async fn handle_conn(mut stream: TcpStream, shared: Arc<Shared>) -> Result<(), S
                 match action {
                     Action::Continue => {}
                     Action::CloseNow => {
+                        // 关闭前先把排队消息（如“令牌无效/配对码停用”等原因）flush 出去，
+                        // 否则客户端只收到 Close 而不知道失败原因（曾导致网页拿旧 token 无限 hello 重连）
+                        while let Ok(json) = out_rx.try_recv() {
+                            let _ = sink.send(Message::Text(json)).await;
+                        }
                         let _ = sink.send(Message::Close(None)).await;
                         closed = true;
                     }
