@@ -404,9 +404,19 @@ fn set_own_config_impl(app: &AppHandle, plugin_id: &str, key: &str, value: &str)
         .settings
         .read()
         .map_err(|e| format!("读取设置失败: {e}"))?
+        .plugin_config
         .clone();
-    crate::storage::settings::save_settings(&state.data_dir, &snapshot)
-        .map_err(|e| format!("保存设置失败: {e}"))?;
+    // 只刷 plugin_config（其它字段以磁盘为准），避免多实例共享数据目录时
+    // 旧内存快照把 tts_engine 等不相关字段刷回默认。
+    let updated = crate::storage::settings::update_setting(
+        &state.data_dir,
+        "plugin_config",
+        serde_json::json!(snapshot),
+    )
+    .map_err(|e| format!("保存设置失败: {e}"))?;
+    if let Ok(mut g) = state.settings.write() {
+        *g = updated;
+    }
     super::config::inject_manifest(&manifest, Some(&entry));
     crate::sync::notify_changed(app, crate::sync::EVENT_SETTINGS_CHANGED);
     Ok(())

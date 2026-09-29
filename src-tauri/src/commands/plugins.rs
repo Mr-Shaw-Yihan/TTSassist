@@ -47,9 +47,24 @@ pub fn uninstall_plugin(
         settings.plugin_config.remove(&id).is_some()
     };
     if had_config {
-        let settings = state.settings.read().map_err(|e| format!("读取设置失败: {e}"))?.clone();
-        crate::storage::settings::save_settings(&state.data_dir, &settings)
-            .map_err(|e| format!("保存设置失败: {e}"))?;
+        // 仅把内存里最新的 plugin_config 落盘；其它字段（tts_engine 等）以磁盘为准，
+        // 避免多实例（多 worktree 共享 com.voiceassist.app 数据目录）并发时把另一实例刚写的
+        // 首选引擎、音量等刷回旧内存快照。
+        let plugin_cfg = state
+            .settings
+            .read()
+            .map_err(|e| format!("读取设置失败: {e}"))?
+            .plugin_config
+            .clone();
+        let updated = crate::storage::settings::update_setting(
+            &state.data_dir,
+            "plugin_config",
+            serde_json::json!(plugin_cfg),
+        )
+        .map_err(|e| format!("保存设置失败: {e}"))?;
+        if let Ok(mut g) = state.settings.write() {
+            *g = updated;
+        }
         if let Some(m) = &manifest {
             plugin_config::remove_manifest_envs(m);
         }
@@ -211,20 +226,29 @@ pub fn set_plugin_config(
         entry.insert(f.key.clone(), v.to_string());
     }
 
-    // 落盘 + 内存 + 环境变量 + 广播
-    let settings = {
+    // 落盘 + 内存 + 环境变量 + 广播。
+    // 只把变化的 plugin_config 刷到磁盘（其它字段以磁盘最新为准），
+    // 避免多实例共享数据目录时旧内存快照覆盖 tts_engine 等不相关字段。
+    let new_plugin_cfg = {
         let mut settings = state
             .settings
             .write()
             .map_err(|e| format!("读取设置失败: {e}"))?;
         settings.plugin_config.insert(id.clone(), entry.clone());
-        settings.clone()
+        settings.plugin_config.clone()
     };
-    crate::storage::settings::save_settings(&state.data_dir, &settings)
-        .map_err(|e| format!("保存设置失败: {e}"))?;
+    let updated = crate::storage::settings::update_setting(
+        &state.data_dir,
+        "plugin_config",
+        serde_json::json!(new_plugin_cfg),
+    )
+    .map_err(|e| format!("保存设置失败: {e}"))?;
+    if let Ok(mut g) = state.settings.write() {
+        *g = updated.clone();
+    }
     plugin_config::inject_manifest(&manifest, Some(&entry));
     notify_changed(&app, EVENT_SETTINGS_CHANGED);
-    Ok(settings)
+    Ok(updated)
 }
 
 /// 清空插件全部配置：删除存储条目 + 移除声明的环境变量。
@@ -236,21 +260,29 @@ pub fn clear_plugin_config(
     app: tauri::AppHandle,
 ) -> Result<crate::storage::types::Settings, String> {
     let manifest = plugins.manifest_of(&id);
-    let settings = {
+    // 同 set_plugin_config：只刷 plugin_config，其它字段以磁盘为准。
+    let new_plugin_cfg = {
         let mut settings = state
             .settings
             .write()
             .map_err(|e| format!("读取设置失败: {e}"))?;
         settings.plugin_config.remove(&id);
-        settings.clone()
+        settings.plugin_config.clone()
     };
-    crate::storage::settings::save_settings(&state.data_dir, &settings)
-        .map_err(|e| format!("保存设置失败: {e}"))?;
+    let updated = crate::storage::settings::update_setting(
+        &state.data_dir,
+        "plugin_config",
+        serde_json::json!(new_plugin_cfg),
+    )
+    .map_err(|e| format!("保存设置失败: {e}"))?;
+    if let Ok(mut g) = state.settings.write() {
+        *g = updated.clone();
+    }
     if let Some(m) = &manifest {
         plugin_config::remove_manifest_envs(m);
     }
     notify_changed(&app, EVENT_SETTINGS_CHANGED);
-    Ok(settings)
+    Ok(updated)
 }
 
 // ── 安装 ─────────────────────────────────────────
