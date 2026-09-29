@@ -7,18 +7,8 @@
       "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/edge-tts-0.1.0.zip",
       "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/edge-tts-0.1.0.zip",
       "checksum": "2ad55b2da020266137e8eb7ba6872b776d82a04e31eb27c88e2b386b55665323",
-      "description": "免费、无需 Key 的微软 Edge 语音（非官方接口，可能不稳定）",
+      "description": "免费、无需 Key 的微软 Edge 语音，非官方接口可能不稳定",
       "plugin_type": "tts_engine"
-    },
-    {
-      "id": "mimo-asr",
-      "name": "MiMo ASR（小米·云端）",
-      "version": "0.1.0",
-      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/mimo-asr-0.1.0.zip",
-      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/mimo-asr-0.1.0.zip",
-      "checksum": "12b165e4ea0739cfa75603906b6dc0566e0a9049b8f65c8cee535073ef895664",
-      "description": "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测",
-      "plugin_type": "asr_engine"
     },
     {
       "id": "genie-tts",
@@ -27,7 +17,7 @@
       "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/genie-tts-0.1.0.zip",
       "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/genie-tts-0.1.0.zip",
       "checksum": "da15f4bd96819c8bf5411cecc39eede304a3c4f9eda4a9ba9ee23f604143a878",
-      "description": "GPT-SoVITS ONNX 本地推理引擎，CPU 离线合成，音色包可扩展（首次使用自动下载运行环境约 1.1GB，每个音色另约 320MB）",
+      "description": "GPT-SoVITS ONNX 本地推理引擎，CPU 离线合成，音色包可扩展（首次使用自动下载运行环境）",
       "plugin_type": "tts_engine"
     },
     {
@@ -41,13 +31,23 @@
       "plugin_type": "tts_engine"
     },
     {
+      "id": "mimo-asr",
+      "name": "MiMo ASR（小米·云端）",
+      "version": "0.1.0",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/mimo-asr-0.1.0.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/mimo-asr-0.1.0.zip",
+      "checksum": "12b165e4ea0739cfa75603906b6dc0566e0a9049b8f65c8cee535073ef895664",
+      "description": "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测",
+      "plugin_type": "asr_engine"
+    },
+    {
       "id": "minimax-tts",
       "name": "MiniMax TTS（国内版）",
       "version": "0.2.1",
       "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-0.2.1.zip",
       "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-0.2.1.zip",
       "checksum": "fb89ca0933b40a6576e293cf871795d7be2fbfb6adff2628df74a4270c6625f1",
-      "description": "MiniMax 云端语音合成（国内版），需 API Key，50+ 音色、40 种语言",
+      "description": "MiniMax 云端语音合成（国内版·阉割版），需 API Key，50+ 音色、40 种语言，不支持音色克隆",
       "plugin_type": "tts_engine"
     },
     {
@@ -57,7 +57,7 @@
       "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-global-0.2.1.zip",
       "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-global-0.2.1.zip",
       "checksum": "5c344b74599a00b1820d8dcd38b83fcd30860695dd0b1a2de1647bdef160853d",
-      "description": "MiniMax 云端语音合成（国际版），需 API Key，50+ 音色、40 种语言",
+      "description": "MiniMax 云端语音合成（国际版），需 API Key，50+ 音色、40 种语言，支持音色克隆与音色管理",
       "plugin_type": "tts_engine"
     }
   ]

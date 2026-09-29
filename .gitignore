@@ -12,9 +12,10 @@ dist
 dist-ssr
 *.local
 
-# Rust 构建产物（src-tauri 由 Tauri 管理，这里管 plugins 子 crate）——通配覆盖全部插件，Cargo.lock 统一入库（可复现构建）
-plugins/*/target/
-plugins/*/dist/
+# Rust 构建产物（src-tauri 由 Tauri 管理，这里管 plugins 子 crate）——通配覆盖任意深度；Cargo.lock 仅入库 workspace 根 plugins/Cargo.lock
+plugins/**/target/
+plugins/**/dist/
+plugins/target-test/
 
 # Editor directories and files
 .vscode/*

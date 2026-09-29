@@ -846,7 +846,7 @@ mod tests {
         RESULT
             .get_or_init(|| {
                 let src_tauri = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-                let manifest = src_tauri.join("../plugins/test-plugin/Cargo.toml");
+                let manifest = src_tauri.join("../plugins/tests/test-plugin/Cargo.toml");
                 let target_dir = src_tauri.join("../plugins/target-test");
                 let status = std::process::Command::new("cargo")
                     .args(["build", "--manifest-path"])
@@ -1182,7 +1182,7 @@ mod tests {
         RESULT
             .get_or_init(|| {
                 let src_tauri = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-                let manifest = src_tauri.join("../plugins/test-fx-plugin/Cargo.toml");
+                let manifest = src_tauri.join("../plugins/tests/test-fx-plugin/Cargo.toml");
                 let target_dir = src_tauri.join("../plugins/target-test");
                 let status = std::process::Command::new("cargo")
                     .args(["build", "--manifest-path"])

@@ -33,4 +33,4 @@
   会直接中断脚本，判断成败用 `$LASTEXITCODE`（临时降级 `"Continue"`）
 - 插件开发规范：QoderWork 用户请加载 `voiceassist-dev` skill；
   其他工具读 `../doc/插件系统开发参考.md`（版本三处同步、索引与发布规则
-  见其中「索引与发布规则」一节，发布用 `plugins/publish.ps1`）
+  见其中「索引与发布规则」一节，发布用 `plugins/scripts/publish.ps1`）

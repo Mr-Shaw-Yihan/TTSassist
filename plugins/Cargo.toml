@@ -1,0 +1,7 @@
+# plugins Cargo workspace：收编全部插件 crate（ABI 库 + 引擎 + 共享库 + 测试桩），
+# 共享构建缓存（plugins/target，cargo 在成员目录构建时自动落到这里），cargo check/build
+# 一次覆盖全部成员。各成员仍是独立 cdylib，产物与分发方式不变。
+# 注意：src-tauri 以 path 依赖引用 plugin-api（跨 workspace 合法）。
+[workspace]
+resolver = "2"
+members = ["plugin-api", "engines/*", "shared/*", "tests/*"]
