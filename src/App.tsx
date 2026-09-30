@@ -26,6 +26,7 @@ import { UpdateDialog } from "./components/Settings/UpdateDialog";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "./stores/updateStore";
 import { usePluginTaskStore } from "./stores/pluginTaskStore";
+import { useWindowState } from "./hooks/useWindowState";
 import { playMicOnChime, playMicOffChime } from "./utils/chime";
 import {
   generateTTS,
@@ -158,6 +159,9 @@ function App() {
     const theme = settings?.theme === "dark" ? "dark" : "light";
     document.documentElement.setAttribute("data-theme", theme);
   }, [settings?.theme]);
+
+  // 主窗口几何记忆：启动恢复上次尺寸/位置/最大化，拖动缩放防抖保存（仅 main 路径执行）
+  useWindowState();
 
   // 首次切到收藏 tab 时加载（列表也兜底）
   useEffect(() => {
