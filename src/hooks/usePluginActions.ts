@@ -12,8 +12,18 @@ import {
 import { useSettingsStore } from "../stores/settingsStore";
 import { confirm } from "../components/common/ConfirmDialog";
 import { toast } from "../components/common/Toast";
-import type { Candidate } from "./usePluginInventory";
+import type { StoreItem } from "./usePluginInventory";
 import type { PluginInfo } from "../types";
+
+/** 在线更新候选（已装卡的「更新至 vX」按钮使用） */
+interface Candidate {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  requirements?: string | null;
+  source: "bundled" | "online";
+}
 
 export function usePluginActions(reload: () => Promise<void>, reloadBundled: () => Promise<void>) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -28,6 +38,27 @@ export function usePluginActions(reload: () => Promise<void>, reloadBundled: () 
           c.source === "bundled"
             ? await installBundledPlugin(c.id)
             : await downloadInstallPlugin(c.id);
+        await reload();
+        await reloadBundled();
+        toast(msg);
+      } catch (e) {
+        toast(`安装失败：${e}`, "err");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [reload, reloadBundled]
+  );
+
+  /** 商店条目安装/更新：内置走离线通道，在线走下载通道 */
+  const installStoreItem = useCallback(
+    async (item: StoreItem) => {
+      setBusy(item.hasUpdate ? `正在更新「${item.name}」…` : `正在安装「${item.name}」…`);
+      try {
+        const msg =
+          item.source === "bundled"
+            ? await installBundledPlugin(item.id)
+            : await downloadInstallPlugin(item.id);
         await reload();
         await reloadBundled();
         toast(msg);
@@ -112,7 +143,7 @@ export function usePluginActions(reload: () => Promise<void>, reloadBundled: () 
     [reload]
   );
 
-  return { busy, installCandidate, uninstall, setEngine, openLocation, dropInstall };
+  return { busy, installCandidate, installStoreItem, uninstall, setEngine, openLocation, dropInstall };
 }
 
 export type PluginActions = ReturnType<typeof usePluginActions>;

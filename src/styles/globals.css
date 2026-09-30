@@ -50,6 +50,40 @@
   /* 节奏 */
   --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
   --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* ============================================================
+     界面尺寸档位（响应窗口宽度；竖状小窗＝现状尺寸不动）
+     紧凑 <680px ／ 舒适 ≥680px ／ 宽屏 ≥1000px
+     侧边栏与导航热区整体缩放，全屏用户不再觉得小
+     ============================================================ */
+  --side-w: 3.5rem;        /* 侧栏宽（= w-14 现状） */
+  --side-btn: 2.75rem;     /* 导航按钮热区（= h-11 w-11 现状） */
+  --side-ic: 1rem;         /* 图标尺寸（= 16px 现状） */
+  --side-label: 0.5625rem; /* 导航文字（= 9px 现状） */
+}
+
+@media (min-width: 680px) {
+  :root {
+    --side-w: 62px;
+    --side-btn: 48px;
+    --side-ic: 19px;
+    --side-label: 0.625rem;
+  }
+}
+
+@media (min-width: 1000px) {
+  :root {
+    --side-w: 74px;
+    --side-btn: 56px;
+    --side-ic: 23px;
+    --side-label: 0.6875rem;
+  }
+}
+
+/* 侧栏图标随档位缩放（SVG 的 width/height 属性被 CSS 覆盖） */
+.side-icon svg {
+  width: var(--side-ic);
+  height: var(--side-ic);
 }
 
 html,

@@ -515,8 +515,9 @@ function App() {
       </header>
 
       <div className="flex min-h-0 flex-1">
-        {/* 左侧边栏（永久）：消息 / 收藏 / 语音 / 字幕 / 插件 / 遥控 / 设置（恒为按钮组最后一个），「其他」置底 */}
-        <nav className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-[var(--ink-200)] bg-[var(--paper)] py-3">
+        {/* 左侧边栏（永久）：消息 / 收藏 / 语音 / 字幕 / 插件 / 遥控 / 设置（恒为按钮组最后一个），「其他」置底
+            宽度与热区走 --side-* 档位变量（globals.css 按窗口宽度三档缩放，竖状小窗维持现状尺寸） */}
+        <nav className="flex w-[var(--side-w)] shrink-0 flex-col items-center gap-1 border-r border-[var(--ink-200)] bg-[var(--paper)] py-3">
           <SideButton icon={<TexIcon name="msg" size={16} />} label="消息" active={tab === "messages"} onClick={() => setTab("messages")} />
           <SideButton icon={<TexIcon name="star" size={16} />} label="收藏" active={tab === "favorites"} onClick={() => setTab("favorites")} />
           <SideButton icon={<TexIcon name="mic" size={16} />} label="语音" active={tab === "voice"} onClick={() => setTab("voice")} />
@@ -686,7 +687,8 @@ function App() {
 }
 
 /** 侧边栏按钮：纹理图标 + 小字标签，可选红点。
- *  选中态铺皮肤质感（浅色哑金磨砂 / 深色紫晶星点），图标变为实心断线形态 */
+ *  选中态铺皮肤质感（浅色哑金磨砂 / 深色紫晶星点），图标变为实心断线形态
+ *  尺寸走 --side-* 档位变量（随窗口宽度缩放；图标由 .side-icon 的 CSS 接管尺寸） */
 function SideButton({
   icon,
   label,
@@ -705,14 +707,14 @@ function SideButton({
       onClick={onClick}
       title={label}
       className={[
-        "relative flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-xl transition-colors",
+        "relative flex h-[var(--side-btn)] w-[var(--side-btn)] flex-col items-center justify-center gap-0.5 rounded-xl transition-colors",
         active
           ? "btn-tex border"
           : "text-[var(--ink-300)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
       ].join(" ")}
     >
-      <span className="flex h-4 w-4 items-center justify-center leading-none">{icon}</span>
-      <span className="text-[9px] leading-none tracking-wide">{label}</span>
+      <span className="side-icon flex h-4 w-4 items-center justify-center leading-none">{icon}</span>
+      <span className="text-[length:var(--side-label)] leading-none tracking-wide">{label}</span>
       {dot && (
         <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[var(--seal)]" />
       )}
