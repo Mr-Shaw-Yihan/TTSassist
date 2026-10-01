@@ -606,6 +606,8 @@ pub struct BundledPluginInfo {
     pub requirements: Option<String>,
     /// 插件类型（manifest.type）：tts_engine / asr_engine，前端按此分类展示
     pub plugin_type: String,
+    /// 引擎类别："local" 本地离线 / "remote" 联网（manifest 缺省 remote），前端子分类与徽标用
+    pub category: String,
     /// 本机是否已安装（含加载失败的）
     pub installed: bool,
 }
@@ -682,6 +684,7 @@ pub fn list_bundled_plugins(
             description: m.description,
             requirements: m.requirements,
             plugin_type: m.plugin_type,
+            category: m.category,
         };
         match by_id.get(&info.id) {
             Some(prev) if cmp_version(&info.version, &prev.version) != std::cmp::Ordering::Greater => {}

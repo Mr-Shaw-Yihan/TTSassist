@@ -1,7 +1,7 @@
-// 插件商店卡（竖版，适配阵列网格）：身份 + 商店态徽标 → 描述 → 属性点 → 主操作。
+// 插件商店卡（竖版，适配阵列网格）：身份行 → 属性徽标行 → 描述 → 主操作。
 // 已安装的插件在商店里显示「已安装 ✓」（可更新时显示更新按钮，版本明示去向）。
 
-import type { StoreItem } from "../../hooks/usePluginInventory";
+import { supportsClone, type StoreItem } from "../../hooks/usePluginInventory";
 
 export function StoreCard({
   item,
@@ -21,6 +21,7 @@ export function StoreCard({
 
   return (
     <div className="flex flex-col rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3.5 py-3 shadow-[0_1px_2px_rgba(26,24,22,0.03)]">
+      {/* 身份行：名称 + 版本 + 商店态徽标 */}
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
         <span className="text-[13px] font-medium text-[var(--ink-900)]">{item.name}</span>
         <span className="rounded-md bg-[var(--ink-100)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--ink-500)]">
@@ -43,27 +44,39 @@ export function StoreCard({
         )}
       </div>
 
-      <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-500)]" title={item.description}>
-        {item.description || "　"}
-      </p>
-
-      {/* 属性点：来源 + 资源需求摘要 */}
+      {/* 属性徽标行（名称下方，统一一排） */}
       <div className="mt-1.5 flex flex-wrap gap-1">
+        <span className="rounded border border-[var(--ink-200)] px-1.5 py-0.5 text-[9.5px] text-[var(--ink-500)]">
+          {item.category === "local" ? "本地离线" : "云端"}
+        </span>
+        {supportsClone(item.id) && (
+          <span className="rounded border border-[var(--ink-200)] px-1.5 py-0.5 text-[9.5px] text-[var(--ink-500)]">
+            支持克隆
+          </span>
+        )}
         {item.source === "bundled" && (
           <span className="rounded bg-[var(--ink-100)]/70 px-1.5 py-0.5 text-[9.5px] text-[var(--ink-500)]">
             内置分发
           </span>
         )}
-        {item.requirements && (
-          <span
-            className="max-w-full truncate rounded bg-[var(--ink-100)]/70 px-1.5 py-0.5 text-[9.5px] text-[var(--ink-500)]"
-            title={item.requirements}
-          >
-            {item.requirements}
-          </span>
-        )}
       </div>
 
+      {/* 描述 */}
+      <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-500)]" title={item.description}>
+        {item.description || "　"}
+      </p>
+
+      {/* 资源需求摘要 */}
+      {item.requirements && (
+        <p
+          className="mt-1.5 truncate rounded bg-[var(--ink-100)]/40 px-1.5 py-0.5 text-[9.5px] text-[var(--ink-500)]"
+          title={item.requirements}
+        >
+          {item.requirements}
+        </p>
+      )}
+
+      {/* 操作行 */}
       <div className="mt-auto flex flex-wrap items-center gap-0.5 pt-2.5">
         {mode === "update" && (
           <button

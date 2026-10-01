@@ -22,6 +22,11 @@ export function catOf(pluginType: string | undefined | null): PluginCat {
   return "ext";
 }
 
+/** 支持音色克隆的插件 id（与宿主克隆链路绑定一致：
+ *  minimax_clone.rs 仅服务 minimax-tts-global（国内版阉割无克隆）；hojo 为零样本克隆引擎） */
+const CLONE_CAPABLE = new Set(["hojo-tts", "minimax-tts-global"]);
+export const supportsClone = (pluginId: string): boolean => CLONE_CAPABLE.has(pluginId);
+
 /** 商店条目：内置与在线索引合并去重后的统一形态（含已装态） */
 export interface StoreItem {
   id: string;
@@ -31,6 +36,8 @@ export interface StoreItem {
   requirements?: string | null;
   /** manifest 类型（bundled 缺省按 tts_engine） */
   plugin_type?: string;
+  /** 引擎类别："local" 本地离线 / "remote" 联网（已装回填或 zip manifest；在线条目缺省云端） */
+  category?: string;
   /** 安装来源：bundled=随安装包内置（离线即装） / online=官方在线下载 */
   source: "bundled" | "online";
   /** 本机是否已安装 */
@@ -70,6 +77,8 @@ function mergeStoreItems(
       description: b.description,
       requirements: b.requirements,
       plugin_type: b.plugin_type,
+      // 已装的以 PluginInfo.category 为准（运行时事实），否则用 zip 内嵌 manifest
+      category: installed?.category ?? b.category,
       source: "bundled",
       installed: !!installed,
       installedVersion: installed?.version,
@@ -85,6 +94,9 @@ function mergeStoreItems(
       description: o.description,
       requirements: o.requirements,
       plugin_type: o.plugin_type,
+      // 在线索引暂无 category 字段：已装回填，否则按云端（现网在线渠道均为云端引擎；
+      // 待 publish.ps1 把 category 派生进索引后改为精确值）
+      category: installed?.category ?? "remote",
       source: "online",
       installed: !!installed,
       installedVersion: installed?.version,

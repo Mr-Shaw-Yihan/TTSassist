@@ -1,18 +1,16 @@
-// 已安装插件卡（竖版，适配阵列网格）：身份行 → 状态一句话 → 主操作 + 弱操作 → 按需展开。
-// 启用/停用开关由 enabled/onToggle 传入后渲染（后端停用能力落地前不显示）。
+// 已安装插件卡（竖版，适配阵列网格）：身份行 → 属性徽标行 → 状态一句话 → 主操作 + 弱操作。
+// 配置职能不在插件库（语音中心负责）；启用/停用开关由 enabled/onToggle 传入后渲染。
 
-import { useState } from "react";
-import { PluginSetupPanel } from "./PluginSetupPanel";
-import { ResourcePackLinks } from "./ResourcePackLinks";
-import { PluginConfigPanel } from "../Settings/PluginConfigPanel";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { usePluginTaskStore } from "../../stores/pluginTaskStore";
+import { PluginSetupPanel } from "./PluginSetupPanel";
+import { ResourcePackLinks } from "./ResourcePackLinks";
 import { importResourcePackFlow } from "../../services/invoke";
 import { isNewer } from "../../utils/version";
+import { supportsClone, type PluginCat } from "../../hooks/usePluginInventory";
 import { toast } from "../common/Toast";
 import type { PluginInfo, PluginIndexEntry } from "../../types";
 import type { PluginActions } from "../../hooks/usePluginActions";
-import type { PluginCat } from "../../hooks/usePluginInventory";
 
 export function InstalledCard({
   p,
@@ -48,10 +46,7 @@ export function InstalledCard({
   const isCurrentEngine =
     (cat === "tts" && settings?.tts_engine === p.id) ||
     (cat === "asr" && settings?.asr_plugin === p.id);
-  // 配置卡展开（本地状态）
-  const [showConfig, setShowConfig] = useState(false);
-  const hasConfig = (p.config?.fields.length ?? 0) > 0;
-  // 必填缺失 → 待配置徽标（点击直达卡内配置）
+  // 必填缺失 → 待配置提示（配置入口在语音中心，此处仅状态展示）
   const missingRequired = (p.config?.fields ?? []).filter(
     (f) => f.required && !(settings?.plugin_config?.[p.id]?.[f.key] ?? "").trim(),
   );
@@ -65,7 +60,7 @@ export function InstalledCard({
         "border-[var(--ink-200)]",
       ].join(" ")}
     >
-      {/* 身份行 */}
+      {/* 身份行：名称 + 版本 + 状态徽标 + 启停开关 */}
       <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
         <span className="text-[13px] font-medium text-[var(--ink-900)]">{p.name}</span>
         <span className="rounded-md bg-[var(--ink-100)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--ink-500)]">
@@ -75,27 +70,21 @@ export function InstalledCard({
           <span className="rounded-md bg-[var(--amber-200)]/70 px-1.5 py-0.5 text-[10px] font-medium text-[var(--amber-600)]">
             使用中
           </span>
-        ) : p.loaded ? (
-          <span className="rounded-md bg-emerald-600/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
-            已启用
-          </span>
-        ) : (
+        ) : !p.loaded ? (
           <span
             className="rounded-md bg-[var(--seal)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--seal)]"
             title={p.error ?? undefined}
           >
             故障
           </span>
-        )}
-        {missingRequired.length > 0 && p.loaded && (
-          <button
-            onClick={() => setShowConfig(true)}
+        ) : missingRequired.length > 0 ? (
+          <span
             className="rounded-md border border-dashed border-[var(--amber-600)]/45 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--amber-600)]"
-            title={`待配置：${missingRequired.map((f) => f.label).join("、")}。点击在本卡内展开配置`}
+            title={`待配置：${missingRequired.map((f) => f.label).join("、")}。请在语音中心选中该引擎后填写`}
           >
             ⚙ 待配置
-          </button>
-        )}
+          </span>
+        ) : null}
         {enabled !== undefined && onToggle && (
           <button
             role="switch"
@@ -117,22 +106,27 @@ export function InstalledCard({
         )}
       </div>
 
-      {/* 状态一句话 / 描述 */}
-      <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-500)]" title={p.description}>
-        {p.description || "　"}
-      </p>
-
-      {/* 属性点：类别 + 环境需求（安装前判断配置的决策信息） */}
+      {/* 属性徽标行（名称下方，统一一排） */}
       <div className="mt-1.5 flex flex-wrap gap-1">
-        <span className="rounded bg-[var(--ink-100)]/70 px-1.5 py-0.5 text-[9.5px] text-[var(--ink-500)]">
+        <span className="rounded border border-[var(--ink-200)] px-1.5 py-0.5 text-[9.5px] text-[var(--ink-500)]">
           {p.category === "local" ? "本地离线" : "云端"}
         </span>
+        {supportsClone(p.id) && (
+          <span className="rounded border border-[var(--ink-200)] px-1.5 py-0.5 text-[9.5px] text-[var(--ink-500)]">
+            支持克隆
+          </span>
+        )}
         {p.has_setup && (
           <span className="rounded bg-[var(--ink-100)]/70 px-1.5 py-0.5 text-[9.5px] text-[var(--ink-500)]">
             需下载环境
           </span>
         )}
       </div>
+
+      {/* 描述 */}
+      <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-500)]" title={p.description}>
+        {p.description || "　"}
+      </p>
 
       {/* 失败原因 */}
       {!p.loaded && p.error && (
@@ -141,14 +135,7 @@ export function InstalledCard({
         </div>
       )}
 
-      {/* 通用插件配置卡：本卡内直接展开 */}
-      {hasConfig && showConfig && (
-        <div className="mt-2 border-t border-dashed border-[var(--ink-200)] pt-2.5">
-          <PluginConfigPanel key={p.id} pluginId={p.id} pluginName={p.name} />
-        </div>
-      )}
-
-      {/* 本地引擎环境安装区 */}
+      {/* 本地引擎环境安装区（环境安装属插件库职责） */}
       {p.loaded && p.has_setup && (
         <div className="mt-2">
           {task?.pluginId === p.id ? (
@@ -245,15 +232,6 @@ export function InstalledCard({
             更新至 v{online.version}
           </button>
         )}
-        {hasConfig && !showConfig && (
-          <button
-            onClick={() => setShowConfig(true)}
-            disabled={busy !== null}
-            className="mr-1 rounded-lg border border-[var(--ink-200)] px-2.5 py-1 text-[11px] text-[var(--ink-500)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)] disabled:opacity-40"
-          >
-            配置
-          </button>
-        )}
         <span className="flex-1" />
         <button
           onClick={() => void actions.openLocation(p)}
@@ -269,29 +247,6 @@ export function InstalledCard({
           卸载
         </button>
       </div>
-
-      {/* 音色清单（网格卡内最多展示 3 个） */}
-      {cat !== "asr" && p.loaded && p.voices.length > 0 && (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {p.voices.slice(0, 3).map((v) => (
-            <span
-              key={v.id}
-              className="rounded border border-[var(--ink-200)] bg-[var(--paper)] px-1.5 py-0.5 text-[9.5px] text-[var(--ink-500)]"
-              title={v.id}
-            >
-              {v.label}
-            </span>
-          ))}
-          {p.voices.length > 3 && (
-            <span
-              className="rounded border border-dashed border-[var(--ink-200)] px-1.5 py-0.5 text-[9.5px] text-[var(--ink-300)]"
-              title={p.voices.slice(3).map((v) => v.label).join("、")}
-            >
-              +{p.voices.length - 3}
-            </span>
-          )}
-        </div>
-      )}
     </div>
   );
 }

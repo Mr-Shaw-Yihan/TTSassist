@@ -4,7 +4,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { usePluginInventory, catOf, type PluginCat, type StoreItem } from "../../hooks/usePluginInventory";
+import { usePluginInventory, catOf, supportsClone, type PluginCat, type StoreItem } from "../../hooks/usePluginInventory";
 import { usePluginActions } from "../../hooks/usePluginActions";
 import { InstalledCard } from "./InstalledCard";
 import { StoreCard } from "./StoreCard";
@@ -12,6 +12,7 @@ import { ConfirmDialogHost } from "../common/ConfirmDialog";
 import { ToastHost } from "../common/Toast";
 
 type MainTab = "inst" | "store";
+type Sub = "" | "cloud" | "local" | "clone";
 const CATS: { id: "all" | PluginCat; label: string }[] = [
   { id: "all", label: "全部" },
   { id: "tts", label: "语音合成" },
@@ -19,6 +20,18 @@ const CATS: { id: "all" | PluginCat; label: string }[] = [
   { id: "ext", label: "扩展" },
 ];
 const CAT_LABEL: Record<PluginCat, string> = { tts: "语音合成", asr: "语音识别", ext: "扩展" };
+/** 二级子分类：TTS 多一项「支持克隆」（克隆与云/本地交叉，作为独立视图） */
+const SUBS: Partial<Record<PluginCat, { id: Exclude<Sub, "">; label: string }[]>> = {
+  tts: [
+    { id: "cloud", label: "云端" },
+    { id: "local", label: "本地" },
+    { id: "clone", label: "支持克隆" },
+  ],
+  asr: [
+    { id: "cloud", label: "云端" },
+    { id: "local", label: "本地" },
+  ],
+};
 
 /** 搜索匹配：名称 / 描述 / id（大小写不敏感） */
 function matches(p: { id: string; name: string; description: string }, q: string): boolean {
@@ -34,11 +47,20 @@ export function PluginPage() {
 
   const [mainTab, setMainTab] = useState<MainTab>("inst");
   const [cat, setCat] = useState<"all" | PluginCat>("all");
+  const [sub, setSub] = useState<Sub>("");
   const [q, setQ] = useState("");
   // 拖入 zip 时的浮层开关
   const [dragOver, setDragOver] = useState(false);
   // 正在展示「安装方式二选一」面板的插件 id（在线下载 / 离线导入）
   const [envPickId, setEnvPickId] = useState<string | null>(null);
+
+  // 二级子分类过滤：云端/本地按引擎类别，支持克隆按宿主克隆链路绑定
+  const subOk = (item: { id: string; category?: string }): boolean => {
+    if (!sub) return true;
+    if (sub === "clone") return supportsClone(item.id);
+    if (sub === "local") return item.category === "local";
+    return item.category !== "local";
+  };
 
   // 商店惰性联网：首次进入商店页签时自动获取在线索引（应用启动不联网）
   useEffect(() => {
@@ -76,26 +98,26 @@ export function PluginPage() {
     };
   }, [actions.dropInstall]);
 
-  // 当前视图的分组渲染数据：分类过滤 + 搜索
+  // 当前视图的分组渲染数据：分类过滤 + 二级子分类 + 搜索
   const cats: PluginCat[] = cat === "all" ? ["tts", "asr", "ext"] : [cat];
 
   const instSections = useMemo(
     () =>
       cats.map((c) => ({
         cat: c,
-        items: inv.installedGroups[c].filter((p) => matches(p, q)),
+        items: inv.installedGroups[c].filter((p) => matches(p, q) && subOk(p)),
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [inv.installedGroups, cat, q],
+    [inv.installedGroups, cat, sub, q],
   );
   const storeSections = useMemo(
     () =>
       cats.map((c) => ({
         cat: c,
-        items: inv.storeGroups[c].filter((it) => matches(it, q)),
+        items: inv.storeGroups[c].filter((it) => matches(it, q) && subOk(it)),
       })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [inv.storeGroups, cat, q],
+    [inv.storeGroups, cat, sub, q],
   );
   const instVisible = instSections.reduce((n, s) => n + s.items.length, 0);
   const storeVisible = storeSections.reduce((n, s) => n + s.items.length, 0);
@@ -161,12 +183,15 @@ export function PluginPage() {
           ))}
         </div>
 
-        {/* 工具行：子分类 + 搜索（两视图共用） */}
+        {/* 工具行：子分类 + 搜索（两视图共用）；选中语音合成/语音识别时出现二级子分类 */}
         <div className="flex flex-wrap items-center gap-1.5 py-3">
           {CATS.map((c) => (
             <button
               key={c.id}
-              onClick={() => setCat(c.id)}
+              onClick={() => {
+                setCat(c.id);
+                setSub("");
+              }}
               className={[
                 "rounded-full border px-3 py-1 text-[11px] transition-colors",
                 cat === c.id
@@ -190,6 +215,25 @@ export function PluginPage() {
             />
           </label>
         </div>
+        {(cat === "tts" || cat === "asr") && (
+          <div className="-mt-1.5 flex flex-wrap items-center gap-1.5 pb-3">
+            <span className="text-[10px] text-[var(--ink-300)]">筛选</span>
+            {(SUBS[cat] ?? []).map((s) => (
+              <button
+                key={s.id}
+                onClick={() => setSub(sub === s.id ? "" : s.id)}
+                className={[
+                  "rounded-full border px-2.5 py-0.5 text-[10.5px] transition-colors",
+                  sub === s.id
+                    ? "border-[var(--amber-500)] bg-[var(--amber-500)] font-medium text-[var(--paper)]"
+                    : "border-[var(--ink-200)] bg-transparent text-[var(--ink-500)] hover:text-[var(--ink-700)]",
+                ].join(" ")}
+              >
+                {s.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* ══ 已安装视图 ══ */}
         {mainTab === "inst" && (
