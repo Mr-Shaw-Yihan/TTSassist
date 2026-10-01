@@ -249,8 +249,7 @@ fn register_favorite_hotkey(app: &AppHandle, hotkey: &str, audio_path: String) -
                 };
                 if enabled && !device.is_empty() {
                     if let Some(mic) = app.try_state::<MicPlayback>() {
-                        // 效果器解析（fail-open 直通原声，内部自带 10s 超时）
-                        let abs = crate::fx::resolve_for_mic(app, &state.data_dir, &audio_path);
+                        let abs = state.data_dir.join(&audio_path);
                         mic.play(abs, device, volume);
                     }
                 }

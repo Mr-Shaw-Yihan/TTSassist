@@ -219,8 +219,7 @@ pub fn play_favorite_by_id(app: &AppHandle, id: &str) -> Result<(), String> {   
     };
     if enabled && !device.is_empty() {
         if let Some(mic) = app.try_state::<MicPlayback>() {
-            // 效果器解析（fail-open 直通原声，内部自带 10s 超时）
-            let abs = crate::fx::resolve_for_mic(app, &state.data_dir, &fav.audio_path);
+            let abs = state.data_dir.join(&fav.audio_path);
             mic.play(abs, device, volume);
         }
     }
@@ -229,19 +228,13 @@ pub fn play_favorite_by_id(app: &AppHandle, id: &str) -> Result<(), String> {   
     Ok(())
 }
 
-/// 状态快照 JSON：{"mic_send","playing_id","synthesizing","fx"}。
-/// playing_id = 当前播放音频对应的收藏 id（无收藏匹配时 null）；
-/// fx = 当前效果器预设 key（"off" 或 "<plugin>:<effect>"；RC-2：新 App 据此显隐效果器控件，
-/// 老 App 不认识该字段不受影响）
+/// 状态快照 JSON：{"mic_send","playing_id","synthesizing"}。
+/// playing_id = 当前播放音频对应的收藏 id（无收藏匹配时 null）
 pub fn state_json(app: &AppHandle) -> String {
     let mic_send = app
         .try_state::<crate::commands::AppState>()
         .map(|s| s.settings.read().map(|g| g.mic_send_enabled).unwrap_or(false))
         .unwrap_or(false);
-
-    let fx_preset = app
-        .try_state::<crate::commands::AppState>()
-        .and_then(|s| s.settings.read().ok().map(|g| g.fx_preset.clone()));
 
     let (playing_path, synthesizing) = app
         .try_state::<HostBridge>()
@@ -258,63 +251,11 @@ pub fn state_json(app: &AppHandle) -> String {
         "mic_send": mic_send,
         "playing_id": playing_id,
         "synthesizing": synthesizing,
-        "fx": fx_preset,
     })
     .to_string()
 }
 
 // ── 原生能力（供本体遥控服务 remote/ 直接调用；下方 C ABI br_* 转调这些，单一事实源）──
-
-/// 读当前效果器预设 key（"off" / "<plugin>:<effect>"；状态未就绪回 "off"）
-pub fn current_fx_preset(app: &AppHandle) -> String {
-    app.try_state::<crate::commands::AppState>()
-        .and_then(|s| s.settings.read().ok().map(|g| g.fx_preset.clone()))
-        .unwrap_or_else(|| "off".to_string())
-}
-
-/// 效果器预设 JSON 数组（RC-1 list_fx 下行）：[{"key","name","plugin","effect_id"}]
-pub fn native_list_fx_presets(app: &AppHandle) -> Vec<serde_json::Value> {
-    use crate::commands::fx::collect_fx_presets;
-    let Some(pm) = app.try_state::<PluginManager>() else {
-        return Vec::new();
-    };
-    collect_fx_presets(&pm)
-        .into_iter()
-        .map(|p| {
-            serde_json::json!({
-                "key": p.key,
-                "name": p.name,
-                "plugin": p.plugin,
-                "effect_id": p.effect_id,
-            })
-        })
-        .collect()
-}
-
-/// 切换效果器预设（RC-1 set_fx）：复用既有设置写入路径（update_setting 白名单 arm），
-/// 同步内存 AppState + 落盘 + 广播 settings:changed（前端抽屉与遥控端即时跟随）。
-pub fn native_set_fx_preset(app: &AppHandle, key: &str) -> Result<(), String> {
-    use crate::sync::{notify_changed, EVENT_SETTINGS_CHANGED};
-    let state = app
-        .try_state::<crate::commands::AppState>()
-        .ok_or("宿主状态未就绪")?;
-    // 值合法性兜底：允许 "off" 或 "<plugin>:<effect>" 形态；其余直接拒绝
-    if key != "off" && key.split_once(':').map_or(true, |(pid, eid)| pid.is_empty() || eid.is_empty()) {
-        return Err(format!("非法预设 key「{key}」"));
-    }
-    let settings = crate::storage::settings::update_setting(
-        &state.data_dir,
-        "fx_preset",
-        serde_json::Value::String(key.to_string()),
-    )
-    .map_err(|e| format!("保存设置失败: {e}"))?;
-    {
-        let mut guard = state.settings.write().map_err(|e| format!("更新内存设置失败: {e}"))?;
-        *guard = settings;
-    }
-    notify_changed(app, EVENT_SETTINGS_CHANGED);
-    Ok(())
-}
 
 /// 收藏元数据 JSON 数组（id/备注/时间/快捷键，不含音频路径）
 pub fn native_list_favorites(app: &AppHandle) -> String {

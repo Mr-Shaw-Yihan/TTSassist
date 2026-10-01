@@ -283,6 +283,8 @@ export interface BundledPluginInfo {
   requirements?: string | null;
   /** 插件类型（manifest.type）：tts_engine / asr_engine */
   plugin_type?: string;
+  /** 引擎类别："local" 本地离线 / "remote" 联网（缺省 remote） */
+  category?: string;
   /** 本机是否已安装 */
   installed: boolean;
 }
@@ -296,32 +298,6 @@ export interface AsrPluginInfo {
   loaded: boolean;
   /** 支持语言 JSON 字符串，如 [{"code":"zh","label":"中文"}] */
   languages: string;
-}
-
-/** 语音效果器可调参数声明（v1 仅占位，UI 不开放调节） */
-export interface FxParamInfo {
-  key: string;
-  label: string;
-  min: number;
-  max: number;
-  default: number;
-  unit: string;
-}
-
-/** 语音效果器预设（list_fx_presets 返回条目；「原声 off」固定首项，不来自插件） */
-export interface FxPresetInfo {
-  /** 全名 "<plugin_id>:<effect_id>"（fx_preset 存的就是它） */
-  key: string;
-  /** 展示名（中文短语） */
-  name: string;
-  description: string;
-  /** 所属插件 id */
-  plugin: string;
-  /** 所属插件展示名 */
-  plugin_name: string;
-  /** 插件内效果 id（ASCII 蛇形） */
-  effect_id: string;
-  params: FxParamInfo[];
 }
 
 /** 音频输出设备 */

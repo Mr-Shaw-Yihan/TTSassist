@@ -5,7 +5,6 @@
 import { useState, useRef, useEffect } from "react";
 import { VoiceInputButton } from "./VoiceInputButton";
 import { VolumeMeter } from "./VolumeMeter";
-import { FxDrawer } from "./FxDrawer";
 import { useVoiceInputStore } from "../../stores/voiceInputStore";
 
 interface Props {
@@ -104,8 +103,6 @@ export function InputBox({ onSend }: Props) {
             }
           }}
         />
-        {/* 效果器抽屉：无 audio_effect 插件时自身不渲染（[🎤][输入框][效果器][发]） */}
-        <FxDrawer />
         <button
           className="btn-tex rounded-xl px-4 py-2.5 text-sm font-medium transition-all disabled:cursor-not-allowed active:scale-[0.97]"
           disabled={!text.trim() || sending}

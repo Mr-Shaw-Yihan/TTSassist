@@ -3,7 +3,7 @@
 
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry, BundledPluginInfo, UpdateInfo, DownloadedInfo, AsrPluginInfo, FxPresetInfo, PluginConfigInfo, AudioProcess, SubtitleSession, SubtitleStatus } from "../types";
+import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry, BundledPluginInfo, UpdateInfo, DownloadedInfo, AsrPluginInfo, PluginConfigInfo, AudioProcess, SubtitleSession, SubtitleStatus } from "../types";
 
 // ── TTS ──────────────────────────────────────────
 
@@ -636,10 +636,4 @@ export async function exportDiagnostics(includeHost: boolean): Promise<{ path: s
 /** main 窗口首帧回执：记录 run() 进入 → 前端首帧的 startup 耗时（后端只记第一次） */
 export async function perfStartupDone(): Promise<void> {
   return invoke<void>("perf_startup_done");
-}
-// ── 语音效果器 ──────────────────────────────────
-
-/** 已安装并加载成功的 audio_effect 插件提供的全部预设（一维扁平；「原声」由 UI 固定渲染首项） */
-export async function listFxPresets(): Promise<FxPresetInfo[]> {
-  return invoke<FxPresetInfo[]>("list_fx_presets");
 }

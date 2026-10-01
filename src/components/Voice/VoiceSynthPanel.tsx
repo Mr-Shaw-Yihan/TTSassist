@@ -19,7 +19,6 @@ import type { PluginInfo, MossVoice } from "../../types";
 import { Field, SubPanel, SecretInput } from "../common/SettingsSection";
 import { EngineCard } from "./EngineCard";
 import { MinimaxVoicePanel } from "./MinimaxVoicePanel";
-import { FxManagePanel } from "./FxManagePanel";
 import { PluginSetupPanel } from "../Plugins/PluginSetupPanel";
 import { PluginConfigPanel } from "../Settings/PluginConfigPanel";
 import { ResourcePackLinks } from "../Plugins/ResourcePackLinks";
@@ -666,8 +665,6 @@ export function VoiceSynthPanel() {
         );
       })()}
 
-      {/* 效果器管理：与 TTS 引擎分区平级（预设选择/排序 + 插件安装/卸载） */}
-      <FxManagePanel />
     </div>
   );
 }
