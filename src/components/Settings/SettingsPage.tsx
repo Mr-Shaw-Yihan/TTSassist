@@ -18,11 +18,6 @@ import { AppUpdater } from "../common/AppUpdater";
 import { CopyableGroupId } from "../common/CopyableGroupId";
 import { TexIcon } from "../icons/TexIcon";
 
-const THEMES = [
-  { id: "light", label: "安墨（浅色）", desc: "宣纸暖白 · 墨色 · 暖琥珀" },
-  { id: "dark",  label: "夜窗（深色）", desc: "深炭灰 · 琥珀高光 · 夜间友好" },
-] as const;
-
 export function SettingsPage() {
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
@@ -264,33 +259,6 @@ export function SettingsPage() {
             </div>
           </Section>
 
-          {/* 外观 */}
-          <Section title="外观">
-            <div className="grid grid-cols-2 gap-2">
-              {THEMES.map((t) => {
-                const active = (settings?.theme ?? "light") === t.id;
-                return (
-                  <button
-                    key={t.id}
-                    onClick={() => patch("theme", t.id)}
-                    className={[
-                      "rounded-xl border px-3 py-2.5 text-left transition-all",
-                      active
-                        ? "border-[var(--amber-500)] bg-[var(--amber-200)]/30 ring-1 ring-[var(--amber-500)]/40"
-                        : "border-[var(--ink-200)] bg-[var(--paper-card)] hover:border-[var(--ink-300)]",
-                    ].join(" ")}
-                  >
-                    <div className={["text-xs font-medium", active ? "text-[var(--amber-600)]" : "text-[var(--ink-700)]"].join(" ")}>
-                      {t.label}
-                    </div>
-                    <div className="mt-0.5 text-[10px] leading-relaxed text-[var(--ink-300)]">
-                      {t.desc}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </Section>
 
           {/* 关于 */}
           <Section

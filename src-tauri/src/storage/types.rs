@@ -112,6 +112,10 @@ pub struct Settings {
     /// 语音输入录音设备 id（浏览器 deviceId，空=系统默认麦克风）
     #[serde(default)]
     pub voice_input_device: String,
+    /// 语音输入识别结果去向：text=填入输入框（默认）/ direct=直接发送合成
+    /// （「说话」按钮角标可选；全局快捷键语音输入固定 direct）
+    #[serde(default = "default_asr_result_mode")]
+    pub asr_result_mode: String,
     /// 播放最近一条消息的全局快捷键（空=未设置）
     #[serde(default)]
     pub hotkey_play_last: String,
@@ -195,6 +199,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            asr_result_mode: default_asr_result_mode(),
             tts_engine: "mimo".to_string(),
             tts_model: "default".to_string(),
             playback_volume: 0.8,
@@ -270,6 +275,10 @@ pub fn gen_id(prefix: &str) -> String {
 
 fn default_asr_language() -> String {
     "zh".to_string()
+}
+
+fn default_asr_result_mode() -> String {
+    "text".to_string()
 }
 
 fn default_ball_pos() -> i32 {

@@ -1,5 +1,9 @@
-// 快捷输入浮窗：极简输入框 + 三态反馈 + 边打字边合成 + 顶部拖拽。
-// 大纲 4.7 + 10.x + 阶段 13。
+// 快捷输入浮窗：仿主界面「工具栏 + 输入框」结构（工具栏兼拖拽区）+ 三态反馈。
+// 顶部条取消：语音输入由右下角「说话」分裂按钮承担（模式跟随主界面），
+// 麦克风发送开关与音量/语速从主窗「其他」移入工具栏；右上角保留「打开主界面」。
+// 直播伴侣形态：窗口永久挂 WS_EX_NOACTIVATE（永不激活、游戏保前台），
+// 键盘路由靠点击输入框后后端 SetFocus webview 子窗口建立。
+// 全局快捷键语音输入固定直接发送（识别完即合成，不进输入框）。
 
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -11,7 +15,9 @@ import { useTauriListen } from "../../hooks/useTauriListen";
 import { useVoiceInputHotkey } from "../../hooks/useVoiceInputHotkey";
 import { useVoiceInputStore } from "../../stores/voiceInputStore";
 import { VolumeMeter } from "../Chat/VolumeMeter";
-import { MicIcon } from "../icons/MicIcon";
+import { MicToggle } from "../Chat/MicToggle";
+import { VolumePopover } from "../Chat/VolumePopover";
+import { VoiceInputButton } from "../Chat/VoiceInputButton";
 
 /** 发送/合成的三态反馈 */
 type Status =
@@ -30,30 +36,24 @@ export function QuickInput() {
   const [typing, setTyping] = useState(false);
   const inpRef = useRef<HTMLInputElement | null>(null);
   const setSettings = useSettingsStore((s) => s.setSettings);
-  // 麦克风发送状态指示（标题栏图标）：开关开启且已配置设备 = 生效中（随皮肤强调色）
-  const micSendOn = useSettingsStore(
-    (s) =>
-      (s.settings?.mic_send_enabled ?? false) &&
-      !!(s.settings?.mic_output_device && s.settings.mic_output_device.trim()),
-  );
 
-  // 语音输入全局快捷键会话（按住说话）：浮窗是游戏内主场景，必须支持
+  // 语音输入全局快捷键会话（按住说话）：浮窗是游戏内主场景，必须支持。
+  // 快捷键识别结果固定直接发送（不进输入框）。
   useVoiceInputHotkey();
   const viPhase = useVoiceInputStore((s) => s.phase);
   const viRecorder = useVoiceInputStore((s) => s.recorder);
   const viSeconds = useVoiceInputStore((s) => s.seconds);
   const viError = useVoiceInputStore((s) => s.error);
 
-  // 快捷键识别结果 → 填入浮窗输入框；错误提示 6 秒后自动消失
+  // 快捷键识别结果 → 固定直接发送（合成上屏，跳过输入框）
   useEffect(() => {
     const onResult = (e: Event) => {
       const t = (e as CustomEvent<string>).detail;
-      setText((prev) => (prev ? prev + t : t));
-      inpRef.current?.focus();
-      takeKeyboardFocus(); // 识别完回到打字态：重建键盘路由
+      void sendText(t);
     };
     window.addEventListener("voice-input:result", onResult);
     return () => window.removeEventListener("voice-input:result", onResult);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     if (!viError) return;
@@ -66,7 +66,7 @@ export function QuickInput() {
     document.documentElement.setAttribute("data-theme", theme === "dark" ? "dark" : "light");
   }
 
-  // 浮窗启动：加载 settings 到 store（供 MicToggle 用）并应用主题
+  // 浮窗启动：加载 settings 到 store（供 MicToggle/VolumePopover 用）并应用主题
   useEffect(() => {
     (async () => {
       try {
@@ -94,7 +94,6 @@ export function QuickInput() {
   }
 
   // ESC 关闭浮窗：键盘路由建立后生效；未点击浮窗时用快捷键/悬浮球收起。
-  // 失焦隐藏已废弃（窗口永不激活、没有焦点事件），关闭只走 ESC/快捷键/悬浮球。
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") void getCurrentWindow().hide();
@@ -123,8 +122,9 @@ export function QuickInput() {
     return () => { un?.(); };
   }, []);
 
-  async function send() {
-    const t = text.trim();
+  /** 发送指定文本（合成 → 自动播放 → 状态反馈）。直接发送模式与手动发送共用。 */
+  async function sendText(raw: string) {
+    const t = raw.trim();
     // 合成期间仍可打字，但不重复发送
     if (!t || sending) return;
     setText(""); // 立即清空输入框，合成期间可直接输入下一句
@@ -165,68 +165,28 @@ export function QuickInput() {
     void (await invoke("show_main_window"));
   }
 
-  // 语音输入按钮（点击切换）：emit 与全局快捷键相同的事件，复用快捷键会话链路
-  const viHotkey = useSettingsStore((s) => s.settings?.voice_input_hotkey);
-  function toggleVoiceInput() {
-    if (viPhase === "recording") {
-      void emit("voice-input:released");
-    } else if (viPhase === "idle") {
-      void emit("voice-input:pressed");
-    }
-    // 识别中（transcribing）点击无效，按钮已禁用
-  }
-
   return (
     <div
       className="flex h-screen flex-col overflow-hidden rounded-2xl bg-[var(--paper)] text-[var(--ink-900)] shadow-[0_20px_60px_rgba(26,24,22,0.25)]"
     >
-      {/* 顶部条：拖拽区 + 语音输入 + 打开主界面（发送到麦克风开关在主界面「其他」面板） */}
-      <div className="flex select-none items-center px-3 pt-2 pb-1">
-        {/* 拖拽区（⠿ + 标题 + 空白）：按住左键拖动移动浮窗。
-            只用手动 startDragging 单一拖拽源（data-tauri-drag-region 与之叠加会冲突） */}
+      {/* 工具栏（兼拖拽区）：麦克风开关 / 音量语速 · 空白处按住拖动浮窗 · 打开主界面 */}
+      <div className="flex select-none items-center gap-0.5 px-2 pt-2">
+        <MicToggle onOpenSettings={openMainAndClose} />
+        <VolumePopover />
+        {/* 拖拽区：按住左键移动浮窗（后端 startDragging，与 data-tauri-drag-region 叠加会冲突故只用单一拖拽源） */}
         <div
           onMouseDown={(e) => {
             if (e.button !== 0) return;
             void getCurrentWindow().startDragging().catch(() => {});
           }}
-          className="flex flex-1 cursor-move items-center gap-2"
-        >
-          <span className="text-[var(--ink-300)]">⠿</span>
-          <span className="font-display text-xs text-[var(--ink-500)]">电子声带</span>
-          {/* 麦克风发送状态指示：生效中实心发强调色（浅金/深紫随皮肤），未开启为灰色描边 */}
-          <span title={micSendOn ? "发送到麦克风：已开启" : "发送到麦克风：未开启"}>
-            <MicIcon
-              size={11}
-              filled={micSendOn}
-              className={["transition-colors", micSendOn ? "text-[var(--amber-600)]" : "text-[var(--ink-300)]"].join(" ")}
-            />
-          </span>
-        </div>
-        {/* 语音输入按钮（点击切换录音；快捷键见 title 提示） */}
-        <button
-          onClick={toggleVoiceInput}
-          disabled={viPhase === "transcribing"}
-          title={
-            viPhase === "recording"
-              ? "点击结束录音并识别"
-              : viHotkey
-                ? `语音输入（快捷键 ${viHotkey}，按住说话）`
-                : "语音输入（可在设置-语音输入中绑定快捷键）"
-          }
-          className={[
-            "rounded-lg p-1.5 transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-            viPhase === "recording"
-              ? "animate-pulse bg-red-500/15 text-red-500"
-              : "text-[var(--ink-300)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
-          ].join(" ")}
-        >
-          <MicIcon size={15} />
-        </button>
-        {/* 打开主界面并关闭浮窗 */}
+          title="按住拖动，移动浮窗位置"
+          className="h-8 min-w-0 flex-1 cursor-move"
+        />
+        {/* 打开主界面并关闭浮窗（ESC 也可关闭浮窗） */}
         <button
           onClick={openMainAndClose}
-          title="打开主界面"
-          className="ml-0.5 flex rounded-lg p-1.5 text-[var(--ink-300)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]"
+          title="打开主界面 · ESC 关闭浮窗"
+          className="flex h-8 w-8 items-center justify-center rounded-[9px] text-[var(--ink-300)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <rect x="4" y="4" width="16" height="16" rx="2" />
@@ -235,11 +195,11 @@ export function QuickInput() {
         </button>
       </div>
 
-      {/* 输入行（合成期间仍可打字） */}
-      <div className="flex items-center gap-1.5 px-3 py-2">
+      {/* 无边框输入行（合成期间仍可打字） */}
+      <div className="flex min-h-[56px] flex-1 items-start px-3.5 pt-2.5">
         <input
           ref={inpRef}
-          className="flex-1 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm text-[var(--ink-900)] outline-none transition-colors placeholder:text-[var(--ink-300)] focus:border-[var(--amber-500)]"
+          className="w-full border-none bg-transparent text-sm text-[var(--ink-900)] outline-none placeholder:text-[var(--ink-300)]"
           placeholder={typing ? "输入文字，回车发送…" : "点击输入框开始输入…"}
           value={text}
           onPointerDown={takeKeyboardFocus}
@@ -247,16 +207,33 @@ export function QuickInput() {
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              send();
+              void sendText(text);
             }
           }}
         />
+      </div>
+
+      {/* 按钮行：说话（分裂按钮，模式跟随主界面）+ 发送 */}
+      <div className="flex items-center justify-end gap-2 px-3 pb-2">
+        <VoiceInputButton
+          compact
+          onResult={(t) => {
+            // 转文字模式：识别结果追加到输入框
+            setText((prev) => (prev ? prev + t : t));
+            inpRef.current?.focus();
+            takeKeyboardFocus(); // 识别完回到打字态：重建键盘路由
+          }}
+          onSend={(t) => {
+            // 直接发送模式：识别结果立即合成
+            void sendText(t);
+          }}
+        />
         <button
-          onClick={send}
+          onClick={() => void sendText(text)}
           disabled={!text.trim() || sending}
-          className="rounded-xl bg-[var(--ink-900)] px-3.5 py-2 text-sm font-medium text-[var(--paper)] transition-all hover:bg-[var(--ink-700)] disabled:cursor-not-allowed disabled:bg-[var(--ink-200)] disabled:text-[var(--ink-300)] active:scale-[0.97]"
+          className="btn-tex rounded-xl px-3.5 py-[7px] text-[12.5px] font-medium transition-all disabled:cursor-not-allowed active:scale-[0.97]"
         >
-          {sending ? "…" : "发"}
+          {sending ? "…" : "发送"}
         </button>
       </div>
 

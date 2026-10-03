@@ -65,6 +65,8 @@ export interface Settings {
   voice_input_enabled: boolean;
   /** 语音输入录音设备 deviceId（空=系统默认麦克风） */
   voice_input_device: string;
+  /** 语音输入识别结果去向：text=填入输入框 / direct=直接发送合成（「说话」角标可选；快捷键固定 direct） */
+  asr_result_mode: string;
   /** 播放最近一条消息的全局快捷键（空=未设置） */
   hotkey_play_last: string;
   /** 开关「发送到麦克风」的全局快捷键（空=未设置） */

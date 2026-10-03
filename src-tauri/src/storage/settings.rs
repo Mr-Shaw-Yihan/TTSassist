@@ -62,6 +62,7 @@ pub fn load_settings(data_dir: &Path) -> Settings {
             voice_input_hotkey: v.get("voice_input_hotkey").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.voice_input_hotkey),
             voice_input_enabled: v.get("voice_input_enabled").and_then(|x| x.as_bool()).unwrap_or(default.voice_input_enabled),
             voice_input_device: v.get("voice_input_device").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.voice_input_device),
+            asr_result_mode: v.get("asr_result_mode").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.asr_result_mode),
             hotkey_play_last: v.get("hotkey_play_last").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.hotkey_play_last),
             hotkey_mic_toggle: v.get("hotkey_mic_toggle").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.hotkey_mic_toggle),
             plugin_config: v.get("plugin_config")
@@ -179,6 +180,10 @@ pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> R
         "update_ignored_version" => if let Some(v) = value.as_str() { s.update_ignored_version = v.to_string() },
         "asr_plugin" => if let Some(v) = value.as_str() { s.asr_plugin = v.to_string() },
         "asr_language" => if let Some(v) = value.as_str() { s.asr_language = v.to_string() },
+        // 语音输入识别结果去向：仅接受 text / direct 两个值
+        "asr_result_mode" => if let Some(v) = value.as_str() {
+            if v == "text" || v == "direct" { s.asr_result_mode = v.to_string() }
+        },
         "voice_input_hotkey" => if let Some(v) = value.as_str() { s.voice_input_hotkey = v.to_string() },
         "voice_input_enabled" => if let Some(v) = value.as_bool() { s.voice_input_enabled = v },
         "voice_input_device" => if let Some(v) = value.as_str() { s.voice_input_device = v.to_string() },

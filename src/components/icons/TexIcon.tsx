@@ -18,7 +18,10 @@ export type TexIconName =
   | "send"
   | "copy"
   | "trash"
-  | "remote";
+  | "remote"
+  | "speaker"
+  | "sun"
+  | "moon";
 
 /** 全局纹理与符号定义：主窗口挂载一次即可（放到 App 根节点） */
 export function TexDefs() {
@@ -164,6 +167,41 @@ export function TexDefs() {
         <path
           style={{ fill: "none", stroke: "var(--ln)", strokeWidth: "var(--lnw)", strokeLinecap: "round", strokeLinejoin: "round" }}
           strokeDasharray="12 6 9 5" d="M20.6 3.4L10.7 15.35"
+        />
+      </symbol>
+      {/* 喇叭（音量/语速） */}
+      <symbol id="ti-speaker" viewBox="0 0 24 24">
+        <path
+          style={{ fill: "var(--tx)" }}
+          d="M4.5 9.2h3.6L12.5 4.6c.4-.32 1-.05 1 .46v14.9c0 .5-.6.78-1 .46L8.1 15.8H4.5a1 1 0 0 1-1-1v-4.6a1 1 0 0 1 1-1z"
+        />
+        <path
+          style={{ fill: "none", stroke: "var(--ln)", strokeWidth: "var(--lnw)", strokeLinecap: "round" }}
+          strokeDasharray="4.5 3 5 3" d="M15.6 9.3a4.4 4.4 0 0 1 0 5.4"
+        />
+        <path
+          style={{ fill: "none", stroke: "var(--ln)", strokeWidth: "var(--lnw)", strokeLinecap: "round" }}
+          strokeDasharray="5.5 3.5 6 3.5" d="M18.2 7.1a8 8 0 0 1 0 9.8"
+        />
+      </symbol>
+      {/* 日（浅色下显示：点击进夜窗则用月；此处为太阳本体） */}
+      <symbol id="ti-sun" viewBox="0 0 24 24">
+        <circle style={{ fill: "var(--tx)" }} cx="12" cy="12" r="4.7" />
+        <path
+          style={{ fill: "none", stroke: "var(--ln)", strokeWidth: "var(--lnw)", strokeLinecap: "round" }}
+          strokeDasharray="2.6 2.2"
+          d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"
+        />
+      </symbol>
+      {/* 月（夜窗标识） */}
+      <symbol id="ti-moon" viewBox="0 0 24 24">
+        <path
+          style={{ fill: "var(--tx)" }}
+          d="M19.6 14.9A8.4 8.4 0 0 1 9.1 4.4c.2-1 .9-1.4 1.7-1A8.4 8.4 0 0 0 20.9 13.2c.4.8 0 1.5-1 1.7-.1 0-.2 0-.3 0z"
+        />
+        <path
+          style={{ fill: "none", stroke: "var(--ln)", strokeWidth: "var(--lnw)", strokeLinecap: "round" }}
+          strokeDasharray="7 4.5 8 5" d="M4.6 10.2a7.6 7.6 0 0 0 9.2 9.2"
         />
       </symbol>
       {/* 复制 */}

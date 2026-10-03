@@ -8,9 +8,6 @@ import { useTauriListen } from "./hooks/useTauriListen";
 import { useVoiceInputHotkey } from "./hooks/useVoiceInputHotkey";
 import { InputBox } from "./components/Chat/InputBox";
 import { MessageBubble } from "./components/Chat/MessageBubble";
-import { VolumeControl } from "./components/Chat/VolumeSlider";
-import { MicToggle } from "./components/Chat/MicToggle";
-import { MicIcon } from "./components/icons/MicIcon";
 import { TexDefs, TexIcon } from "./components/icons/TexIcon";
 import { FavoriteList } from "./components/Favorites/FavoriteList";
 import { SettingsPage } from "./components/Settings/SettingsPage";
@@ -47,6 +44,11 @@ type Tab = "messages" | "favorites" | "voice" | "plugins" | "remote" | "subtitle
 /** 消息列表每页条数：首屏只载最近一页，上滑再翻页加载更早的 */
 const MESSAGE_PAGE_SIZE = 20;
 
+/** 输入区高度：分隔条拖拽范围与默认值 */
+const COMPOSER_DEF = 172;
+const COMPOSER_MIN = 118;
+const COMPOSER_MAX_RATIO = 0.55;
+
 function App() {
   // 多窗口路由：检查当前窗口 label
   const win = getCurrentWindow();
@@ -70,17 +72,20 @@ function App() {
   const [atBottom, setAtBottom] = useState(true);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [tab, setTab] = useState<Tab>("messages");
-  // 「其他」弹层（收纳麦克风开关、音量与播放速度）
-  const [moreOpen, setMoreOpen] = useState(false);
-  const moreRef = useRef<HTMLDivElement | null>(null);
   const [playingPath, setPlayingPath] = useState<string | null>(null);
   const settings = useSettingsStore((s) => s.settings);
   const setSettings = useSettingsStore((s) => s.setSettings);
   const patch = useSettingsStore((s) => s.patch);
-  // 麦克风发送状态指示（标题栏图标）：开关开启且已配置设备 = 生效中（随皮肤强调色），与 MicToggle 口径一致
-  const micSendOn =
-    (settings?.mic_send_enabled ?? false) &&
-    !!(settings?.mic_output_device && settings.mic_output_device.trim());
+
+  // 输入区高度（分隔条拖拽调整；记忆 + 双击复位，与窗口记忆同款 localStorage 方案）
+  const [composerH, setComposerH] = useState<number>(() => {
+    try {
+      const h = parseInt(localStorage.getItem("va-composer-h") || "", 10);
+      return h >= COMPOSER_MIN && h <= 600 ? h : COMPOSER_DEF;
+    } catch {
+      return COMPOSER_DEF;
+    }
+  });
 
   // 版本更新状态
   const updateLatest = useUpdateStore((s) => s.latest);
@@ -154,11 +159,11 @@ function App() {
     })();
   }, [settings]);
 
-  // 皮肤同步到 <html data-theme>，整界面立刻换肤
+  // 皮肤同步到 <html data-theme>，整界面立刻换肤（入口：侧栏底部昼夜按钮）
+  const theme = settings?.theme === "dark" ? "dark" : "light";
   useEffect(() => {
-    const theme = settings?.theme === "dark" ? "dark" : "light";
     document.documentElement.setAttribute("data-theme", theme);
-  }, [settings?.theme]);
+  }, [theme]);
 
   // 主窗口几何记忆：启动恢复上次尺寸/位置/最大化，拖动缩放防抖保存（仅 main 路径执行）
   useWindowState();
@@ -266,17 +271,30 @@ function App() {
     setTimeout(run, 50);
   }, []);
 
-  // 点弹层外收起「其他」面板
-  useEffect(() => {
-    if (!moreOpen) return;
-    function onClick(e: MouseEvent) {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
-        setMoreOpen(false);
+  // 分隔条拖拽：调整输入区高度（向上拖增大），松开时记忆；双击复位
+  const composerDragRef = useRef<{ y: number; h: number } | null>(null);
+  function onResizerMouseDown(e: React.MouseEvent) {
+    if (e.button !== 0) return;
+    composerDragRef.current = { y: e.clientY, h: composerH };
+    const move = (ev: MouseEvent) => {
+      if (!composerDragRef.current) return;
+      const max = Math.floor(window.innerHeight * COMPOSER_MAX_RATIO);
+      const h = Math.min(max, Math.max(COMPOSER_MIN, composerDragRef.current.h + (composerDragRef.current.y - ev.clientY)));
+      composerDragRef.current.h = h;
+      setComposerH(h);
+    };
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      if (composerDragRef.current) {
+        try {
+          localStorage.setItem("va-composer-h", String(composerDragRef.current.h));
+        } catch { /* 记忆失败不影响使用 */ }
       }
-    }
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, [moreOpen]);
+    };
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  }
 
   // 播放音量与播放速度
   const volume = settings?.playback_volume ?? 0.8;
@@ -471,17 +489,6 @@ function App() {
           <BallLogo />
           <span className="font-display text-sm text-[var(--ink-900)] tracking-tight">电子声带</span>
           <span className="text-[9px] text-[var(--ink-300)] tracking-[0.3em] uppercase">TTSassist</span>
-          {/* 麦克风发送状态指示：生效中实心发强调色（浅金/深紫随皮肤），未开启为灰色描边 */}
-          <span
-            title={micSendOn ? "发送到麦克风：已开启" : "发送到麦克风：未开启"}
-            className="self-center"
-          >
-            <MicIcon
-              size={13}
-              filled={micSendOn}
-              className={["transition-colors", micSendOn ? "text-[var(--amber-600)]" : "text-[var(--ink-300)]"].join(" ")}
-            />
-          </span>
         </div>
         {/* 窗口控制：最小化 / 最大化 / 关闭 */}
         <div className="flex h-full shrink-0 items-stretch">
@@ -534,27 +541,13 @@ function App() {
           <SideButton icon={<TexIcon name="gear" size={16} />} label="设置" active={tab === "settings"} dot={updateDot} onClick={() => setTab("settings")} />
           <div className="flex-1" />
 
-          {/* 「其他」：收纳麦克风开关、音量与播放速度 */}
-          <div ref={moreRef} className="relative flex justify-center">
-            <SideButton
-              icon={<TexIcon name="dots" size={16} />}
-              label="其他"
-              active={moreOpen}
-              onClick={() => setMoreOpen((v) => !v)}
-            />
-            {moreOpen && (
-              <div className="absolute bottom-0 left-full z-50 ml-2 flex w-48 flex-col gap-2.5 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] p-3 shadow-[0_8px_24px_rgba(26,24,22,0.12)] animate-fade">
-                <MicToggle
-                  variant="row"
-                  onOpenSettings={() => {
-                    setMoreOpen(false);
-                    setTab("settings");
-                  }}
-                />
-                <VolumeControl inline />
-              </div>
-            )}
-          </div>
+          {/* 昼夜切换（原「其他」按钮位：麦克风/音量语速已移至消息工具栏，弹层取消） */}
+          <SideButton
+            icon={<TexIcon name={theme === "dark" ? "sun" : "moon"} size={16} />}
+            label="昼夜"
+            active={false}
+            onClick={() => void patch("theme", theme === "dark" ? "light" : "dark")}
+          />
         </nav>
 
         {/* 右侧内容区（随侧边栏切换） */}
@@ -662,9 +655,28 @@ function App() {
 
           {/* 输入框（仅消息视图显示） */}
           {tab === "messages" && (
-            <footer className="border-t border-[var(--ink-200)] bg-[var(--paper-card)] p-3">
-              <InputBox onSend={handleSend} />
-            </footer>
+            <>
+              {/* 分隔条：拖拽调整输入区高度（双击复位；高度记忆在 localStorage） */}
+              <div
+                onMouseDown={onResizerMouseDown}
+                onDoubleClick={() => {
+                  setComposerH(COMPOSER_DEF);
+                  try {
+                    localStorage.setItem("va-composer-h", String(COMPOSER_DEF));
+                  } catch { /* ignore */ }
+                }}
+                title="拖动调整输入区高度 · 双击复位"
+                className="group relative h-[6px] shrink-0 cursor-row-resize border-t border-[var(--ink-200)]"
+              >
+                <span className="absolute left-1/2 top-[2px] h-[2px] w-9 -translate-x-1/2 rounded bg-[var(--ink-200)] transition-all group-hover:w-14 group-hover:bg-[var(--amber-500)]" aria-hidden />
+              </div>
+              <footer style={{ height: composerH }} className="shrink-0 overflow-hidden bg-[var(--paper-card)]">
+                <InputBox
+                  onSend={handleSend}
+                  onOpenSettings={() => setTab("settings")}
+                />
+              </footer>
+            </>
           )}
         </div>
       </div>
