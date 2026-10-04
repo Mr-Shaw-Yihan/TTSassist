@@ -1,11 +1,11 @@
 // 工具栏喇叭按钮：点击弹出音量 + 语速双滑条（复用 VolumeControl 的设置写入逻辑）。
-// 点弹层外收起；主窗与浮窗工具栏共用。
+// 点弹层外收起；主窗与浮窗工具栏共用。浮窗工具栏贴顶且根容器有圆角裁剪，需向下弹（direction="down"）。
 
 import { useEffect, useRef, useState } from "react";
 import { TexIcon } from "../icons/TexIcon";
 import { useSettingsStore } from "../../stores/settingsStore";
 
-export function VolumePopover() {
+export function VolumePopover({ direction = "up" }: { direction?: "up" | "down" }) {
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
   const [open, setOpen] = useState(false);
@@ -41,7 +41,12 @@ export function VolumePopover() {
       </button>
 
       {open && (
-        <div className="animate-rise absolute bottom-full left-0 z-40 mb-2 w-[230px] rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] p-3 shadow-[0_8px_28px_rgba(26,24,22,0.13)]">
+        <div
+          className={[
+            "animate-rise absolute z-40 w-[230px] rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] p-3 shadow-[0_8px_28px_rgba(26,24,22,0.13)]",
+            direction === "up" ? "bottom-full left-0 mb-2" : "top-full left-0 mt-2",
+          ].join(" ")}
+        >
           {/* 音量 */}
           <div className="mb-2.5 flex items-center gap-2.5">
             <span className="grid w-5 shrink-0 place-items-center text-[var(--ink-300)]">

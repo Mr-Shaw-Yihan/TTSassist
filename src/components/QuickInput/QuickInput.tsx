@@ -8,7 +8,7 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { cursorPosition, getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import { getAudioUrl, getSettings, generateTTS } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useTauriListen } from "../../hooks/useTauriListen";
@@ -165,6 +165,32 @@ export function QuickInput() {
     void (await invoke("show_main_window"));
   }
 
+  // 手动拖拽跟随鼠标：不用 startDragging（系统标题栏拖拽路径会触发 Windows 贴靠吸附，
+  // 表现为"跳到固定位置"而非跟随鼠标）。记录光标与窗口左上角的偏移，mousemove 实时 setPosition。
+  async function onToolbarDragStart(e: React.MouseEvent) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const win = getCurrentWindow();
+    try {
+      const [cursor, winPos] = await Promise.all([cursorPosition(), win.outerPosition()]);
+      const offX = winPos.x - cursor.x;
+      const offY = winPos.y - cursor.y;
+      const onMove = async () => {
+        const c = await cursorPosition();
+        await win.setPosition(new PhysicalPosition(c.x + offX, c.y + offY));
+      };
+      const onMoveSafe = () => { onMove().catch(() => {}); };
+      const up = () => {
+        window.removeEventListener("mousemove", onMoveSafe);
+        window.removeEventListener("mouseup", up);
+      };
+      window.addEventListener("mousemove", onMoveSafe);
+      window.addEventListener("mouseup", up);
+    } catch {
+      /* 取光标/窗口位置失败则本次不拖动 */
+    }
+  }
+
   return (
     <div
       className="flex h-screen flex-col overflow-hidden rounded-2xl bg-[var(--paper)] text-[var(--ink-900)] shadow-[0_20px_60px_rgba(26,24,22,0.25)]"
@@ -172,13 +198,10 @@ export function QuickInput() {
       {/* 工具栏（兼拖拽区）：麦克风开关 / 音量语速 · 空白处按住拖动浮窗 · 打开主界面 */}
       <div className="flex select-none items-center gap-0.5 px-2 pt-2">
         <MicToggle onOpenSettings={openMainAndClose} />
-        <VolumePopover />
-        {/* 拖拽区：按住左键移动浮窗（后端 startDragging，与 data-tauri-drag-region 叠加会冲突故只用单一拖拽源） */}
+        <VolumePopover direction="down" />
+        {/* 拖拽区：按住左键移动浮窗（手动跟随鼠标，不走系统拖拽以免触发贴靠吸附） */}
         <div
-          onMouseDown={(e) => {
-            if (e.button !== 0) return;
-            void getCurrentWindow().startDragging().catch(() => {});
-          }}
+          onMouseDown={(e) => void onToolbarDragStart(e)}
           title="按住拖动，移动浮窗位置"
           className="h-8 min-w-0 flex-1 cursor-move"
         />

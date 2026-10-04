@@ -670,7 +670,7 @@ function App() {
               >
                 <span className="absolute left-1/2 top-[2px] h-[2px] w-9 -translate-x-1/2 rounded bg-[var(--ink-200)] transition-all group-hover:w-14 group-hover:bg-[var(--amber-500)]" aria-hidden />
               </div>
-              <footer style={{ height: composerH }} className="shrink-0 overflow-hidden bg-[var(--paper-card)]">
+              <footer style={{ height: composerH }} className="shrink-0 bg-[var(--paper-card)]">
                 <InputBox
                   onSend={handleSend}
                   onOpenSettings={() => setTab("settings")}
