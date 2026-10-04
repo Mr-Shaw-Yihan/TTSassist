@@ -271,29 +271,30 @@ function App() {
     setTimeout(run, 50);
   }, []);
 
-  // 分隔条拖拽：调整输入区高度（向上拖增大），松开时记忆；双击复位
+  // 分隔条拖拽：调整输入区高度（向上拖增大），松开时记忆；双击复位。
+  // 用 Pointer Capture：按下时捕获指针，后续 pointermove 全部派发给分隔条本身，
+  // 不受浏览器文本选择拖拽/移出窗口影响（window 级 mousemove 会被截胡导致拖不动）。
   const composerDragRef = useRef<{ y: number; h: number } | null>(null);
-  function onResizerMouseDown(e: React.MouseEvent) {
+  function onResizerPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (e.button !== 0) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
     composerDragRef.current = { y: e.clientY, h: composerH };
-    const move = (ev: MouseEvent) => {
-      if (!composerDragRef.current) return;
-      const max = Math.floor(window.innerHeight * COMPOSER_MAX_RATIO);
-      const h = Math.min(max, Math.max(COMPOSER_MIN, composerDragRef.current.h + (composerDragRef.current.y - ev.clientY)));
-      composerDragRef.current.h = h;
-      setComposerH(h);
-    };
-    const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-      if (composerDragRef.current) {
-        try {
-          localStorage.setItem("va-composer-h", String(composerDragRef.current.h));
-        } catch { /* 记忆失败不影响使用 */ }
-      }
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+  }
+  function onResizerPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!composerDragRef.current) return;
+    const max = Math.floor(window.innerHeight * COMPOSER_MAX_RATIO);
+    const h = Math.min(max, Math.max(COMPOSER_MIN, composerDragRef.current.h + (composerDragRef.current.y - e.clientY)));
+    composerDragRef.current.h = h;
+    setComposerH(h);
+  }
+  function onResizerPointerUp() {
+    if (!composerDragRef.current) return;
+    const h = composerDragRef.current.h;
+    composerDragRef.current = null;
+    try {
+      localStorage.setItem("va-composer-h", String(h));
+    } catch { /* 记忆失败不影响使用 */ }
   }
 
   // 播放音量与播放速度
@@ -656,9 +657,13 @@ function App() {
           {/* 输入框（仅消息视图显示） */}
           {tab === "messages" && (
             <>
-              {/* 分隔条：拖拽调整输入区高度（双击复位；高度记忆在 localStorage） */}
+              {/* 分隔条：拖拽调整输入区高度（双击复位；高度记忆在 localStorage）。
+                  Pointer Capture 拖拽（触摸/鼠标通用），select-none 防文本选择截胡 */}
               <div
-                onMouseDown={onResizerMouseDown}
+                onPointerDown={onResizerPointerDown}
+                onPointerMove={onResizerPointerMove}
+                onPointerUp={onResizerPointerUp}
+                onPointerCancel={onResizerPointerUp}
                 onDoubleClick={() => {
                   setComposerH(COMPOSER_DEF);
                   try {
@@ -666,7 +671,7 @@ function App() {
                   } catch { /* ignore */ }
                 }}
                 title="拖动调整输入区高度 · 双击复位"
-                className="group relative h-[6px] shrink-0 cursor-row-resize border-t border-[var(--ink-200)]"
+                className="group relative h-[6px] shrink-0 cursor-row-resize touch-none select-none border-t border-[var(--ink-200)]"
               >
                 <span className="absolute left-1/2 top-[2px] h-[2px] w-9 -translate-x-1/2 rounded bg-[var(--ink-200)] transition-all group-hover:w-14 group-hover:bg-[var(--amber-500)]" aria-hidden />
               </div>
