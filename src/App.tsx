@@ -671,9 +671,9 @@ function App() {
                   } catch { /* ignore */ }
                 }}
                 title="拖动调整输入区高度 · 双击复位"
-                className="group relative h-[6px] shrink-0 cursor-row-resize touch-none select-none border-t border-[var(--ink-200)]"
+                className="group relative h-2.5 shrink-0 cursor-row-resize touch-none select-none border-t border-[var(--ink-200)]"
               >
-                <span className="absolute left-1/2 top-[2px] h-[2px] w-9 -translate-x-1/2 rounded bg-[var(--ink-200)] transition-all group-hover:w-14 group-hover:bg-[var(--amber-500)]" aria-hidden />
+                <span className="absolute left-1/2 top-1/2 h-[2px] w-9 -translate-x-1/2 -translate-y-1/2 rounded bg-[var(--ink-200)] transition-all group-hover:w-14 group-hover:bg-[var(--amber-500)]" aria-hidden />
               </div>
               <footer style={{ height: composerH }} className="shrink-0 bg-[var(--paper-card)]">
                 <InputBox

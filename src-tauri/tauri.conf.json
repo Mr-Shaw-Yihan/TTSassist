@@ -26,7 +26,7 @@
         "label": "quick_input",
         "title": "",
         "width": 360,
-        "height": 135,
+        "height": 220,
         "decorations": false,
         "alwaysOnTop": true,
         "visible": false,

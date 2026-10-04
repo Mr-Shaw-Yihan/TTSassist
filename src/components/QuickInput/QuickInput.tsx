@@ -18,6 +18,7 @@ import { VolumeMeter } from "../Chat/VolumeMeter";
 import { MicToggle } from "../Chat/MicToggle";
 import { VolumePopover } from "../Chat/VolumePopover";
 import { VoiceInputButton } from "../Chat/VoiceInputButton";
+import { TexDefs } from "../icons/TexIcon";
 
 /** 发送/合成的三态反馈 */
 type Status =
@@ -195,6 +196,8 @@ export function QuickInput() {
     <div
       className="flex h-screen flex-col overflow-hidden rounded-2xl bg-[var(--paper)] text-[var(--ink-900)] shadow-[0_20px_60px_rgba(26,24,22,0.25)]"
     >
+      {/* 纹理图标符号库：浮窗是独立 WebView，必须自带（主窗挂的 TexDefs 跨窗口不可见） */}
+      <TexDefs />
       {/* 工具栏（兼拖拽区）：麦克风开关 / 音量语速 · 空白处按住拖动浮窗 · 打开主界面 */}
       <div className="flex select-none items-center gap-0.5 px-2 pt-2">
         <MicToggle onOpenSettings={openMainAndClose} />
