@@ -3,11 +3,13 @@
 // 「说话」按钮按 settings.asr_result_mode 分流（转文字 / 直接发送）。
 
 import { useState, useRef, useEffect } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { VoiceInputButton } from "./VoiceInputButton";
 import { VolumeMeter } from "./VolumeMeter";
 import { VolumePopover } from "./VolumePopover";
 import { MicToggle } from "./MicToggle";
 import { useVoiceInputStore } from "../../stores/voiceInputStore";
+import { useSettingsStore } from "../../stores/settingsStore";
 
 interface Props {
   onSend: (text: string) => Promise<void>;
@@ -27,11 +29,19 @@ export function InputBox({ onSend, onOpenSettings }: Props) {
   const error = useVoiceInputStore((s) => s.error);
   const setVi = useVoiceInputStore((s) => s.set);
 
-  // 快捷键识别结果 → 固定直接发送（跳过输入框，合成上屏）
+  // 快捷键识别结果 → 仅本窗口可见时消费，按所选路径（asr_result_mode）分流：
+  // direct 直接合成发送；text 填入输入框（无可见界面时已由 hook 后台直发，不会走到这）
   useEffect(() => {
-    const onResult = (e: Event) => {
+    const onResult = async (e: Event) => {
       const t = (e as CustomEvent<string>).detail;
-      void onSend(t);
+      if (!(await getCurrentWindow().isVisible().catch(() => true))) return;
+      const mode = useSettingsStore.getState().settings?.asr_result_mode;
+      if (mode === "direct") {
+        void onSend(t);
+      } else {
+        setText((prev) => (prev ? prev + t : t));
+        inputRef.current?.focus();
+      }
     };
     window.addEventListener("voice-input:result", onResult);
     return () => window.removeEventListener("voice-input:result", onResult);

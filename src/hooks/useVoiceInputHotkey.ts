@@ -6,12 +6,45 @@
 
 import { useEffect, useRef } from "react";
 import { listen, emit } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, Window } from "@tauri-apps/api/window";
 import { AudioRecorder } from "../utils/audioRecorder";
-import { asrTranscribe, listAsrPlugins } from "../services/invoke";
+import { asrTranscribe, generateTTS, getAudioUrl, getSettings, listAsrPlugins } from "../services/invoke";
 import { useSettingsStore } from "../stores/settingsStore";
 import { useVoiceInputStore, emitVoiceInputResult } from "../stores/voiceInputStore";
 import { playStartChime, playEndChime } from "../utils/chime";
+
+/** 是否存在任一可见界面（主窗 / 浮窗） */
+async function anyWindowVisible(): Promise<boolean> {
+  for (const label of ["main", "quick_input"]) {
+    try {
+      const w = await Window.getByLabel(label);
+      if (w && (await w.isVisible())) return true;
+    } catch { /* 窗口不存在则跳过 */ }
+  }
+  return false;
+}
+
+/** 后台直接合成发送（两窗全隐时的快捷键路径）：合成 → 扬声器播放；
+ *  麦克风由后端 generate_tts 按全局开关自动处理 */
+async function sendInBackground(text: string) {
+  try {
+    const msg = await generateTTS(text);
+    const s: { playback_volume?: number; playback_rate?: number } = await getSettings();
+    const url = await getAudioUrl(msg.audio_path);
+    const a = new Audio(url);
+    a.volume = s.playback_volume ?? 0.8;
+    a.playbackRate = s.playback_rate ?? 1.0;
+    a.addEventListener("ended", () => {
+      void emit("va:play:stop").catch(() => {});
+      void emit("playback:stopped").catch(() => {});
+    });
+    void emit("va:play:start").catch(() => {});
+    void emit("playback:started", msg.audio_path).catch(() => {});
+    void a.play();
+  } catch (e) {
+    useVoiceInputStore.getState().set({ error: `直接发送失败：${e}` });
+  }
+}
 
 export function useVoiceInputHotkey() {
   const recorderRef = useRef<AudioRecorder | null>(null);
@@ -45,9 +78,10 @@ export function useVoiceInputHotkey() {
     async function startRecording() {
       // 上一次按下还没启动完（或已在录音/转写）→ 忽略本次按下
       if (startingRef.current || store.getState().phase !== "idle") return;
-      // 仅可见窗口处理（主窗/浮窗互斥，防止双录）
+      // 会话归属：可见窗口处理（主窗/浮窗互斥，防双录）；
+      // 两窗全隐时由主窗兜底录音（后台直接合成路径仍可用）
       const visible = await getCurrentWindow().isVisible().catch(() => true);
-      if (!visible) return;
+      if (!visible && getCurrentWindow().label !== "main") return;
       if (store.getState().phase !== "idle") return;
       startingRef.current = true;
       releasedEarlyRef.current = false;
@@ -111,7 +145,13 @@ export function useVoiceInputHotkey() {
         if (!pluginId) throw new Error("暂无可用的语音识别插件");
         const text = await asrTranscribe(wav, pluginId, settings?.asr_language || "auto");
         if (text.trim()) {
-          emitVoiceInputResult(text.trim());
+          // 有可见界面：广播给该界面按所选路径（asr_result_mode）走转文字/直接发送；
+          // 两窗全隐：后台直接合成发送（无界面可填，固定直发）
+          if (await anyWindowVisible()) {
+            emitVoiceInputResult(text.trim());
+          } else {
+            void sendInBackground(text.trim());
+          }
           store.getState().set({ phase: "idle", error: null });
         } else {
           store.getState().set({ phase: "idle", error: "未识别到语音内容，请对着麦克风说句话再试" });

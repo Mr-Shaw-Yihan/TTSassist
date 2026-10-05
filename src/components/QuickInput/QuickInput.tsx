@@ -35,7 +35,7 @@ export function QuickInput() {
   // 键盘路由靠点击输入框后后端 SetFocus webview 子窗口建立。
   // typing = 键盘路由已建立（驱动 placeholder 文案）。
   const [typing, setTyping] = useState(false);
-  const inpRef = useRef<HTMLInputElement | null>(null);
+  const inpRef = useRef<HTMLTextAreaElement | null>(null);
   const setSettings = useSettingsStore((s) => s.setSettings);
 
   // 语音输入全局快捷键会话（按住说话）：浮窗是游戏内主场景，必须支持。
@@ -46,11 +46,20 @@ export function QuickInput() {
   const viSeconds = useVoiceInputStore((s) => s.seconds);
   const viError = useVoiceInputStore((s) => s.error);
 
-  // 快捷键识别结果 → 固定直接发送（合成上屏，跳过输入框）
+  // 快捷键识别结果 → 仅本窗口可见时消费，按所选路径（asr_result_mode）分流：
+  // direct 直接合成发送；text 填入输入框（无可见界面时已由 hook 后台直发，不会走到这）
   useEffect(() => {
-    const onResult = (e: Event) => {
+    const onResult = async (e: Event) => {
       const t = (e as CustomEvent<string>).detail;
-      void sendText(t);
+      if (!(await getCurrentWindow().isVisible().catch(() => true))) return;
+      const mode = useSettingsStore.getState().settings?.asr_result_mode;
+      if (mode === "direct") {
+        void sendText(t);
+      } else {
+        setText((prev) => (prev ? prev + t : t));
+        inpRef.current?.focus();
+        takeKeyboardFocus(); // 识别完回到打字态：重建键盘路由
+      }
     };
     window.addEventListener("voice-input:result", onResult);
     return () => window.removeEventListener("voice-input:result", onResult);
@@ -221,11 +230,11 @@ export function QuickInput() {
         </button>
       </div>
 
-      {/* 无边框输入行（合成期间仍可打字） */}
-      <div className="flex min-h-[56px] flex-1 items-start px-3.5 pt-2.5">
-        <input
+      {/* 无边框输入区（撑满窗口剩余空间，合成期间仍可打字） */}
+      <div className="flex min-h-0 flex-1 px-3.5 pt-2.5">
+        <textarea
           ref={inpRef}
-          className="w-full border-none bg-transparent text-sm text-[var(--ink-900)] outline-none placeholder:text-[var(--ink-300)]"
+          className="h-full w-full resize-none border-none bg-transparent text-sm leading-relaxed text-[var(--ink-900)] outline-none placeholder:text-[var(--ink-300)]"
           placeholder={typing ? "输入文字，回车发送…" : "点击输入框开始输入…"}
           value={text}
           onPointerDown={takeKeyboardFocus}
