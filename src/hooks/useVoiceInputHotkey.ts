@@ -28,7 +28,9 @@ async function anyWindowVisible(): Promise<boolean> {
  *  麦克风由后端 generate_tts 按全局开关自动处理 */
 async function sendInBackground(text: string) {
   try {
-    const msg = await generateTTS(text);
+    const { message: msg, hostPlayed } = await generateTTS(text);
+    // 宿主已流式播放（扬声器）则跳过整段播放，避免双播
+    if (hostPlayed) return;
     const s: { playback_volume?: number; playback_rate?: number } = await getSettings();
     const url = await getAudioUrl(msg.audio_path);
     const a = new Audio(url);

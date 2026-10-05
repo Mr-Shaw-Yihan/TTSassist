@@ -7,12 +7,23 @@ import type { Message, Favorite, Settings, MossVoice, AudioDevice, MicStatus, Pl
 
 // ── TTS ──────────────────────────────────────────
 
-export async function generateTTS(text: string): Promise<Message> {
+export interface GenerateTtsResult {
+  message: Message;
+  /** 宿主已流式播放（扬声器）：前端跳过整段自动播放，避免双播 */
+  hostPlayed: boolean;
+}
+
+export async function generateTTS(text: string): Promise<GenerateTtsResult> {
   // 悬浮球角色业务态事件（va:* 词表）：成功转一圈 / 失败 alerting（合成中不加状态）
+  // 统一走 generate_tts_stream：流式引擎边合边播（hostPlayed=true）；
+  // 非流式引擎宿主内部回落阻塞管线（hostPlayed=false，前端照旧自动播放）
   try {
-    const msg = await invoke<Message>("generate_tts", { text });
+    const res = await invoke<{ message: Message; host_played: boolean }>(
+      "generate_tts_stream",
+      { text },
+    );
     void emit("va:tts:done").catch(() => {});
-    return msg;
+    return { message: res.message, hostPlayed: res.host_played };
   } catch (e) {
     void emit("va:tts:error").catch(() => {});
     throw e;

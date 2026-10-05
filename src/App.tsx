@@ -468,10 +468,12 @@ function App() {
   }, [reloadLatestMessages, reloadFavorites]);
 
   async function handleSend(text: string) {
-    const msg = await generateTTS(text);
+    const { message: msg, hostPlayed } = await generateTTS(text);
     setMessages((prev) => [...prev, msg]);
     // 新消息滚到底（用户正在向上翻阅时不打断，可用定位按钮回底部）
     if (atBottom) scrollToBottom();
+    // 宿主已流式播放（扬声器）则不再整段自动播放，避免双播
+    if (hostPlayed) return;
     // 自动播放延迟 0.4 秒（避免刚生成时卡音）
     setTimeout(() => playAudio(msg.audio_path), 400);
   }

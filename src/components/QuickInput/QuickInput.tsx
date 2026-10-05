@@ -141,23 +141,26 @@ export function QuickInput() {
     setSending(true);
     setStatus({ kind: "converting" });
     try {
-      const msg = await generateTTS(t);
-      // 播放语音（麦克风由后端 generate_tts 按全局开关自动处理）
-      try {
-        const s: { playback_volume?: number; playback_rate?: number } = await invoke("get_settings");
-        const url = await getAudioUrl(msg.audio_path);
-        const a = new Audio(url);
-        a.volume = s.playback_volume ?? 0.8;
-        a.playbackRate = s.playback_rate ?? 1.0;
-        a.addEventListener("ended", () => {
-          void emit("va:play:stop").catch(() => {});
-          void emit("playback:stopped").catch(() => {});
-        });
-        void emit("va:play:start").catch(() => {});
-        // 播放态上报（后端聚合为通用播放状态，供宿主能力桥订阅方感知）
-        void emit("playback:started", msg.audio_path).catch(() => {});
-        void a.play();
-      } catch { /* 播放失败不影响发送 */ }
+      const { message: msg, hostPlayed } = await generateTTS(t);
+      // 播放语音（麦克风由后端 generate_tts 按全局开关自动处理）；
+      // 宿主已流式播放（扬声器）则跳过整段播放，避免双播
+      if (!hostPlayed) {
+        try {
+          const s: { playback_volume?: number; playback_rate?: number } = await invoke("get_settings");
+          const url = await getAudioUrl(msg.audio_path);
+          const a = new Audio(url);
+          a.volume = s.playback_volume ?? 0.8;
+          a.playbackRate = s.playback_rate ?? 1.0;
+          a.addEventListener("ended", () => {
+            void emit("va:play:stop").catch(() => {});
+            void emit("playback:stopped").catch(() => {});
+          });
+          void emit("va:play:start").catch(() => {});
+          // 播放态上报（后端聚合为通用播放状态，供宿主能力桥订阅方感知）
+          void emit("playback:started", msg.audio_path).catch(() => {});
+          void a.play();
+        } catch { /* 播放失败不影响发送 */ }
+      }
       setStatus({ kind: "success" });
       // 1.2s 后淡出成功提示（若期间没有新状态覆盖）
       setTimeout(() => {
