@@ -47,6 +47,10 @@ pub struct LoadedPlugin {
     f_voice_import: Option<plugin_api::VaVoiceImportFn>,
     /// 可选：宿主能力桥接入点（manifest 声明 requires_host_bridge 时由 manager 注入）
     pub f_attach_host: Option<plugin_api::VaPluginAttachHostFn>,
+    /// 可选：流式合成三件套（va_tts_stream_plugin! 导出；三个都有才算具备流式能力）
+    f_stream_start: Option<plugin_api::VaTtsStreamStartFn>,
+    f_stream_next: Option<plugin_api::VaTtsStreamNextFn>,
+    f_stream_stop: Option<plugin_api::VaTtsStreamStopFn>,
 }
 
 // libloading::Library 是 Send+Sync，函数指针天然 Send+Sync
@@ -140,6 +144,15 @@ impl LoadedPlugin {
         let f_attach_host =
             unsafe { try_get_sym::<plugin_api::VaPluginAttachHostFn>(&lib, plugin_api::SYM_PLUGIN_ATTACH_HOST) };
 
+        // 3.7 可选符号：流式合成三件套（缺任一按无流式能力处理，走阻塞合成）
+        let (f_stream_start, f_stream_next, f_stream_stop) = unsafe {
+            (
+                try_get_sym::<plugin_api::VaTtsStreamStartFn>(&lib, plugin_api::SYM_TTS_STREAM_START),
+                try_get_sym::<plugin_api::VaTtsStreamNextFn>(&lib, plugin_api::SYM_TTS_STREAM_NEXT),
+                try_get_sym::<plugin_api::VaTtsStreamStopFn>(&lib, plugin_api::SYM_TTS_STREAM_STOP),
+            )
+        };
+
         // 5. dll 自报 id 必须与清单一致；dll 自报版本仅记录（清单为准）
         if dll_id != manifest.id {
             return Err(PluginError::Unsupported(format!(
@@ -172,6 +185,9 @@ impl LoadedPlugin {
             f_voice_preload,
             f_voice_import,
             f_attach_host,
+            f_stream_start,
+            f_stream_next,
+            f_stream_stop,
         }))
     }
 
@@ -381,6 +397,136 @@ impl LoadedPlugin {
             };
             Err(PluginError::Synthesize(msg))
         }
+    }
+
+    /// 插件是否具备流式合成能力（三个流式符号齐全）
+    pub fn has_stream(&self) -> bool {
+        self.f_stream_start.is_some() && self.f_stream_next.is_some() && self.f_stream_stop.is_some()
+    }
+
+    /// 打开流式合成会话（阻塞调用，含插件侧连接/握手，需在 blocking 线程执行）。
+    /// 返回会话句柄与音频块格式自述（{"format","sample_rate","channels"}）。
+    pub fn stream_start(
+        &self,
+        text: &str,
+        voice: Option<&str>,
+    ) -> Result<(StreamHandle, StreamInfo), PluginError> {
+        let f_start = self
+            .f_stream_start
+            .ok_or_else(|| PluginError::Unsupported("该插件不支持流式合成".into()))?;
+
+        let c_text = CString::new(text)
+            .map_err(|_| PluginError::Synthesize("文本含非法字符（NUL）".into()))?;
+        let c_voice = match voice {
+            Some(v) => Some(
+                CString::new(v)
+                    .map_err(|_| PluginError::Synthesize("音色名含非法字符（NUL）".into()))?,
+            ),
+            None => None,
+        };
+
+        let mut session: plugin_api::VaStreamSession = std::ptr::null_mut();
+        let mut out_info: *mut std::ffi::c_char = std::ptr::null_mut();
+        let mut out_err: *mut std::ffi::c_char = std::ptr::null_mut();
+
+        let code = unsafe {
+            f_start(
+                c_text.as_ptr(),
+                c_voice.as_ref().map(|c| c.as_ptr()).unwrap_or(std::ptr::null()),
+                &mut session,
+                &mut out_info,
+                &mut out_err,
+            )
+        };
+
+        if code != plugin_api::VA_OK {
+            let msg = unsafe { read_out_err(out_err, self.f_free_cstr, code) };
+            return Err(PluginError::Synthesize(msg));
+        }
+        if session.is_null() {
+            return Err(PluginError::Synthesize("插件返回成功但未给出会话句柄".into()));
+        }
+        let info_json = if out_info.is_null() {
+            String::new()
+        } else {
+            let s = unsafe { CStr::from_ptr(out_info) }.to_string_lossy().into_owned();
+            unsafe { (self.f_free_cstr)(out_info) };
+            s
+        };
+        let info: StreamInfo = serde_json::from_str(&info_json).unwrap_or(StreamInfo {
+            format: "pcm_s16le".into(),
+            sample_rate: 32000,
+            channels: 1,
+        });
+        Ok((StreamHandle(session), info))
+    }
+
+    /// 拉取下一个音频块（阻塞调用，需在 blocking 线程执行；宿主侧单管线消费）。
+    /// Ok(空 vec) = 流正常结束。
+    pub fn stream_next(&self, handle: &StreamHandle) -> Result<Vec<u8>, PluginError> {
+        let f_next = self
+            .f_stream_next
+            .ok_or_else(|| PluginError::Unsupported("该插件不支持流式合成".into()))?;
+
+        let mut out_chunk: *mut u8 = std::ptr::null_mut();
+        let mut out_len: usize = 0;
+        let mut out_err: *mut std::ffi::c_char = std::ptr::null_mut();
+
+        let code = unsafe { f_next(handle.0, &mut out_chunk, &mut out_len, &mut out_err) };
+
+        if code != plugin_api::VA_OK {
+            let msg = unsafe { read_out_err(out_err, self.f_free_cstr, code) };
+            return Err(PluginError::Synthesize(msg));
+        }
+        if out_len == 0 {
+            return Ok(Vec::new()); // 流正常结束（out_chunk 可能为空指针）
+        }
+        if out_chunk.is_null() {
+            return Err(PluginError::Synthesize("插件返回音频块但长度为 0 指针".into()));
+        }
+        // 立即拷贝到宿主内存，然后归还插件缓冲
+        let bytes = unsafe { std::slice::from_raw_parts(out_chunk, out_len) }.to_vec();
+        unsafe { (self.f_free_bytes)(out_chunk, out_len) };
+        Ok(bytes)
+    }
+
+    /// 中止流式会话（可从任意线程调用；必须能让阻塞中的 stream_next 尽快返回）。
+    pub fn stream_stop(&self, handle: &StreamHandle) {
+        if let Some(f_stop) = self.f_stream_stop {
+            unsafe { f_stop(handle.0) };
+        }
+    }
+}
+
+/// 流式会话句柄：插件分配的不透明值，宿主不得解引用，仅原样传回。
+/// 插件契约保证 stop 可跨线程调用、next 单管线消费，故句柄可在线程间转移；
+/// Copy 语义：句柄只是不透明数值，多处持有（守卫/拉块闭包/中止命令）互为副本。
+#[derive(Clone, Copy)]
+pub struct StreamHandle(plugin_api::VaStreamSession);
+unsafe impl Send for StreamHandle {}
+unsafe impl Sync for StreamHandle {}
+
+/// 音频块格式自述（va_tts_stream_start 的 out_info JSON 解析结果）
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct StreamInfo {
+    /// 当前宿主仅支持 "pcm_s16le"（16-bit 小端交错 PCM）
+    pub format: String,
+    pub sample_rate: u32,
+    pub channels: u32,
+}
+
+/// 读 out_err 并归还（空/缺失时按错误码兜底文案）
+unsafe fn read_out_err(
+    out_err: *mut std::ffi::c_char,
+    free_cstr: plugin_api::VaFreeCstrFn,
+    code: i32,
+) -> String {
+    if !out_err.is_null() {
+        let s = CStr::from_ptr(out_err).to_string_lossy().into_owned();
+        free_cstr(out_err);
+        s
+    } else {
+        format!("插件流式调用失败（错误码 {code}）")
     }
 }
 

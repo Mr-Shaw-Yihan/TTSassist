@@ -174,7 +174,7 @@ fn decode_file(
     rodio::Decoder::new(BufReader::new(file)).map_err(|e| format!("解码失败：{e}"))
 }
 
-fn find_device_by_name(name: &str) -> Option<cpal::Device> {
+pub(crate) fn find_device_by_name(name: &str) -> Option<cpal::Device> {
     let host = cpal::default_host();
     host.output_devices()
         .ok()?

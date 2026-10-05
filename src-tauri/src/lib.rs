@@ -136,10 +136,12 @@ pub fn run() {
             host_bridge.setup_playback_listeners(app.handle());
             app.manage(host_bridge);
 
-            // AppState / MicPlayback 提前 manage：能力桥包装的合成、收藏播放、
-            // 停止播放等能力依赖二者，插件 attach 时必须已就绪
+            // AppState / MicPlayback / StreamPlayer 提前 manage：能力桥包装的合成、
+            // 收藏播放、停止播放等能力依赖二者，插件 attach 时必须已就绪
             app.manage(AppState::new(data_dir.clone(), settings.clone()));
             app.manage(crate::commands::mic::MicPlayback::spawn());
+            // 流式 TTS 播放线程（插件 WS 逐块 PCM → 边收边播）
+            app.manage(crate::commands::tts_stream::StreamPlayer::spawn());
 
             // 阶段 22：插件根目录改为 exe 同级 plugins/（脱离 APPDATA 系统盘）
             let plugins_root = resolve_plugins_root();
@@ -324,6 +326,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             crate::commands::tts::generate_tts,
+            crate::commands::tts_stream::generate_tts_stream,
+            crate::commands::tts_stream::tts_stream_stop,
             crate::commands::perf::perf_startup_done,
             crate::commands::diag::export_diagnostics,
             crate::commands::plugins::list_plugins,

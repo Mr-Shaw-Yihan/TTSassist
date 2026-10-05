@@ -93,7 +93,8 @@ pub async fn generate_tts(text: String, app: AppHandle) -> Result<Message, Strin
 
 /// 合成中的标志守卫：进入合成置位，任何路径退出（含错误）自动复位。
 /// 状态供宿主能力桥 get_state 查询（手机遥控等订阅方据此显示「合成中…」）。
-struct SynthesizingFlag(AppHandle);
+/// 流式管线（tts_stream.rs）复用同一标志。
+pub(crate) struct SynthesizingFlag(pub(crate) AppHandle);
 impl Drop for SynthesizingFlag {
     fn drop(&mut self) {
         crate::plugins::bridge::set_synthesizing(&self.0, false);

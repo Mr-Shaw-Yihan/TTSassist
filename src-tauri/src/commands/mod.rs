@@ -19,6 +19,7 @@ pub mod remote;
 pub mod settings;
 pub mod subtitle;
 pub mod tts;
+pub mod tts_stream;
 pub mod update;
 pub mod vbcable;
 
