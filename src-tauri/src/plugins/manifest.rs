@@ -137,18 +137,10 @@ impl PluginManifest {
         if self.plugin_type != "tts_engine"
             && self.plugin_type != "asr_engine"
             && self.plugin_type != "service"
-            && self.plugin_type != "audio_effect"
         {
             return Err(PluginError::Unsupported(format!(
-                "不支持的插件类型「{}」（当前支持 tts_engine / asr_engine / service / audio_effect）",
+                "不支持的插件类型「{}」（当前支持 tts_engine / asr_engine / service）",
                 self.plugin_type
-            )));
-        }
-        // 效果器插件只做纯 DSP，不需要（也不允许）宿主能力桥反向能力
-        if self.plugin_type == "audio_effect" && self.requires_host_bridge {
-            return Err(PluginError::Unsupported(format!(
-                "插件「{}」为 audio_effect 类型，不支持声明 requires_host_bridge",
-                self.id
             )));
         }
         if !self.platform.iter().any(|p| p == "windows") {

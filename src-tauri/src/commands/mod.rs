@@ -11,7 +11,6 @@ pub mod diag;
 pub mod favorite;
 pub mod floating_ball;
 pub mod message;
-pub mod fx;
 pub mod mic;
 pub mod minimax_clone;
 pub mod perf;
