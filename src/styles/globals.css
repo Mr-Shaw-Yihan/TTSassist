@@ -108,19 +108,38 @@ body {
   letter-spacing: 0.02em;
 }
 
-/* 滚动条 ── 极细、墨色、低存在感 */
-.scrollbar-thin::-webkit-scrollbar {
-  width: 4px;
+/* ============================================================
+   滚动条 ── 全局统一「墨色悬浮胶囊」：6px 布局宽、轨道透明、
+   滑块内缩 2px 成悬浮胶囊（QQ/微信式低存在感），hover 加深、拖动更深。
+   深浅皮肤跟 --ink-* 变量自动切换；所有窗口/滚动区域全局生效
+   （旧 .scrollbar-thin 单类规则由本全局规则接管，类名引用保留无害）。
+   ============================================================ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-200) transparent;
 }
-.scrollbar-thin::-webkit-scrollbar-track {
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
   background: transparent;
 }
-.scrollbar-thin::-webkit-scrollbar-thumb {
-  background: rgba(26, 24, 22, 0.12);
-  border-radius: 2px;
+::-webkit-scrollbar-track {
+  background: transparent;
 }
-.scrollbar-thin::-webkit-scrollbar-thumb:hover {
-  background: rgba(26, 24, 22, 0.22);
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--ink-200);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--ink-300);
+}
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--ink-500);
 }
 
 /* ============================================================
