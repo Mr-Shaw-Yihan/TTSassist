@@ -47,6 +47,12 @@ pub const SYM_VOICE_UNINSTALL: &[u8] = b"va_voice_uninstall\0";
 pub const SYM_VOICE_PRELOAD: &[u8] = b"va_voice_preload\0";
 pub const SYM_VOICE_IMPORT: &[u8] = b"va_voice_import\0";
 
+// 可选符号（流式 TTS 支持；va_tts_stream_plugin! 宏生成，老插件没有）。
+// 宿主三个符号都取到才算具备流式能力；缺任何一个按无流式处理（走阻塞合成）。
+pub const SYM_TTS_STREAM_START: &[u8] = b"va_tts_stream_start\0";
+pub const SYM_TTS_STREAM_NEXT: &[u8] = b"va_tts_stream_next\0";
+pub const SYM_TTS_STREAM_STOP: &[u8] = b"va_tts_stream_stop\0";
+
 // ── 效果器（audio_effect）插件导出符号 ──────────────────────
 pub const SYM_FX_LIST: &[u8] = b"va_fx_list\0";
 pub const SYM_FX_PROCESS: &[u8] = b"va_fx_process\0";
@@ -815,6 +821,187 @@ macro_rules! va_tts_plugin_voices {
     };
 }
 
+
+// ── 流式 TTS（pull 模型）────────────────────────────────
+//
+// 设计（与阻塞式 va_tts_synthesize 并存，纯增量可选能力，老宿主/老插件互不影响）：
+// - 宿主 start 打开会话（插件内部连服务、建立合成任务，不拉音频）；
+// - 宿主循环 next 主动拉块（pull 模型：节奏由宿主控制，插件只管产块）；
+//   Ok 且块长 0 = 流正常结束；Err = 失败或被 stop 中止（中文错误）。
+// - 宿主可随时从任意线程调 stop 中止；插件必须保证阻塞中的 next 在
+//   stop 后【尽快】（亚秒级）返回 VA_ERR，不悬死。
+// - 会话句柄对宿主是不透明值（VaStreamSession），宿主不得解引用；
+//   next 不得跨线程并发调用（单管线消费），stop 可以。
+// - 音频块格式由 start 返回的 info JSON 自述（{"format","sample_rate","channels"}）；
+//   宿主当前只支持 "pcm_s16le"（16-bit 小端交错 PCM），其余格式拒绝走流式。
+
+/// 流式会话句柄（插件私有，宿主原样传回；0/NULL 无效）
+pub type VaStreamSession = *mut std::os::raw::c_void;
+
+/// va_tts_stream_start：打开流式合成会话。
+/// text：NUL 结尾 UTF-8，必传；voice：NUL 结尾 UTF-8 或 NULL（NULL=插件默认音色）。
+/// 成功返回 VA_OK 并写 out_session（会话句柄）与 out_info（元信息 JSON CString，
+/// 宿主读取后调 va_free_cstr 归还）；失败返回 VA_ERR，out_err 写中文错误。
+pub type VaTtsStreamStartFn = unsafe extern "C" fn(
+    text: *const c_char,
+    voice: *const c_char,
+    out_session: *mut VaStreamSession,
+    out_info: *mut *mut c_char,
+    out_err: *mut *mut c_char,
+) -> i32;
+
+/// va_tts_stream_next：拉取下一个音频块（阻塞直到有块/流结束/出错）。
+/// 成功写 out_chunk/out_len（宿主拷贝后调 va_free_bytes 归还）；len==0 表示流正常结束。
+/// 失败返回 VA_ERR（out_err 中文错误：网络断开、被 stop 中止、服务报错等）。
+pub type VaTtsStreamNextFn = unsafe extern "C" fn(
+    session: VaStreamSession,
+    out_chunk: *mut *mut u8,
+    out_len: *mut usize,
+    out_err: *mut *mut c_char,
+) -> i32;
+
+/// va_tts_stream_stop：中止会话并释放句柄（幂等；stop 后句柄作废，不得再 next）。
+/// 可从任意线程调用；必须让阻塞中的 va_tts_stream_next 尽快返回 VA_ERR。
+pub type VaTtsStreamStopFn = unsafe extern "C" fn(session: VaStreamSession);
+
+/// 插件侧可选导出：流式 TTS 三件套（与 va_tts_plugin! 配合使用）。
+///
+/// 用法（插件 crate 的 lib.rs，va_tts_plugin! 之后）：
+/// ```ignore
+/// plugin_api::va_tts_stream_plugin! {
+///     start: my_stream_start,  // fn(&str, Option<&str>) -> Result<(String, u64), String>
+///     next: my_stream_next,    // fn(u64) -> Result<Vec<u8>, String>（Ok 空 vec = 流正常结束）
+///     stop: my_stream_stop,    // fn(u64)（幂等释放；须让阻塞中的 next 尽快返回 Err）
+/// }
+/// ```
+///
+/// - start 返回 `(info_json, session_id)`：info_json 为音频块格式自述
+///   （约定 `{"format":"pcm_s16le","sample_rate":32000,"channels":1}`）；
+///   session_id 由插件自行分配（如全局注册表键），宿主视为不透明值原样传回；
+/// - next/stop 以 session_id 定位会话；stop 必须幂等（会话不存在时静默返回）；
+/// - 宏负责 catch_unwind、指针与 u64 互转、CString 分配（宿主经 va_free_cstr/
+///   va_free_bytes 归还），勿手写导出。
+#[macro_export]
+macro_rules! va_tts_stream_plugin {
+    (
+        start: $start_fn:expr,
+        next: $next_fn:expr,
+        stop: $stop_fn:expr $(,)?
+    ) => {
+        /// 内部共用：写中文错误到 out_err（CString::into_raw，宿主经 va_free_cstr 归还）
+        #[doc(hidden)]
+        unsafe fn __va_stream_write_err(err: String, out_err: *mut *mut ::std::os::raw::c_char) {
+            if !out_err.is_null() {
+                let c = ::std::ffi::CString::new(err)
+                    .unwrap_or_else(|_| ::std::ffi::CString::new("stream error").unwrap());
+                *out_err = c.into_raw();
+            }
+        }
+
+        #[no_mangle]
+        pub unsafe extern "C" fn va_tts_stream_start(
+            text: *const ::std::os::raw::c_char,
+            voice: *const ::std::os::raw::c_char,
+            out_session: *mut $crate::VaStreamSession,
+            out_info: *mut *mut ::std::os::raw::c_char,
+            out_err: *mut *mut ::std::os::raw::c_char,
+        ) -> i32 {
+            if text.is_null() || out_session.is_null() || out_info.is_null() {
+                return $crate::VA_ERR;
+            }
+            let text = match ::std::ffi::CStr::from_ptr(text).to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    unsafe { __va_stream_write_err("文本不是合法 UTF-8".into(), out_err) };
+                    return $crate::VA_ERR;
+                }
+            };
+            let voice: Option<&str> = if voice.is_null() {
+                None
+            } else {
+                match ::std::ffi::CStr::from_ptr(voice).to_str() {
+                    Ok(s) => Some(s),
+                    Err(_) => {
+                        unsafe { __va_stream_write_err("音色名不是合法 UTF-8".into(), out_err) };
+                        return $crate::VA_ERR;
+                    }
+                }
+            };
+
+            let f: fn(&str, Option<&str>) -> ::std::result::Result<(::std::string::String, u64), ::std::string::String> = $start_fn;
+            let result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| f(text, voice)));
+
+            match result {
+                Ok(Ok((info_json, session_id))) => {
+                    // u64 会话 id 装进不透明指针位（usize == 指针位宽，无损）
+                    unsafe { *out_session = session_id as usize as $crate::VaStreamSession };
+                    let c = ::std::ffi::CString::new(info_json)
+                        .unwrap_or_else(|_| ::std::ffi::CString::new("{}").unwrap());
+                    unsafe { *out_info = c.into_raw() };
+                    $crate::VA_OK
+                }
+                Ok(Err(e)) => {
+                    unsafe { __va_stream_write_err(e, out_err) };
+                    $crate::VA_ERR
+                }
+                Err(_) => {
+                    unsafe { __va_stream_write_err("流式插件内部崩溃（panic）".into(), out_err) };
+                    $crate::VA_ERR
+                }
+            }
+        }
+
+        #[no_mangle]
+        pub unsafe extern "C" fn va_tts_stream_next(
+            session: $crate::VaStreamSession,
+            out_chunk: *mut *mut u8,
+            out_len: *mut usize,
+            out_err: *mut *mut ::std::os::raw::c_char,
+        ) -> i32 {
+            if session.is_null() || out_chunk.is_null() || out_len.is_null() {
+                return $crate::VA_ERR;
+            }
+            let session_id = session as usize as u64;
+
+            let f: fn(u64) -> ::std::result::Result<::std::vec::Vec<u8>, ::std::string::String> = $next_fn;
+            let result = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| f(session_id)));
+
+            match result {
+                Ok(Ok(chunk)) => {
+                    // 空 vec = 流正常结束：写零长度，不分配
+                    if chunk.is_empty() {
+                        unsafe { *out_chunk = ::std::ptr::null_mut(); *out_len = 0; }
+                        return $crate::VA_OK;
+                    }
+                    let boxed = chunk.into_boxed_slice();
+                    let len = boxed.len();
+                    let ptr = Box::into_raw(boxed) as *mut u8;
+                    unsafe { *out_chunk = ptr; *out_len = len; }
+                    $crate::VA_OK
+                }
+                Ok(Err(e)) => {
+                    unsafe { __va_stream_write_err(e, out_err) };
+                    $crate::VA_ERR
+                }
+                Err(_) => {
+                    unsafe { __va_stream_write_err("流式插件内部崩溃（panic）".into(), out_err) };
+                    $crate::VA_ERR
+                }
+            }
+        }
+
+        #[no_mangle]
+        pub unsafe extern "C" fn va_tts_stream_stop(session: $crate::VaStreamSession) {
+            if session.is_null() {
+                return;
+            }
+            let session_id = session as usize as u64;
+            let f: fn(u64) = $stop_fn;
+            // stop 绝不让 panic 跨 FFI 边界（宿主可能从看门狗线程调用）
+            let _ = ::std::panic::catch_unwind(::std::panic::AssertUnwindSafe(|| f(session_id)));
+        }
+    };
+}
 
 // ── 效果器（audio_effect）类型与宏 ──────────────────────────
 //

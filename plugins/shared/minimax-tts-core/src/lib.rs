@@ -11,6 +11,9 @@ use serde::{Deserialize, Serialize};
 // 重新导出 plugin_api::VoiceItem 供插件 crate 使用
 pub use plugin_api::VoiceItem;
 
+// 流式合成（WebSocket T2A v2）子模块：会话、协议、分句、会话注册表
+pub mod stream;
+
 /// MiniMax TTS API 默认模型
 pub const DEFAULT_MODEL: &str = "speech-2.8-hd";
 
@@ -77,11 +80,22 @@ pub fn synthesize(
     text: &str,
     voice_id: Option<&str>,
 ) -> Result<Vec<u8>, String> {
+    synthesize_with_model(base_url, api_key_env, DEFAULT_MODEL, text, voice_id)
+}
+
+/// 同 [`synthesize`]，但显式指定模型（流式插件阻塞兜底路径与 WS 路径共用同一模型口径）。
+pub fn synthesize_with_model(
+    base_url: &str,
+    api_key_env: &str,
+    model: &str,
+    text: &str,
+    voice_id: Option<&str>,
+) -> Result<Vec<u8>, String> {
     let api_key = read_api_key(api_key_env)?;
     let url = format!("{}/v1/t2a_v2", base_url);
 
     let req = T2aRequest {
-        model: DEFAULT_MODEL.to_string(),
+        model: model.to_string(),
         text: text.to_string(),
         stream: false,
         voice_setting: VoiceSetting {

@@ -5,3 +5,5 @@
 [workspace]
 resolver = "2"
 members = ["plugin-api", "engines/*", "shared/*", "tests/*"]
+# builtin-fx 目录只剩效果器拆除后的 dist 残留（无 Cargo.toml），排除以免 glob 报错
+exclude = ["engines/builtin-fx"]

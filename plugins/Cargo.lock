@@ -74,14 +74,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "builtin-fx"
-version = "1.0.0"
-dependencies = [
- "plugin-api",
- "serde_json",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.20.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -728,12 +720,22 @@ dependencies = [
  "plugin-api",
  "serde",
  "serde_json",
+ "tungstenite",
  "ureq",
 ]
 
 [[package]]
 name = "minimax-tts-global"
 version = "0.2.1"
+dependencies = [
+ "minimax-tts-core",
+ "plugin-api",
+ "serde_json",
+]
+
+[[package]]
+name = "minimax-tts-stream"
+version = "0.1.0"
 dependencies = [
  "minimax-tts-core",
  "plugin-api",
@@ -1223,13 +1225,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "test-fx-plugin"
-version = "0.1.0"
-dependencies = [
- "plugin-api",
-]
-
-[[package]]
 name = "test-plugin"
 version = "0.1.0"
 dependencies = [
@@ -1420,6 +1415,7 @@ dependencies = [
  "sha1",
  "thiserror 1.0.69",
  "utf-8",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]

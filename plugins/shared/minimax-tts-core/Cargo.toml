@@ -13,3 +13,5 @@ plugin-api = { path = "../../plugin-api" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ureq = { version = "2", features = ["json"] }
+# 流式合成用同步 WebSocket 客户端（rustls 纯 Rust TLS，无原生依赖）
+tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
