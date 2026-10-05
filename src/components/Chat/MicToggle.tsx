@@ -101,15 +101,13 @@ export function MicToggle({ onOpenSettings, variant = "icon" }: Props) {
         className={[
           "relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-all",
           on
-            ? "btn-tex border"
+            ? "border border-[var(--amber-500)]/45 bg-[var(--amber-200)]/60 text-[var(--amber-600)]"
             : hasDevice
               ? "text-[var(--ink-300)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]"
               : "text-[var(--ink-200)] opacity-60 hover:bg-[var(--ink-100)]",
         ].join(" ")}
       >
-        <MicIcon size={16} />
-        {/* 开启态：右下角绿点角标（生效中），不用文字标记 */}
-        {on && <span className="absolute bottom-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-emerald-500 ring-1 ring-[var(--paper-card)]" />}
+        <MicIcon size={18} />
       </button>
       {showInstallDialog && (
         <VbCableInstallDialog

@@ -37,7 +37,7 @@ export function VolumePopover({ direction = "up" }: { direction?: "up" | "down" 
             : "text-[var(--ink-300)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
         ].join(" ")}
       >
-        <TexIcon name="speaker" size={17} />
+        <TexIcon name="speaker" size={18} />
       </button>
 
       {open && (

@@ -485,7 +485,9 @@ function App() {
         data-tauri-drag-region
         className="flex h-11 shrink-0 items-center justify-between border-b border-[var(--ink-200)] bg-[var(--paper)] pl-4"
       >
-        <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center gap-2">
+        {/* deep：文字/logo 上的双击与拖拽也算拖拽区（bare 模式只响应直接点击，
+            双击落在「电子声带」文字上时不触发最大化切换——时好时坏的根因） */}
+        <div data-tauri-drag-region="deep" className="flex min-w-0 flex-1 items-center gap-2">
           {/* 悬浮球 logo（休眠态占位）：点击放出/收回悬浮球 */}
           <BallLogo />
           <span className="font-display text-sm text-[var(--ink-900)] tracking-tight">电子声带</span>
