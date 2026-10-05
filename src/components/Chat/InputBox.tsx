@@ -87,7 +87,6 @@ export function InputBox({ onSend, onOpenSettings }: Props) {
       <div className="flex items-center gap-0.5 px-3 pt-2">
         <MicToggle onOpenSettings={onOpenSettings} />
         <VolumePopover />
-        <span className="ml-auto text-[10px] text-[var(--ink-300)]">工具栏 · 后续功能可扩展到这里</span>
       </div>
 
       {/* 输入框（高度随 composer 拖拽伸展） */}

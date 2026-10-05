@@ -25,6 +25,7 @@ import { useUpdateStore, shouldShowUpdateDot } from "./stores/updateStore";
 import { usePluginTaskStore } from "./stores/pluginTaskStore";
 import { useWindowState } from "./hooks/useWindowState";
 import { playMicOnChime, playMicOffChime } from "./utils/chime";
+import { computeComposerHeight, COMPOSER_DEF, COMPOSER_MIN, COMPOSER_MAX_RATIO } from "./utils/composerResize";
 import {
   generateTTS,
   listMessages,
@@ -44,10 +45,7 @@ type Tab = "messages" | "favorites" | "voice" | "plugins" | "remote" | "subtitle
 /** 消息列表每页条数：首屏只载最近一页，上滑再翻页加载更早的 */
 const MESSAGE_PAGE_SIZE = 20;
 
-/** 输入区高度：分隔条拖拽范围与默认值 */
-const COMPOSER_DEF = 172;
-const COMPOSER_MIN = 118;
-const COMPOSER_MAX_RATIO = 0.55;
+// 输入区高度默认/上下限常量集中在 utils/composerResize.ts（纯计算 + 单测）
 
 function App() {
   // 多窗口路由：检查当前窗口 label
@@ -274,26 +272,28 @@ function App() {
   // 分隔条拖拽：调整输入区高度（向上拖增大），松开时记忆；双击复位。
   // 用 Pointer Capture：按下时捕获指针，后续 pointermove 全部派发给分隔条本身，
   // 不受浏览器文本选择拖拽/移出窗口影响（window 级 mousemove 会被截胡导致拖不动）。
-  const composerDragRef = useRef<{ y: number; h: number } | null>(null);
+  const composerDragRef = useRef<{ anchorY: number; startH: number; h: number } | null>(null);
   function onResizerPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (e.button !== 0) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
-    composerDragRef.current = { y: e.clientY, h: composerH };
+    // 记录起点：锚点 y 与起始高度全程固定，位移按绝对值线性求值（不逐帧累加）
+    composerDragRef.current = { anchorY: e.clientY, startH: composerH, h: composerH };
   }
   function onResizerPointerMove(e: React.PointerEvent<HTMLDivElement>) {
-    if (!composerDragRef.current) return;
+    const d = composerDragRef.current;
+    if (!d) return;
     const max = Math.floor(window.innerHeight * COMPOSER_MAX_RATIO);
-    const h = Math.min(max, Math.max(COMPOSER_MIN, composerDragRef.current.h + (composerDragRef.current.y - e.clientY)));
-    composerDragRef.current.h = h;
+    const h = computeComposerHeight({ startH: d.startH, anchorY: d.anchorY, clientY: e.clientY, min: COMPOSER_MIN, max });
+    d.h = h; // 记录最新值供 pointerup 记忆
     setComposerH(h);
   }
   function onResizerPointerUp() {
-    if (!composerDragRef.current) return;
-    const h = composerDragRef.current.h;
+    const d = composerDragRef.current;
+    if (!d) return;
     composerDragRef.current = null;
     try {
-      localStorage.setItem("va-composer-h", String(h));
+      localStorage.setItem("va-composer-h", String(d.h));
     } catch { /* 记忆失败不影响使用 */ }
   }
 
@@ -544,7 +544,7 @@ function App() {
 
           {/* 昼夜切换（原「其他」按钮位：麦克风/音量语速已移至消息工具栏，弹层取消） */}
           <SideButton
-            icon={<TexIcon name={theme === "dark" ? "sun" : "moon"} size={16} />}
+            icon={<TexIcon name={theme === "dark" ? "moon" : "sun"} size={16} />}
             label="昼夜"
             active={false}
             onClick={() => void patch("theme", theme === "dark" ? "light" : "dark")}
@@ -671,7 +671,7 @@ function App() {
                   } catch { /* ignore */ }
                 }}
                 title="拖动调整输入区高度 · 双击复位"
-                className="group relative h-2.5 shrink-0 cursor-row-resize touch-none select-none border-t border-[var(--ink-200)]"
+                className="group relative h-2 shrink-0 cursor-row-resize touch-none select-none border-t border-[var(--ink-200)]"
               >
                 <span className="absolute left-1/2 top-1/2 h-[2px] w-9 -translate-x-1/2 -translate-y-1/2 rounded bg-[var(--ink-200)] transition-all group-hover:w-14 group-hover:bg-[var(--amber-500)]" aria-hidden />
               </div>

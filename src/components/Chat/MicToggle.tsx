@@ -99,18 +99,17 @@ export function MicToggle({ onOpenSettings, variant = "icon" }: Props) {
         onClick={onClick}
         title={title}
         className={[
-          "flex items-center gap-1 rounded-lg px-2 py-1.5 text-base transition-all",
-          enabled && hasDevice
-            ? "bg-[var(--amber-500)] text-[var(--paper)] shadow-sm"
+          "relative flex h-8 w-8 items-center justify-center rounded-[9px] transition-all",
+          on
+            ? "btn-tex border"
             : hasDevice
               ? "text-[var(--ink-300)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]"
-              : "text-[var(--ink-200)] hover:bg-[var(--ink-100)]",
+              : "text-[var(--ink-200)] opacity-60 hover:bg-[var(--ink-100)]",
         ].join(" ")}
       >
         <MicIcon size={16} />
-        {enabled && hasDevice && (
-          <span className="text-[10px] font-medium tracking-wide">麦</span>
-        )}
+        {/* 开启态：右下角绿点角标（生效中），不用文字标记 */}
+        {on && <span className="absolute bottom-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-emerald-500 ring-1 ring-[var(--paper-card)]" />}
       </button>
       {showInstallDialog && (
         <VbCableInstallDialog
