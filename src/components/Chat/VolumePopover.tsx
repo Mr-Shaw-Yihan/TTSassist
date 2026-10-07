@@ -79,6 +79,10 @@ export function VolumePopover({ direction = "up" }: { direction?: "up" | "down" 
             />
             <span className="w-10 shrink-0 text-right font-mono text-[10.5px] text-[var(--ink-500)]">{rate}x</span>
           </div>
+          {/* 作用范围提示：虚拟麦克风的音量是独立设置，不受此处影响 */}
+          <p className="mt-2 border-t border-dashed border-[var(--ink-200)] pt-2 text-[10px] leading-relaxed text-[var(--ink-300)]">
+            该设置仅对本机扬声器生效；发送到虚拟麦克风的音量独立调节（设置-虚拟麦克风）。
+          </p>
         </div>
       )}
     </div>
