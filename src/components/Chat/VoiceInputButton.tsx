@@ -193,7 +193,34 @@ export function VoiceInputButton({ onResult, onSend, compact = false }: Props) {
       </div>
 
       {/* 模式下拉 */}
-      {menuOpen && (
+      {menuOpen && (compact ? (
+        /* 紧凑形态（浮窗）：窗口矮，横排单行小菜单（~34px）保证在窗内完整显示 */
+        <div
+          className="animate-rise absolute bottom-full right-0 z-40 mb-1 flex w-max gap-1 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] p-1 shadow-[0_8px_28px_rgba(26,24,22,0.13)]"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            onClick={() => pickMode("text")}
+            title="识别后填入输入框，自行决定是否发送"
+            className={["rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors",
+              mode === "text"
+                ? "bg-[var(--amber-200)]/50 text-[var(--amber-600)]"
+                : "text-[var(--ink-500)] hover:bg-[var(--ink-100)]"].join(" ")}
+          >
+            转文字{mode === "text" ? " ✓" : ""}
+          </button>
+          <button
+            onClick={() => pickMode("direct")}
+            title="识别后立即合成语音（快捷键语音输入默认此模式）"
+            className={["rounded-lg px-2.5 py-1.5 text-[11px] font-medium transition-colors",
+              mode === "direct"
+                ? "bg-[var(--amber-200)]/50 text-[var(--amber-600)]"
+                : "text-[var(--ink-500)] hover:bg-[var(--ink-100)]"].join(" ")}
+          >
+            直接发送{mode === "direct" ? " ✓" : ""}
+          </button>
+        </div>
+      ) : (
         <div
           className="animate-rise absolute bottom-full right-0 z-40 mb-1.5 w-56 rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] p-1.5 shadow-[0_8px_28px_rgba(26,24,22,0.13)]"
           onMouseDown={(e) => e.stopPropagation()}
@@ -223,7 +250,7 @@ export function VoiceInputButton({ onResult, onSend, compact = false }: Props) {
             </span>
           </button>
         </div>
-      )}
+      ))}
     </div>
   );
 }
