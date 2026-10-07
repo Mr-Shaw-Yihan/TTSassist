@@ -23,6 +23,7 @@ import { PluginSetupPanel } from "../Plugins/PluginSetupPanel";
 import { PluginConfigPanel } from "../Settings/PluginConfigPanel";
 import { ResourcePackLinks } from "../Plugins/ResourcePackLinks";
 import { VoiceManager } from "../Settings/VoiceManager";
+import { toast } from "../common/Toast";
 
 const PRESET_VOICES = [
   { id: "mimo_default", label: "默认 (mimo_default)" },
@@ -173,10 +174,10 @@ export function VoiceSynthPanel() {
     const { pluginId } = pendingEnv;
     setPendingEnv(null);
     try {
-      const done = await importResourcePackFlow(pluginId);
-      if (done) listPlugins().then(setPlugins).catch(() => {});
+      const msg = await importResourcePackFlow(pluginId);
+      if (msg) listPlugins().then(setPlugins).catch(() => {});
     } catch (e) {
-      window.alert(`导入资源包失败：${e}`);
+      toast(`导入资源包失败：${e}`, "err");
     }
   }
 
@@ -254,7 +255,7 @@ export function VoiceSynthPanel() {
       const { getSettings } = await import("../../services/invoke");
       setSettings(await getSettings());
     } catch (e) {
-      window.alert(`导入克隆样本失败：${e}`);
+      toast(`导入克隆样本失败：${e}`, "err");
     } finally {
       setImporting(false);
     }
@@ -268,7 +269,7 @@ export function VoiceSynthPanel() {
       const { getSettings } = await import("../../services/invoke");
       setSettings(await getSettings());
     } catch (e) {
-      window.alert(`删除失败：${e}`);
+      toast(`删除失败：${e}`, "err");
     }
   }
   async function onSaveApiKey(v: string) {

@@ -11,6 +11,7 @@ import { VolumeMeter } from "./VolumeMeter";
 import { TexIcon } from "../icons/TexIcon";
 import { asrTranscribe, listAsrPlugins } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { toast } from "../common/Toast";
 
 interface Props {
   /** 转文字模式：识别文本交给输入框 */
@@ -79,7 +80,7 @@ export function VoiceInputButton({ onResult, onSend, compact = false }: Props) {
       try {
         const target = await pickPlugin();
         if (!target) {
-          window.alert("暂无可用的语音识别插件，请先在插件页安装 ASR 插件（如 MiMo ASR）");
+          toast("暂无可用的语音识别插件，请先在插件页安装 ASR 插件（如 MiMo ASR）", "err");
           return;
         }
         const recorder = new AudioRecorder();
@@ -90,7 +91,7 @@ export function VoiceInputButton({ onResult, onSend, compact = false }: Props) {
         startTimer();
         void emit("va:asr:start").catch(() => {});
       } catch (e) {
-        window.alert(`${e}`);
+        toast(`${e}`, "err");
       }
       return;
     }
@@ -108,14 +109,14 @@ export function VoiceInputButton({ onResult, onSend, compact = false }: Props) {
       if (!target) throw new Error("ASR 插件不可用");
       const text = await asrTranscribe(wav, target.id, target.language);
       if (!text.trim()) {
-        window.alert("未识别到语音内容，请靠近麦克风说清楚一些再试");
+        toast("未识别到语音内容，请靠近麦克风说清楚一些再试", "err");
       } else if (mode === "direct") {
         onSend(text.trim());
       } else {
         onResult(text.trim());
       }
     } catch (e) {
-      window.alert(`语音识别失败：${e}`);
+      toast(`语音识别失败：${e}`, "err");
     } finally {
       setPhase("idle");
       setSeconds(0);

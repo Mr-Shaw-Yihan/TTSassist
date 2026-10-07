@@ -10,6 +10,7 @@ import { VolumePopover } from "./VolumePopover";
 import { MicToggle } from "./MicToggle";
 import { useVoiceInputStore } from "../../stores/voiceInputStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { toast } from "../common/Toast";
 
 interface Props {
   onSend: (text: string) => Promise<void>;
@@ -63,7 +64,7 @@ export function InputBox({ onSend, onOpenSettings }: Props) {
       setText("");
       inputRef.current?.focus();
     } catch (e) {
-      window.alert(`发送失败：${e}`);
+      toast(`发送失败：${e}`, "err");
     } finally {
       setSending(false);
     }

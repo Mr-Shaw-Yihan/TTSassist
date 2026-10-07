@@ -162,8 +162,8 @@ export function InstalledCard({
                   onClick={async () => {
                     setEnvPickId(null);
                     try {
-                      const done = await importResourcePackFlow(p.id);
-                      if (done) onRefresh();
+                      const msg = await importResourcePackFlow(p.id);
+                      if (msg) onRefresh();
                     } catch (e) {
                       toast(`导入资源包失败：${e}`, "err");
                     }

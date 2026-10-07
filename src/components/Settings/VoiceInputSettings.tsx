@@ -9,6 +9,7 @@ import { listAsrPlugins, asrTranscribe } from "../../services/invoke";
 import { AudioRecorder } from "../../utils/audioRecorder";
 import { VolumeMeter } from "../Chat/VolumeMeter";
 import type { AsrPluginInfo } from "../../types";
+import { toast } from "../common/Toast";
 
 /** enumerateDevices 拿到的输入设备（只留我们需要的字段） */
 interface InputDevice {
@@ -74,7 +75,7 @@ export function VoiceInputSettings() {
       stream.getTracks().forEach((t) => t.stop());
       await refreshDevices();
     } catch {
-      window.alert("麦克风授权失败：请检查系统设置中是否允许本应用使用麦克风");
+      toast("麦克风授权失败：请检查系统设置中是否允许本应用使用麦克风", "err");
     } finally {
       setRequesting(false);
     }

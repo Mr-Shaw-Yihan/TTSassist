@@ -441,12 +441,11 @@ export async function pickResourcePackZip(): Promise<string | null> {
 
 /** 离线资源包导入完整流程：选 zip → 导入 → 结果提示。
  *  返回是否完成了导入（false = 用户取消了文件选择）；导入出错时抛异常由调用方提示 */
-export async function importResourcePackFlow(pluginId: string): Promise<boolean> {
+export async function importResourcePackFlow(pluginId: string): Promise<string | null> {
   const zipPath = await pickResourcePackZip();
-  if (!zipPath) return false;
+  if (!zipPath) return null;
   const msg = await importOfflineResources(pluginId, zipPath);
-  window.alert(msg);
-  return true;
+  return msg; // 成功消息交由调用方 toast（服务层不弹 UI）
 }
 
 // ── Settings ─────────────────────────────────────

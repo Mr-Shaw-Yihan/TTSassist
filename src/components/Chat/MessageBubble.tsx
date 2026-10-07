@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 import type { Message } from "../../types";
 import { deleteMessage, addFavorite, revealAudio } from "../../services/invoke";
 import { TexIcon } from "../icons/TexIcon";
+import { toast } from "../common/Toast";
 
 interface Props {
   message: Message;
@@ -77,7 +78,7 @@ export function MessageBubble({ message, playingPath, onDeleted, onFavorited, on
     try {
       await revealAudio(message.audio_path);
     } catch (e) {
-      window.alert(`无法打开文件位置：${e}`);
+      toast(`无法打开文件位置：${e}`, "err");
     }
   }
 
@@ -89,7 +90,7 @@ export function MessageBubble({ message, playingPath, onDeleted, onFavorited, on
       await addFavorite(message.id, note.trim());
       onFavorited();
     } catch (e) {
-      window.alert(`收藏失败：${e}`);
+      toast(`收藏失败：${e}`, "err");
     }
   }
 

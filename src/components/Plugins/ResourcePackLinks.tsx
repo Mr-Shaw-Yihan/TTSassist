@@ -3,6 +3,7 @@
 
 import { useId } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { toast } from "../common/Toast";
 
 const PAN_URL =
   "https://pan.baidu.com/s/5ZS8XXVIsAJY3ubQggnV1ow#list/path=%2Fsharelink3101293518-784515448752370%2F%E7%94%B5%E5%AD%90%E5%A3%B0%E5%B8%A6%2F%E8%B5%84%E6%BA%90%E5%8C%85&parentPath=%2Fsharelink3101293518-784515448752370";
@@ -29,7 +30,7 @@ export function ResourcePackLinks({ className = "" }: { className?: string }) {
     <span className={className}>
       <button
         onClick={() =>
-          openUrl(PAN_URL).catch(() => window.alert("打开网盘失败，请手动复制地址到浏览器"))
+          openUrl(PAN_URL).catch(() => toast("打开网盘失败，请手动复制地址到浏览器", "err"))
         }
         className="font-medium text-[var(--amber-600)] underline decoration-dotted underline-offset-2 hover:opacity-80"
         title="点击在浏览器打开百度网盘下载页"

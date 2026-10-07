@@ -24,6 +24,7 @@ import { useSettingsStore } from "./stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "./stores/updateStore";
 import { usePluginTaskStore } from "./stores/pluginTaskStore";
 import { useWindowState } from "./hooks/useWindowState";
+import { ToastHost } from "./components/common/Toast";
 import { playMicOnChime, playMicOffChime } from "./utils/chime";
 import { computeComposerHeight, COMPOSER_DEF, COMPOSER_MIN, COMPOSER_MAX_RATIO } from "./utils/composerResize";
 import {
@@ -482,6 +483,7 @@ function App() {
     <div className="relative flex h-screen flex-col bg-[var(--paper)] text-[var(--ink-900)]">
       {/* 纹理图标/按钮的全局定义（金磨砂 + 紫星点 pattern 与符号库） */}
       <TexDefs />
+      <ToastHost />
       {/* 自定义标题栏（系统标题栏已关）：品牌字 + 窗口控制，品牌区可拖拽移动窗口 */}
       <header
         data-tauri-drag-region

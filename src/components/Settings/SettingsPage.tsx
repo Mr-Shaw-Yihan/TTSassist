@@ -17,6 +17,7 @@ import { Section } from "../common/SettingsSection";
 import { AppUpdater } from "../common/AppUpdater";
 import { CopyableGroupId } from "../common/CopyableGroupId";
 import { TexIcon } from "../icons/TexIcon";
+import { toast } from "../common/Toast";
 
 export function SettingsPage() {
   const settings = useSettingsStore((s) => s.settings);
@@ -213,7 +214,7 @@ export function SettingsPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    void resetFloatingBallPos().catch((e) => window.alert(`还原位置失败：${e}`));
+                    void resetFloatingBallPos().catch((e) => toast(`还原位置失败：${e}`, "err"));
                   }}
                   className="shrink-0 rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-1.5 text-xs text-[var(--ink-700)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)]"
                 >
@@ -497,7 +498,7 @@ function HotkeyRow({
               try {
                 await onApply("");
               } catch (e) {
-                window.alert(`清除快捷键失败：${e}`);
+                toast(`清除快捷键失败：${e}`, "err");
               }
             }}
             className="shrink-0 rounded-lg border border-[var(--ink-200)] px-2.5 py-2 text-xs text-[var(--ink-300)] transition-colors hover:border-[var(--seal)] hover:text-[var(--seal)]"

@@ -14,6 +14,7 @@ import {
 } from "../../services/invoke";
 import { HotkeyCapture } from "./HotkeyCapture";
 import { TexIcon } from "../icons/TexIcon";
+import { toast } from "../common/Toast";
 
 interface Props {
   favorites: Favorite[];
@@ -74,7 +75,7 @@ export function FavoriteList({ favorites, playingPath, onPlay, onChanged }: Prop
       await importFavorite(filePath, note.trim());
       onChanged();
     } catch (e) {
-      window.alert(`导入失败：${e}`);
+      toast(`导入失败：${e}`, "err");
     }
   }
 
@@ -87,7 +88,7 @@ export function FavoriteList({ favorites, playingPath, onPlay, onChanged }: Prop
     try {
       await revealAudio(audioPath);
     } catch (e) {
-      window.alert(`无法打开文件位置：${e}`);
+      toast(`无法打开文件位置：${e}`, "err");
     }
   }
 
@@ -106,7 +107,7 @@ export function FavoriteList({ favorites, playingPath, onPlay, onChanged }: Prop
       setCapturingId(null);
       onChanged();
     } catch (e) {
-      window.alert(String(e));
+      toast(String(e), "err");
     }
   }
 
@@ -115,7 +116,7 @@ export function FavoriteList({ favorites, playingPath, onPlay, onChanged }: Prop
       await removeFavoriteHotkey(id);
       onChanged();
     } catch (e) {
-      window.alert(String(e));
+      toast(String(e), "err");
     }
   }
 

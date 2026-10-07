@@ -10,6 +10,7 @@ import { useState } from "react";
 import { usePluginTaskStore } from "../../stores/pluginTaskStore";
 import { importResourcePackFlow, cleanFailedResources } from "../../services/invoke";
 import { ResourcePackLinks } from "./ResourcePackLinks";
+import { toast } from "../common/Toast";
 
 export const EVENT_PLUGIN_SETUP_PROGRESS = "plugin-setup-progress";
 
@@ -51,13 +52,13 @@ export function PluginSetupPanel({ pluginId, onClosed }: Props) {
   async function handleImport() {
     try {
       setImporting(true);
-      const done = await importResourcePackFlow(pluginId);
-      if (done) {
+      const msg = await importResourcePackFlow(pluginId);
+      if (msg) {
         clear();
         onClosed?.();
       }
     } catch (e) {
-      window.alert(`导入资源包失败：${e}`);
+      toast(`导入资源包失败：${e}`, "err");
     } finally {
       setImporting(false);
     }
@@ -72,9 +73,9 @@ export function PluginSetupPanel({ pluginId, onClosed }: Props) {
     try {
       setCleaning(true);
       const msg = await cleanFailedResources(pluginId);
-      window.alert(msg);
+      toast(msg);
     } catch (e) {
-      window.alert(`清除失败：${e}`);
+      toast(`清除失败：${e}`, "err");
     } finally {
       setCleaning(false);
     }

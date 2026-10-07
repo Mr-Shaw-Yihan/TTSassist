@@ -26,6 +26,7 @@ import type {
   SubtitleSession,
   SubtitleStatus,
 } from "../../types";
+import { toast } from "../common/Toast";
 
 /** 秒 → m:ss */
 function fmtElapsed(sec: number): string {
@@ -164,7 +165,7 @@ export function SubtitlePage() {
       });
       if (!path) return;
       await exportSubtitleHistory(path);
-      window.alert(`已导出到：\n${path}`);
+      toast(`已导出到：\n${path}`);
     } catch (e) {
       setError(String(e));
     }
