@@ -14,9 +14,13 @@ import {
 import type { LanStatus, RemoteSessionInfo } from "../../services/invoke";
 import { useTauriListen } from "../../hooks/useTauriListen";
 
-// 安卓 App 固定名下载地址（随本体 Release 发布，latest 永远指最新非预发版）
-const REMOTE_APK_URL =
-  "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/voiceassist-remote-latest-arm64.apk";
+// 安卓 App 下载地址：APK 资产发布在 Gitee Release（随遥控 tag 发版）。
+// 启动时从 Gitee dist 的 remote-app-version.json 动态取最新 gitee_url（发新 APK 只需更新该 json），
+// 拉取失败回退到固定直链。GitHub 侧从未上传过 latest 固定名资产，旧链接已 404。
+const REMOTE_APP_VERSION_URL =
+  "https://gitee.com/yihwan/TTSassist/raw/dist/remote-app-version.json";
+const REMOTE_APK_FALLBACK_URL =
+  "https://gitee.com/yihwan/TTSassist/releases/download/remote-v1.8.4/voiceassist-remote-1.8.4-arm64.apk";
 // 用户交流群号（点击复制）
 const REMOTE_QQ_GROUP = "690907648";
 
@@ -69,6 +73,24 @@ export function RemotePage() {
   const [checking, setChecking] = useState(false);
   const [fwBusy, setFwBusy] = useState(false);
   const [fwMsg, setFwMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // 安卓 App 下载地址（动态取版本清单；失败用回退直链）与版本号（按钮提示用）
+  const [apkUrl, setApkUrl] = useState(REMOTE_APK_FALLBACK_URL);
+  const [apkVersion, setApkVersion] = useState<string | null>(null);
+
+  // 挂载时拉一次遥控 App 版本清单（Gitee dist raw，小文件不受大文件 403 限制）
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await fetch(REMOTE_APP_VERSION_URL);
+        if (!r.ok) return;
+        const meta = (await r.json()) as { version?: string; gitee_url?: string };
+        if (meta.gitee_url) setApkUrl(meta.gitee_url);
+        if (meta.version) setApkVersion(meta.version);
+      } catch {
+        /* 拉取失败：使用回退直链 */
+      }
+    })();
+  }, []);
 
   async function refresh() {
     setChecking(true);
@@ -323,7 +345,8 @@ export function RemotePage() {
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => openUrl(REMOTE_APK_URL).catch(() => {})}
+                onClick={() => openUrl(apkUrl).catch(() => {})}
+                title={apkVersion ? `当前版本 v${apkVersion} · Gitee 下载` : "Gitee 下载"}
                 className="rounded-lg bg-[var(--ink-900)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--paper)] transition-colors hover:bg-[var(--ink-700)]"
               >
                 下载安卓 App ↗
