@@ -1,7 +1,10 @@
 // 轻量 toast：模块级 mini store + 页面挂载 ToastHost 渲染。
 // 替代 window.alert 的阻塞式弹窗，安墨风格：纸卡底 + 墨字 + 左侧琥珀/朱砂细条。
+// 智能升级：err 类消息超过 60 字 / 含换行 / 含 URL 时，自动转为可复制的 showInfo
+// 对话框（此类消息通常含用户需要阅读或带出去的内容，瞬态浮条来不及读）。
 
 import { create } from "zustand";
+import { showInfo } from "./ConfirmDialog";
 
 export type ToastTone = "ok" | "err";
 
@@ -36,8 +39,16 @@ const useToastStore = create<ToastStore>((set) => ({
   dismiss: (id) => set((s) => ({ items: s.items.filter((t) => t.id !== id) })),
 }));
 
-/** 命令式弹出提示（成功默认 ok，失败传 "err"） */
+/** 命令式弹出提示（成功默认 ok，失败传 "err"）。
+ *  err 类长消息（>60 字 / 含换行 / 含 URL）自动升级为可复制对话框 */
 export function toast(message: string, tone: ToastTone = "ok"): void {
+  const long =
+    tone === "err" &&
+    (message.length > 60 || message.includes("\n") || message.includes("http"));
+  if (long) {
+    void showInfo({ title: "操作失败", message });
+    return;
+  }
   useToastStore.getState().push(message, tone);
 }
 

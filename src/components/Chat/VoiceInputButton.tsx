@@ -12,6 +12,7 @@ import { TexIcon } from "../icons/TexIcon";
 import { asrTranscribe, listAsrPlugins } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { toast } from "../common/Toast";
+import { showInfo } from "../common/ConfirmDialog";
 
 interface Props {
   /** 转文字模式：识别文本交给输入框 */
@@ -80,7 +81,11 @@ export function VoiceInputButton({ onResult, onSend, compact = false }: Props) {
       try {
         const target = await pickPlugin();
         if (!target) {
-          toast("暂无可用的语音识别插件，请先在插件页安装 ASR 插件（如 MiMo ASR）", "err");
+          void showInfo({
+            title: "还没有可用的语音识别引擎",
+            message:
+              "请先到「插件库」安装语音识别插件（如 MiMo ASR），\n安装后在「语音」页将其设为当前识别引擎。",
+          });
           return;
         }
         const recorder = new AudioRecorder();

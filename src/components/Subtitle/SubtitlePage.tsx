@@ -26,7 +26,7 @@ import type {
   SubtitleSession,
   SubtitleStatus,
 } from "../../types";
-import { toast } from "../common/Toast";
+import { showInfo } from "../common/ConfirmDialog";
 
 /** 秒 → m:ss */
 function fmtElapsed(sec: number): string {
@@ -165,7 +165,7 @@ export function SubtitlePage() {
       });
       if (!path) return;
       await exportSubtitleHistory(path);
-      toast(`已导出到：\n${path}`);
+      void showInfo({ title: "字幕历史已导出", message: `导出位置：\n${path}\n\n（可复制路径到文件管理器打开）` });
     } catch (e) {
       setError(String(e));
     }
