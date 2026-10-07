@@ -8,7 +8,7 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
-import { cursorPosition, getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
+import { currentMonitor, cursorPosition, getCurrentWindow, LogicalSize, PhysicalPosition } from "@tauri-apps/api/window";
 import { getAudioUrl, getSettings, generateTTS } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useTauriListen } from "../../hooks/useTauriListen";
@@ -113,6 +113,19 @@ export function QuickInput() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // 浮窗高度按主显示器逻辑高分档（1080p→150 / 2K→173 / 4K→200 封顶），
+  // 逻辑像素自动跟随系统缩放，跨分辨率观感一致；配置里的 170 仅为创建时的初始值
+  useEffect(() => {
+    void (async () => {
+      try {
+        const m = await currentMonitor();
+        if (!m) return;
+        const logicalH = m.size.height / m.scaleFactor;
+        const h = Math.min(200, Math.max(150, Math.round(logicalH * 0.115)));
+        await getCurrentWindow().setSize(new LogicalSize(360, h));
+      } catch { /* 取显示器失败保持初始尺寸 */ }
+    })();
+  }, []);
   // 挂载时聚焦一次；后端呼出浮窗（toggle）时广播 quick-input:shown → 再次聚焦，
   // 使呼出后无需点击即可直接打字（键盘路由已由后端 focus_webview_child 建立）
   useEffect(() => {
