@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { emit } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { cursorPosition, getCurrentWindow, PhysicalPosition } from "@tauri-apps/api/window";
 import { getAudioUrl, getSettings, generateTTS } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -113,10 +113,17 @@ export function QuickInput() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // 每次显示时自动聚焦输入框（挂载时一次）
+  // 挂载时聚焦一次；后端呼出浮窗（toggle）时广播 quick-input:shown → 再次聚焦，
+  // 使呼出后无需点击即可直接打字（键盘路由已由后端 focus_webview_child 建立）
   useEffect(() => {
     const t = setTimeout(() => inpRef.current?.focus(), 80);
     return () => clearTimeout(t);
+  }, []);
+  useEffect(() => {
+    const un = listen("quick-input:shown", () => {
+      window.setTimeout(() => inpRef.current?.focus(), 60);
+    });
+    return () => { void un.then((f) => f()); };
   }, []);
 
   // 窗口常驻挂载（隐藏不销毁）；NOACTIVATE 形态下焦点事件不再发生，

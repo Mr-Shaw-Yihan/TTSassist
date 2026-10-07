@@ -73,10 +73,13 @@ pub fn toggle_quick_input(app: &AppHandle) {
         } else {
             // 呼出浮窗，同时隐藏主窗（避免两窗同现）。
             // 无激活呼出：不抢前台焦点（全屏/无边框游戏不被打断）；失败才回退普通 show()。
-            // 用户点击输入框后由前端调 focus_quick_input_content 建立键盘路由。
+            // 呼出即建立键盘路由并广播 shown 事件——前端聚焦输入框，呼出后可直接打字。
             if !crate::win32::show_no_activate(&floating) {
                 let _ = floating.show();
             }
+            crate::win32::focus_webview_child(&floating);
+            use tauri::Emitter;
+            let _ = app.emit("quick-input:shown", ());
             if let Some(main) = app.get_webview_window("main") {
                 let _ = main.hide();
             }

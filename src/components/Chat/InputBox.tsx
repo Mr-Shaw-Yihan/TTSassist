@@ -49,6 +49,19 @@ export function InputBox({ onSend, onOpenSettings }: Props) {
   }, [onSend]);
 
   // 错误提示 6 秒后自动消失
+  // 从其他软件切回主窗时自动聚焦输入框（仅 messages 页挂载本组件时生效）
+  useEffect(() => {
+    const win = getCurrentWindow();
+    let un: (() => void) | null = null;
+    (async () => {
+      const f = await win.onFocusChanged(({ payload: focused }) => {
+        if (focused) window.setTimeout(() => inputRef.current?.focus(), 60);
+      });
+      un = f;
+    })();
+    return () => { un?.(); };
+  }, []);
+
   useEffect(() => {
     if (!error) return;
     const t = setTimeout(() => setVi({ error: null }), 6000);
