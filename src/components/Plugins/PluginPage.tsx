@@ -8,7 +8,6 @@ import { usePluginInventory, catOf, supportsClone, type PluginCat, type StoreIte
 import { usePluginActions } from "../../hooks/usePluginActions";
 import { InstalledCard } from "./InstalledCard";
 import { StoreCard } from "./StoreCard";
-import { ConfirmDialogHost } from "../common/ConfirmDialog";
 import { ToastHost } from "../common/Toast";
 
 type MainTab = "inst" | "store";
@@ -355,7 +354,6 @@ export function PluginPage() {
       )}
 
       <ToastHost />
-      <ConfirmDialogHost />
     </div>
   );
 }
