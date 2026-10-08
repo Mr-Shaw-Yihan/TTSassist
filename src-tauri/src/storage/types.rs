@@ -44,6 +44,16 @@ pub struct MossVoice {
     pub voice_id: String,
 }
 
+/// 云端插件「我的音色」条目（用户自行保存的音色 ID，如 Fish Audio 克隆模型 reference_id；
+/// 选中仍走 plugin_voices 通道传给插件，插件把任意音色 id 原样透传）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CustomVoiceItem {
+    /// 传给插件的音色 id
+    pub id: String,
+    /// 展示名
+    pub label: String,
+}
+
 /// 设置（settings.json 的完整结构）
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Settings {
@@ -93,6 +103,9 @@ pub struct Settings {
     /// 各插件引擎当前选中的音色（插件 id → 音色 id）
     #[serde(default)]
     pub plugin_voices: HashMap<String, String>,
+    /// 云端插件「我的音色」列表（插件 id → 自定义条目）；选中后仍经 plugin_voices 传给插件
+    #[serde(default)]
+    pub plugin_custom_voices: HashMap<String, Vec<CustomVoiceItem>>,
     /// 用户选择"忽略"的更新版本号（启动时不再弹窗，关于页仍提示；空=未忽略）
     #[serde(default)]
     pub update_ignored_version: String,
@@ -206,6 +219,7 @@ impl Default for Settings {
             mic_send_enabled: false,
             mic_playback_volume: 1.0,
             plugin_voices: HashMap::new(),
+            plugin_custom_voices: HashMap::new(),
             update_ignored_version: String::new(),
             asr_plugin: String::new(),
             asr_language: "zh".to_string(),

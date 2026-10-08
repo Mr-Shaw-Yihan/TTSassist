@@ -14,6 +14,7 @@ import {
 import type { PluginInfo, MossVoice } from "../../types";
 import { resolveSelectedValue } from "../../utils/selectValue";
 import { Field, SubPanel, SecretInput } from "../common/SettingsSection";
+import { CustomVoicePanel } from "./CustomVoicePanel";
 import { EngineCard } from "./EngineCard";
 import { MinimaxVoicePanel } from "./MinimaxVoicePanel";
 import { CloneSamplePanel } from "./CloneSamplePanel";
@@ -440,7 +441,56 @@ export function VoiceSynthPanel() {
                 voiceSelect={voiceSelectNode}
               />
             ) : (
-              <SubPanel title="音色管理">{voiceSelectNode}</SubPanel>
+              <SubPanel title="音色管理" desc="选择引擎内置音色，或维护你自己的「我的音色」（如克隆音色 ID）。">
+                <Field label="当前音色">
+                  <select
+                    value={settings?.plugin_voices?.[cur.id] ?? cur.voices[0]?.id ?? ""}
+                    onChange={(e) => handlePluginVoiceChange(cur, e.target.value)}
+                    disabled={taskRunning}
+                    className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)] disabled:opacity-60"
+                  >
+                    <optgroup label="内置音色">
+                      {cur.voices.map((v) => (
+                        <option key={v.id} value={v.id}>{v.label}</option>
+                      ))}
+                    </optgroup>
+                    {(settings?.plugin_custom_voices?.[cur.id] ?? []).length > 0 && (
+                      <optgroup label="我的音色">
+                        {(settings?.plugin_custom_voices?.[cur.id] ?? []).map((cv) => (
+                          <option key={`custom:${cv.id}`} value={cv.id}>
+                            {cv.label}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                </Field>
+                <CustomVoicePanel
+                  items={settings?.plugin_custom_voices?.[cur.id] ?? []}
+                  currentVoiceId={settings?.plugin_voices?.[cur.id] ?? cur.voices[0]?.id ?? ""}
+                  onSelect={(vid) => handlePluginVoiceChange(cur, vid)}
+                  onSave={(cv) =>
+                    void patch("plugin_custom_voices", {
+                      ...(settings?.plugin_custom_voices ?? {}),
+                      [cur.id]: [...(settings?.plugin_custom_voices?.[cur.id] ?? []), cv],
+                    })
+                  }
+                  onDelete={(vid) => {
+                    void patch("plugin_custom_voices", {
+                      ...(settings?.plugin_custom_voices ?? {}),
+                      [cur.id]: (settings?.plugin_custom_voices?.[cur.id] ?? []).filter(
+                        (x) => x.id !== vid,
+                      ),
+                    });
+                    // 正选中被删条目：去掉选择键，自然回退到首个内置音色
+                    if (settings?.plugin_voices?.[cur.id] === vid) {
+                      const pv = { ...(settings?.plugin_voices ?? {}) };
+                      delete pv[cur.id];
+                      void patch("plugin_voices", pv);
+                    }
+                  }}
+                />
+              </SubPanel>
             )}
 
             {/* 克隆样本卡：插件自述驱动——`voices` 里有 id="clone" 就显示，

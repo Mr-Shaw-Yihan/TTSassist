@@ -3,7 +3,7 @@
 
 import { create } from "zustand";
 import { updateSetting } from "../services/invoke";
-import type { Settings, MossVoice } from "../types";
+import type { Settings, MossVoice, CustomVoiceItem } from "../types";
 
 interface SettingsState {
   settings: Settings | null;
@@ -18,7 +18,8 @@ interface SettingsState {
       | string[]
       | MossVoice[]
       | Record<string, string>
-      | Record<string, Record<string, string>>,
+      | Record<string, Record<string, string>>
+      | Record<string, CustomVoiceItem[]>,
   ) => Promise<void>;
 }
 

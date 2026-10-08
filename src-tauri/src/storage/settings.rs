@@ -56,6 +56,9 @@ pub fn load_settings(config_dir: &Path) -> Settings {
             plugin_voices: v.get("plugin_voices")
                 .and_then(|x| serde_json::from_value::<std::collections::HashMap<String, String>>(x.clone()).ok())
                 .unwrap_or(default.plugin_voices),
+            plugin_custom_voices: v.get("plugin_custom_voices")
+                .and_then(|x| serde_json::from_value::<std::collections::HashMap<String, Vec<super::types::CustomVoiceItem>>>(x.clone()).ok())
+                .unwrap_or(default.plugin_custom_voices),
             update_ignored_version: v.get("update_ignored_version").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.update_ignored_version),
             asr_plugin: v.get("asr_plugin").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.asr_plugin),
             asr_language: v.get("asr_language").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.asr_language),
@@ -183,6 +186,7 @@ pub fn update_setting(config_dir: &Path, key: &str, value: serde_json::Value) ->
         "mic_send_enabled" => if let Some(v) = value.as_bool() { s.mic_send_enabled = v },
         "mic_playback_volume" => if let Some(v) = value.as_f64() { s.mic_playback_volume = v as f32 },
         "plugin_voices" => if let Ok(map) = serde_json::from_value::<std::collections::HashMap<String, String>>(value.clone()) { s.plugin_voices = map },
+        "plugin_custom_voices" => if let Ok(map) = serde_json::from_value::<std::collections::HashMap<String, Vec<super::types::CustomVoiceItem>>>(value.clone()) { s.plugin_custom_voices = map },
         "update_ignored_version" => if let Some(v) = value.as_str() { s.update_ignored_version = v.to_string() },
         "asr_plugin" => if let Some(v) = value.as_str() { s.asr_plugin = v.to_string() },
         "asr_language" => if let Some(v) = value.as_str() { s.asr_language = v.to_string() },

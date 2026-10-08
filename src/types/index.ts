@@ -25,6 +25,12 @@ export interface MossVoice {
   voice_id: string;
 }
 
+/** 云端插件「我的音色」条目（用户保存的音色 ID + 展示名，如 Fish Audio 克隆模型 reference_id） */
+export interface CustomVoiceItem {
+  id: string;
+  label: string;
+}
+
 export interface Settings {
   tts_engine: string;
   tts_model: string;
@@ -53,6 +59,8 @@ export interface Settings {
   mic_playback_volume: number;
   /** 各插件引擎当前选中的音色（插件 id → 音色 id） */
   plugin_voices: Record<string, string>;
+  /** 云端插件「我的音色」列表（插件 id → 条目）；选中后仍经 plugin_voices 传给插件 */
+  plugin_custom_voices: Record<string, CustomVoiceItem[]>;
   /** 用户选择"忽略"的更新版本号（空=未忽略） */
   update_ignored_version: string;
   /** 当前选择的 ASR 插件 id（空=未配置，自动用第一个可用的） */
