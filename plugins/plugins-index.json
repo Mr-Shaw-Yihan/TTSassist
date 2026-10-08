@@ -42,11 +42,11 @@
     },
     {
       "id": "minimax-tts-stream",
-      "name": "MiniMax 流式 TTS（边合边播）",
-      "version": "0.3.0",
-      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-stream-0.3.0.zip",
-      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-stream-0.3.0.zip",
-      "checksum": "811b9e0b3168cb47b234c9b10fc31afa3287e26b73a767c429c6b24e593519a8",
+      "name": "MiniMax TTS（国内版）",
+      "version": "0.3.1",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-stream-0.3.1.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-stream-0.3.1.zip",
+      "checksum": "0ad7d9686619785f6c8b7013c8945d6a691d59469a7144b7e317d85540486056",
       "description": "MiniMax 云端语音合成流式版（国内版）：WebSocket 边合成边出块、首响更快，直接使用流式，需 API Key，50+ 系统音色 + 账号克隆音色（本体内置自动安装，可卸载）",
       "plugin_type": "tts_engine"
     },

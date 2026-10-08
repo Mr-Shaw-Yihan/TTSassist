@@ -13,8 +13,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $PluginId   = "minimax-tts-stream"
-$PluginName = "MiniMax 流式 TTS（边合边播）"
-$Version    = "0.3.0"
+$PluginName = "MiniMax TTS（国内版）"
+$Version    = "0.3.1"
 $MinAppVer  = "1.8.0"
 $Desc       = "MiniMax 云端语音合成流式版（国内版）：WebSocket 边合成边出块，首响更快、直接使用流式。需 API Key，50+ 系统音色 + 账号克隆音色"
 

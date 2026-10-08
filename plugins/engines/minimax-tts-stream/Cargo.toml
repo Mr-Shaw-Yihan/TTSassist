@@ -1,6 +1,6 @@
 [package]
 name = "minimax-tts-stream"
-version = "0.3.0"
+version = "0.3.1"
 description = "MiniMax 流式 TTS 插件 — WebSocket T2A v2 边合成边出块（国内版，支持克隆音色）"
 edition = "2021"
 

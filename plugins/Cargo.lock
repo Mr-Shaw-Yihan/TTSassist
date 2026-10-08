@@ -726,7 +726,7 @@ dependencies = [
 
 [[package]]
 name = "minimax-tts-stream"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "minimax-tts-core",
  "plugin-api",
