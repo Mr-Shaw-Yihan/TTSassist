@@ -1,19 +1,21 @@
-// MiniMax 流式 TTS 插件 — WebSocket T2A v2 边合成边出块（国内/国际双区合一）。
+// MiniMax 流式 TTS 插件 — WebSocket T2A v2 边合成边出块（国内版）。
 //
 // 与 minimax-tts（非流式）并存，供用户对比首响延迟与播放流畅度：
 // - 流式（本插件主路径）：WS task_start → task_continue → 逐块 PCM（32kHz/16-bit/单声道），
 //   宿主收到一块播一块，首响为服务端首个音频块到达时间；
 // - 阻塞（老宿主兜底）：HTTP t2a_v2 一次成段 MP3（与 minimax-tts 同路径）。
 //
+// 音色：系统音色 + 账号克隆音色均可（voice_id 原样透传进 task_start，
+//   国内端已确认提供 voice_clone/get_voice API，克隆功能由宿主「音色管理」面板接入）。
+//
 // 配置（宿主设置面板按 manifest.config 注入环境变量，改完下次合成即生效）：
-//   MINIMAX_STREAM_API_KEY  API Key（必填，从 platform.minimaxi.com / platform.minimax.io 获取）
-//   MINIMAX_STREAM_REGION   区域：domestic（默认）/ global
+//   MINIMAX_STREAM_API_KEY  API Key（必填，从 platform.minimaxi.com 获取）
 //   MINIMAX_STREAM_MODEL    模型（默认 speech-2.8-hd）
 
 plugin_api::va_tts_plugin! {
     id: "minimax-tts-stream",
     name: "MiniMax 流式 TTS（边合边播）",
-    version: "0.1.1",
+    version: "0.2.0",
     audio_format: "mp3",
     voices: minimax_tts_core::voices_list,
     synthesize: synthesize,
@@ -25,28 +27,13 @@ plugin_api::va_tts_stream_plugin! {
     stop: stream_stop,
 }
 
-/// 国内版 HTTP / WS 端点前缀
+/// 国内版 HTTP / WS 端点前缀（本插件只走国内版：国际版与国内版是两个账号，
+/// 单处填 Key 无法兼顾，且当前无国际 Key 可测，故剔除国际分支）。
 const DOMESTIC_HTTP: &str = "https://api.minimaxi.com";
 const DOMESTIC_WS: &str = "wss://api.minimaxi.com";
-/// 国际版 HTTP / WS 端点前缀
-const GLOBAL_HTTP: &str = "https://api.minimax.io";
-const GLOBAL_WS: &str = "wss://api.minimax.io";
 
 /// 默认模型（与 minimax-tts-core::DEFAULT_MODEL 一致；显式写出便于对照配置项）
 const DEFAULT_MODEL: &str = "speech-2.8-hd";
-
-/// 读区域配置 → (HTTP 前缀, WS 前缀)。空/未知值一律国内版（本仓库主要用户群）。
-fn region() -> (&'static str, &'static str) {
-    match std::env::var("MINIMAX_STREAM_REGION")
-        .unwrap_or_default()
-        .trim()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "global" => (GLOBAL_HTTP, GLOBAL_WS),
-        _ => (DOMESTIC_HTTP, DOMESTIC_WS),
-    }
-}
 
 /// 读模型配置（空值回退默认）
 fn model() -> String {
@@ -67,7 +54,7 @@ fn read_api_key() -> Result<String, String> {
         .ok()
         .filter(|k| !k.is_empty())
         .ok_or_else(|| {
-            "未配置 MiniMax API Key：请在插件设置中填写（platform.minimaxi.com 或 platform.minimax.io 获取）".to_string()
+            "未配置 MiniMax API Key：请在插件设置中填写（platform.minimaxi.com 获取）".to_string()
         })
 }
 
@@ -76,9 +63,8 @@ fn read_api_key() -> Result<String, String> {
 /// 文本 → MP3 字节（HTTP t2a_v2；模型口径与流式路径一致）
 fn synthesize(text: &str, voice: Option<&str>) -> Result<Vec<u8>, String> {
     read_api_key()?; // 先行校验，保证两条路径的报错口径一致（Key 实读在 core 内）
-    let (http_base, _) = region();
     minimax_tts_core::synthesize_with_model(
-        http_base,
+        DOMESTIC_HTTP,
         "MINIMAX_STREAM_API_KEY",
         &model(),
         text,
@@ -91,9 +77,8 @@ fn synthesize(text: &str, voice: Option<&str>) -> Result<Vec<u8>, String> {
 /// 打开流式会话：连接 WS、握手，返回 (音频块格式自述 JSON, 会话句柄)
 fn stream_start(text: &str, voice: Option<&str>) -> Result<(String, u64), String> {
     let api_key = read_api_key()?;
-    let (_, ws_base) = region();
     let session = minimax_tts_core::stream::StreamSession::open(
-        ws_base,
+        DOMESTIC_WS,
         &api_key,
         &model(),
         voice.unwrap_or(minimax_tts_core::DEFAULT_VOICE_ID),
@@ -118,18 +103,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn region_默认国内() {
-        std::env::remove_var("MINIMAX_STREAM_REGION");
-        assert_eq!(region(), (DOMESTIC_HTTP, DOMESTIC_WS));
-    }
-
-    #[test]
-    fn region_大小写与未知值容错() {
-        std::env::set_var("MINIMAX_STREAM_REGION", " GLOBAL ");
-        assert_eq!(region(), (GLOBAL_HTTP, GLOBAL_WS));
-        std::env::set_var("MINIMAX_STREAM_REGION", "unknown");
-        assert_eq!(region(), (DOMESTIC_HTTP, DOMESTIC_WS));
-        std::env::remove_var("MINIMAX_STREAM_REGION");
+    fn 端点常量为国内版() {
+        assert_eq!(DOMESTIC_HTTP, "https://api.minimaxi.com");
+        assert_eq!(DOMESTIC_WS, "wss://api.minimaxi.com");
     }
 
     #[test]

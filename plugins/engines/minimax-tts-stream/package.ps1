@@ -14,9 +14,9 @@ $ErrorActionPreference = "Stop"
 
 $PluginId   = "minimax-tts-stream"
 $PluginName = "MiniMax 流式 TTS（边合边播）"
-$Version    = "0.1.1"
+$Version    = "0.2.0"
 $MinAppVer  = "1.8.0"
-$Desc       = "MiniMax 云端语音合成流式版：WebSocket 边合成边出块，首响更快（国内/国际双区）。需 API Key，50+ 音色、40 种语言。配置可切回非流式对比"
+$Desc       = "MiniMax 云端语音合成流式版（国内版）：WebSocket 边合成边出块，首响更快。需 API Key，50+ 系统音色 + 账号克隆音色。配置可切回非流式对比"
 
 # 通用插件配置声明（宿主 ≥1.8.0 据此渲染设置面板并注入环境变量）。
 # 注意 env 名独立于 minimax-tts / minimax-tts-global，避免宿主必填 env 冲突检测拒载。
@@ -28,7 +28,7 @@ $ConfigDecl = @{
             key         = "api_key"
             type        = "secret"
             label       = "API Key"
-            description = "从 MiniMax 开放平台获取（国内/国际版通用）"
+            description = "从 MiniMax 开放平台（国内版）获取"
             env         = "MINIMAX_STREAM_API_KEY"
             required    = $true
         },
@@ -42,18 +42,6 @@ $ConfigDecl = @{
             options     = @(
                 @{ value = "on";  label = "流式（边合边播·默认）" },
                 @{ value = "off"; label = "非流式（整段对比）" }
-            )
-        },
-        @{
-            key         = "region"
-            type        = "select"
-            label       = "服务区域"
-            description = "账号所属平台（默认国内版）"
-            env         = "MINIMAX_STREAM_REGION"
-            required    = $false
-            options     = @(
-                @{ value = "domestic"; label = "国内版 (api.minimaxi.com)" },
-                @{ value = "global";   label = "国际版 (api.minimax.io)" }
             )
         },
         @{
