@@ -57,6 +57,18 @@ $ConfigDecl = @{
             )
         },
         @{
+            key         = "stream"
+            type        = "select"
+            label       = "合成模式"
+            description = "流式：PCM 分块边合成边播放，首响更快；非流式：整段合成后播放。用于同引擎前后对比（默认流式）"
+            env         = "FISH_AUDIO_STREAM_MODE"
+            required    = $false
+            options     = @(
+                @{ value = "on";  label = "流式（边合边播·默认）" },
+                @{ value = "off"; label = "非流式（整段对比）" }
+            )
+        },
+        @{
             key         = "voice_override"
             type        = "text"
             label       = "自定义音色 ID"
