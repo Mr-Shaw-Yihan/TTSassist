@@ -14,13 +14,13 @@ $ErrorActionPreference = "Stop"
 
 $PluginId   = "fish-audio-tts"
 $PluginName = "Fish Audio TTS"
-$Version    = "0.1.0"
+$Version    = "0.2.0"
 $MinAppVer  = "1.8.0"
-$Desc       = "Fish Audio 云端语音合成（S2.1 系列），千款社区音色，需 API Key；默认免费模型 s2.1-pro-free，国内直连常超时、支持自动探测系统代理"
+$Desc       = "Fish Audio 云端语音合成（S2.1 系列·流式边合边播），千款社区音色，支持「我的音色」保存克隆 ID，需 API Key；默认免费模型 s2.1-pro-free，国内直连常超时、支持自动探测系统代理"
 
 # 通用插件配置声明（宿主 ≥1.8.0 据此渲染设置面板并注入环境变量）
 $ConfigDecl = @{
-    help_url = "https://fish.audio"
+    help_url = "https://fish.audio/?aff=AFLMHCQJW42MW"
     fields   = @(
         @{
             key         = "api_key"
@@ -48,20 +48,13 @@ $ConfigDecl = @{
             key         = "latency"
             type        = "select"
             label       = "延迟档位"
-            description = "Normal 质量优先；Low 首包更快"
+            description = "默认均衡（速度与质量兼顾）；Normal 质量优先，Low 首包最快"
             env         = "FISH_AUDIO_LATENCY"
             options     = @(
-                @{ value = "normal";   label = "Normal（默认·质量优先）" },
-                @{ value = "balanced"; label = "Balanced（均衡）" },
-                @{ value = "low";      label = "Low（低延迟）" }
+                @{ value = "balanced"; label = "Balanced（默认·均衡）" },
+                @{ value = "normal";   label = "Normal（质量优先）" },
+                @{ value = "low";      label = "Low（首包最快）" }
             )
-        },
-        @{
-            key         = "voice_override"
-            type        = "text"
-            label       = "自定义音色 ID"
-            description = "在 https://fish.audio/zh-CN/app/my-voices/ 查看你的音色模型 ID（32 位十六进制），填写后覆盖「当前音色」下拉；留空不覆盖"
-            env         = "FISH_AUDIO_VOICE_OVERRIDE"
         },
         @{
             key         = "proxy"

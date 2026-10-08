@@ -11,10 +11,12 @@
 // 环境变量（由宿主通用插件配置机制按 manifest.config 声明注入）：
 //   FISH_AUDIO_API_KEY        必填，fish.audio → Settings → API Keys 创建
 //   FISH_AUDIO_MODEL          可选，默认 s2.1-pro-free（免费）；可选 s2.1-pro / s2-pro / s1
-//   FISH_AUDIO_LATENCY        可选，normal（默认）/ balanced / low
-//   FISH_AUDIO_VOICE_OVERRIDE 可选，音色模型 ID（reference_id），填写后覆盖下拉选择的音色
+//   FISH_AUDIO_LATENCY        可选，balanced（默认）/ normal / low
 //   FISH_AUDIO_PROXY          可选，如 http://127.0.0.1:7897；不填则依次探测
 //                             环境变量代理 → Windows 系统代理，都无则直连
+//
+// 自定义/克隆音色：宿主「我的音色」区保存后，选中 id 经 va_tts_synthesize 的
+// voice 参数原样透传为 reference_id（与内置音色同一通道，插件无需特殊处理）。
 //
 // 输出：阻塞 MP3 44.1kHz 128kbps；流式 PCM s16le 44.1kHz 单声道。
 // 音色 = Fish Audio 社区模型库的 reference_id；不选音色（NULL/"default"）用官方默认音色。
@@ -29,7 +31,7 @@ use std::time::{Duration, Instant};
 plugin_api::va_tts_plugin! {
     id: "fish-audio-tts",
     name: "Fish Audio TTS",
-    version: "0.1.0",
+    version: "0.2.0",
     audio_format: "mp3",
     voices: voices_list,
     synthesize: synthesize,
@@ -45,7 +47,7 @@ plugin_api::va_tts_stream_plugin! {
 const BASE_URL: &str = "https://api.fish.audio";
 /// 默认模型：s2.1-pro-free 为官方免费档（$0.00），无余额账户也可用
 const DEFAULT_MODEL: &str = "s2.1-pro-free";
-/// 合法 latency 档位（实测 normal/balanced/low 三值均 200）
+/// 合法 latency 档位（实测 normal/balanced/low 三值均 200）；缺省取 balanced（均衡，用户拍板）
 const LATENCY_CHOICES: [&str; 3] = ["normal", "balanced", "low"];
 /// 阻塞合成的单请求整体超时。宿主默认合成超时 60s，留出余量让插件先报出可读错误
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(50);
@@ -121,8 +123,8 @@ fn read_config(text: &str, voice: Option<&str>) -> Result<ApiConfig, String> {
         .unwrap_or_else(|| DEFAULT_MODEL.to_string());
     let latency_raw = std::env::var("FISH_AUDIO_LATENCY").ok();
     let latency = resolve_latency_with(latency_raw.as_deref())?;
-    let override_id = std::env::var("FISH_AUDIO_VOICE_OVERRIDE").ok();
-    let reference_id = resolve_reference_id_with(voice, override_id.as_deref());
+    // 自定义/克隆音色：宿主「我的音色」区保存后，选中的 id 直接经 voice 参数进来，原样透传
+    let reference_id = resolve_reference_id_with(voice);
     Ok(ApiConfig {
         api_key: api_key.trim().to_string(),
         model,
@@ -131,27 +133,20 @@ fn read_config(text: &str, voice: Option<&str>) -> Result<ApiConfig, String> {
     })
 }
 
-/// 音色 → reference_id 的纯函数核心（覆盖值由调用方读好传入）。
-/// 规则：覆盖值有效 → 用它（填 "default" = 显式要官方默认）；
-/// 覆盖空白/未配置 → 按下拉选择，未选或选了 default → None（官方默认音色）。
-fn resolve_reference_id_with(voice: Option<&str>, override_id: Option<&str>) -> Option<String> {
-    if let Some(id) = override_id {
-        let id = id.trim();
-        if !id.is_empty() {
-            return if id == "default" { None } else { Some(id.to_string()) };
-        }
-    }
+/// 音色 → reference_id：未选 / 选 default → None（官方默认音色）；
+/// 其余 id（内置音色 ID 或宿主「我的音色」保存的克隆 ID）原样透传。
+fn resolve_reference_id_with(voice: Option<&str>) -> Option<String> {
     match voice {
         None | Some("") | Some("default") => None,
-        Some(v) => Some(v.to_string()),
+        Some(v) => Some(v.trim().to_string()),
     }
 }
 
-/// latency 解析：空值用默认档；非法值直接报错（不静默兜底，
+/// latency 解析：空值用默认档 balanced（均衡）；非法值直接报错（不静默兜底，
 /// 与「非法入参一律报错」的仓库口径一致，避免用户配错却听不出原因）
 fn resolve_latency_with(raw: Option<&str>) -> Result<&'static str, String> {
     match raw.map(str::trim) {
-        None | Some("") => Ok("normal"),
+        None | Some("") => Ok("balanced"),
         Some(v) if LATENCY_CHOICES.contains(&v) => {
             Ok(LATENCY_CHOICES.iter().find(|c| **c == v).copied().unwrap())
         }
@@ -718,45 +713,29 @@ mod tests {
 
     #[test]
     fn 音色解析_未选与default都用官方默认() {
-        assert_eq!(resolve_reference_id_with(None, None), None);
-        assert_eq!(resolve_reference_id_with(Some("default"), None), None);
-        assert_eq!(resolve_reference_id_with(Some(""), None), None);
-        // 覆盖值填 default 也算官方默认（容错：用户可能照抄下拉项）
-        assert_eq!(resolve_reference_id_with(Some("abc"), Some("default")), None);
+        assert_eq!(resolve_reference_id_with(None), None);
+        assert_eq!(resolve_reference_id_with(Some("default")), None);
+        assert_eq!(resolve_reference_id_with(Some("")), None);
     }
 
     #[test]
-    fn 音色解析_普通音色原样透传() {
+    fn 音色解析_普通音色与我的音色ID都原样透传() {
         let id = "59cb5986671546eaa6ca8ae6f29f6d22";
+        assert_eq!(resolve_reference_id_with(Some(id)), Some(id.to_string()));
+        // 宿主「我的音色」保存的克隆 ID 同走 voice 通道
+        let mine = " afbe646a14b44df597ba03ca4d0a2c58 ";
         assert_eq!(
-            resolve_reference_id_with(Some(id), None),
-            Some(id.to_string())
+            resolve_reference_id_with(Some(mine)),
+            Some("afbe646a14b44df597ba03ca4d0a2c58".to_string())
         );
     }
 
     #[test]
-    fn 音色解析_配置覆盖优先于下拉选择() {
-        assert_eq!(
-            resolve_reference_id_with(
-                Some("59cb5986671546eaa6ca8ae6f29f6d22"),
-                Some(" faccba1a8ac54016bcfc02761285e67f ")
-            ),
-            Some("faccba1a8ac54016bcfc02761285e67f".to_string())
-        );
-        // 覆盖值为空白时不算配置，回落到下拉选择
-        assert_eq!(
-            resolve_reference_id_with(Some("abc"), Some("   ")),
-            Some("abc".to_string())
-        );
-        // 覆盖空白且未选 → 官方默认
-        assert_eq!(resolve_reference_id_with(None, Some("")), None);
-    }
-
-    #[test]
-    fn latency_空值用默认_非法值报错() {
-        assert_eq!(resolve_latency_with(None).unwrap(), "normal");
-        assert_eq!(resolve_latency_with(Some("")).unwrap(), "normal");
+    fn latency_空值用默认balanced_非法值报错() {
+        assert_eq!(resolve_latency_with(None).unwrap(), "balanced");
+        assert_eq!(resolve_latency_with(Some("")).unwrap(), "balanced");
         assert_eq!(resolve_latency_with(Some(" balanced ")).unwrap(), "balanced");
+        assert_eq!(resolve_latency_with(Some("normal")).unwrap(), "normal");
         assert_eq!(resolve_latency_with(Some("low")).unwrap(), "low");
         assert!(resolve_latency_with(Some("fast")).is_err());
     }

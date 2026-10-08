@@ -1,6 +1,6 @@
 [package]
 name = "fish-audio-tts"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fish Audio TTS 插件 — 调用 api.fish.audio 云端语音合成"
 edition = "2021"
 
