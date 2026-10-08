@@ -1,8 +1,13 @@
 // 通用插件配置面板（manifest 声明驱动）：设置页「插件配置」区按插件渲染卡片。
 // 字段控件按声明 type 渲染；secret 值只在提交时单向发送，前端不缓存明文；
 // display 为只读展示（插件经宿主能力桥回写，如配对码），设置变化时自动刷新。
+//
+// 保存模型（2026-10-08 改版）：改动即自动保存，无「保存」按钮。
+// - 防抖 700ms 触发一次 setPluginConfig，避免逐字符狂刷后端；
+// - 自动保存成功后【不】reload（reload 会把正在输入的 secret 打回空态、打断续接输入），
+//   仅更新全局 settings + 轻提示；初次挂载仍 reload 拉取声明与现值。
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getPluginConfig, setPluginConfig, clearPluginConfig } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -11,6 +16,7 @@ import { SectionHeading } from "../common/SettingsSection";
 import type { PluginConfigFieldView } from "../../types";
 
 const SECRET_MASK = "已设置";
+const AUTOSAVE_DEBOUNCE_MS = 700;
 const inputCls =
   "w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none transition-colors placeholder:text-[var(--ink-300)] focus:border-[var(--amber-500)]";
 
@@ -34,6 +40,11 @@ export function PluginConfigPanel({
   const [showSecret, setShowSecret] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // 是否有待保存的改动（用户编辑置位；自动保存成功清零）。初次加载不置位。
+  const [dirty, setDirty] = useState(false);
+  // 保存时读取最新 draft，避免闭包捕获旧值
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
 
   async function reload() {
     try {
@@ -52,6 +63,7 @@ export function PluginConfigPanel({
       setHelpUrl(info.help_url ?? null);
       setDraft(d);
       setHadSecret(h);
+      setDirty(false);
     } catch (e) {
       // 声明拉不到（插件刚卸载等）直接隐藏卡片
       setFields([]);
@@ -64,10 +76,31 @@ export function PluginConfigPanel({
   }, [pluginId]);
 
   // 插件可经宿主能力桥回写 display 字段（如遥控配对码刷新）：
-  // 监听 settings:changed 重拉声明与值，保证上屏内容即时更新
+  // 监听 settings:changed 重拉声明与值，保证上屏内容即时更新。
+  // 注意：仅当本卡没有未保存改动时才重拉，避免覆盖用户正在编辑的内容。
   useTauriListen("settings:changed", () => {
-    void reload();
-  }, []);
+    if (!dirty) void reload();
+  }, [dirty]);
+
+  // 防抖自动保存：dirty 置位后静置一段时间落盘（不 reload，见文件头说明）
+  useEffect(() => {
+    if (!dirty || saving) return;
+    const t = window.setTimeout(async () => {
+      try {
+        setSaving(true);
+        setMsg(null);
+        const settings = await setPluginConfig(pluginId, draftRef.current);
+        setSettings(settings);
+        setDirty(false);
+        setMsg({ ok: true, text: "已自动保存，立即生效（无需重启）" });
+      } catch (e) {
+        setMsg({ ok: false, text: String(e) });
+      } finally {
+        setSaving(false);
+      }
+    }, AUTOSAVE_DEBOUNCE_MS);
+    return () => window.clearTimeout(t);
+  }, [draft, dirty, saving, pluginId, setSettings]);
 
   if (fields === null || fields.length === 0) return null;
 
@@ -75,24 +108,13 @@ export function PluginConfigPanel({
   const missingRequired = fields.filter(
     (f) => f.type !== "display" && f.required && !(draft[f.key] ?? "").trim(),
   );
-  // 全部为 display 时无用户可编辑项，不渲染保存/清空（纯上屏卡）
+  // 全部为 display 时无用户可编辑项（纯上屏卡）
   const hasEditable = fields.some((f) => f.type !== "display");
 
-  async function save() {
-    if (saving) return;
-    setSaving(true);
-    setMsg(null);
-    try {
-      const settings = await setPluginConfig(pluginId, draft);
-      setSettings(settings);
-      // 保存后刷新：secret 回到「留空保持不变」状态
-      await reload();
-      setMsg({ ok: true, text: "已保存，立即生效（无需重启）" });
-    } catch (e) {
-      setMsg({ ok: false, text: String(e) });
-    } finally {
-      setSaving(false);
-    }
+  /** 编辑任一字段：写 draft 并标记为待自动保存 */
+  function updateField(key: string, value: string) {
+    setDraft((d) => ({ ...d, [key]: value }));
+    setDirty(true);
   }
 
   async function clear() {
@@ -155,7 +177,7 @@ export function PluginConfigPanel({
                 {f.type === "select" ? (
                   <select
                     value={draft[f.key] ?? ""}
-                    onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
+                    onChange={(e) => updateField(f.key, e.target.value)}
                     className={inputCls}
                   >
                     {(f.options ?? []).map((o) => (
@@ -167,7 +189,7 @@ export function PluginConfigPanel({
                     <input
                       type={f.type === "secret" && !showSecret[f.key] ? "password" : "text"}
                       value={draft[f.key] ?? ""}
-                      onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
+                      onChange={(e) => updateField(f.key, e.target.value)}
                       placeholder={
                         f.type === "secret" && hadSecret[f.key]
                           ? `${SECRET_MASK}（留空保持不变）`
@@ -193,27 +215,27 @@ export function PluginConfigPanel({
         ))}
       </div>
 
-      {/* 保存 + 提示（无用户可编辑字段时整行不渲染） */}
+      {/* 自动保存状态行（无用户可编辑字段时不渲染） */}
       {hasEditable && (
-        <div className="mt-2.5 flex items-center gap-2">
-          <button
-            onClick={save}
-            disabled={saving}
-            className="rounded-lg bg-[var(--ink-900)] px-3 py-1.5 text-[11px] font-medium text-[var(--paper)] transition-colors hover:bg-[var(--ink-700)] disabled:opacity-50"
-          >
-            {saving ? "保存中…" : "保存"}
-          </button>
+        <div className="mt-2.5 flex items-center gap-2 text-[11px]">
+          {saving ? (
+            <span className="inline-flex items-center gap-1.5 text-[var(--ink-500)]">
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-[var(--amber-500)]" />
+              保存中…
+            </span>
+          ) : dirty ? (
+            <span className="text-[var(--ink-400)]">编辑后将自动保存…</span>
+          ) : msg ? (
+            <span className={msg.ok ? "text-[var(--ink-500)]" : "text-[var(--seal)]"}>{msg.text}</span>
+          ) : (
+            <span className="text-[var(--ink-400)]">改动自动保存</span>
+          )}
           {missingRequired.length > 0 && (
-            <span className="text-[10px] text-[var(--amber-600)]">
+            <span className="text-[var(--amber-600)]">
               「{missingRequired[0].label}」未填写，合成时插件会提示缺少配置
             </span>
           )}
         </div>
-      )}
-      {msg && (
-        <p className={`mt-1.5 text-[11px] leading-relaxed ${msg.ok ? "text-[var(--ink-500)]" : "text-red-500"}`}>
-          {msg.text}
-        </p>
       )}
     </div>
   );

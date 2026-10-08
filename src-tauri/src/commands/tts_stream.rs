@@ -114,21 +114,10 @@ pub async fn generate_tts_stream(text: String, app: AppHandle) -> Result<StreamT
             s.playback_volume,
         )
     };
-    // 插件自身的流式开关（plugin_config[engine_id]["stream"]）：
-    // "off" → 即便插件支持流式也走阻塞管线，用于同引擎前后对比。缺省（未配置）按流式。
-    let stream_wanted = {
-        let state = app.state::<AppState>();
-        let s = state.settings.read().map_err(|e| format!("读取设置失败: {e}"))?;
-        s.plugin_config
-            .get(&engine_id)
-            .and_then(|m| m.get("stream"))
-            .map(|v| v.trim().to_ascii_lowercase() != "off")
-            .unwrap_or(true)
-    };
     let plugins = app.state::<PluginManager>();
     let plugin = match plugins.get(&engine_id) {
-        Some(p) if p.has_stream() && stream_wanted => p,
-        // 非流式引擎 / 用户关闭了流式开关：整体回落到既有阻塞管线（宿主不播，前端照旧整段播放）
+        Some(p) if p.has_stream() => p,
+        // 非流式引擎（mimo/moss/edge-tts 等）：整体回落到既有阻塞管线（宿主不播，前端照旧整段播放）
         _ => {
             let message = crate::commands::tts::generate_tts_impl(&app, &text).await?;
             return Ok(StreamTtsResult { message, host_played: false });
