@@ -1,7 +1,7 @@
-// MiniMax 国际版音色克隆与音色管理命令。
-//
-// 仅服务 minimax-tts-global 插件（国内版为阉割版，不提供克隆）。
-// 端点（base_url = https://api.minimax.io）：
+// MiniMax 音色克隆与音色管理命令（端点参数化，供 minimax-tts-global 国际版
+// 与 minimax-tts-stream 国内流式版复用；base_url 由调用方按引擎传入）。
+// 国内端 api.minimaxi.com 已确认提供 voice_clone/get_voice/delete_voice（2026-10-08 无鉴权探测回 200 业务错，非 404）。
+// 端点（base_url = 引擎对应平台，如 https://api.minimaxi.com 或 https://api.minimax.io）：
 //   POST /v1/files/upload   multipart（purpose + file）→ file_id
 //   POST /v1/voice_clone    {file_id, voice_id, clone_prompt?}
 //   POST /v1/get_voice      {voice_type}

@@ -1,6 +1,7 @@
-// MiniMax 国际版音色面板：账号内「音色克隆」+「音色管理（查询/使用/删除）」。
-// 自含状态与逻辑（直连 settings store 与 minimax_global_* invoke），仅在 minimax-tts-global 引擎下渲染。
-// 从设置页「语音合成」区抽入语音中心，行为与原实现一致。
+// MiniMax 音色面板：账号内「音色克隆」+「音色管理（查询/使用/删除）」。
+// 自含状态与逻辑（直连 settings store 与 minimax_global_* invoke），
+// 在 minimax-tts-global（国际版）与 minimax-tts-stream（国内流式版）两引擎下渲染；
+// 端点按引擎自动选择、API Key 取各自 plugin_config[引擎].api_key。
 
 import { useState, type ReactNode } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -13,8 +14,11 @@ import {
 } from "../../services/invoke";
 import type { PluginInfo } from "../../types";
 
-// MiniMax 国际版克隆/音色管理 API 端点（T2A 由插件走 api-uw 加速端点）
-const MM_GLOBAL_BASE = "https://api.minimax.io";
+// 各 MiniMax 引擎对应的克隆/音色管理 API 端点（voice_clone/get_voice/delete_voice）
+const MM_BASES: Record<string, string> = {
+  "minimax-tts-global": "https://api.minimax.io",
+  "minimax-tts-stream": "https://api.minimaxi.com",
+};
 
 /** get_voice 返回的音色条目（克隆/设计组） */
 interface MmAccountVoice {
@@ -46,7 +50,9 @@ export function MinimaxVoicePanel({ plugin, voiceSelect }: { plugin: PluginInfo;
   const [mmManageMsg, setMmManageMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [mmDeleteTarget, setMmDeleteTarget] = useState<{ type: string; id: string } | null>(null);
 
-  /** MiniMax 国际版 API Key：通用插件配置机制迁移后从 plugin_config 读取 */
+  /** 该引擎对应的克隆 API 端点（未知引擎兜底国际版） */
+  const mmBase = MM_BASES[plugin.id] ?? "https://api.minimax.io";
+  /** MiniMax API Key：通用插件配置机制迁移后从 plugin_config 读取（按引擎隔离） */
   const mmGlobalKey = settings?.plugin_config?.[plugin.id]?.["api_key"] ?? "";
 
   /** 音色克隆：上传音频（+可选样本）→ voice_clone → 持久化并切换 */
@@ -54,7 +60,7 @@ export function MinimaxVoicePanel({ plugin, voiceSelect }: { plugin: PluginInfo;
     const vid = mmCloneVoiceId.trim();
     if (!mmCloneFile || !vid || mmCloning) return;
     if (!mmGlobalKey) {
-      setMmCloneMsg({ ok: false, text: "请先在上方配置卡中填写 MiniMax 国际版 API Key" });
+      setMmCloneMsg({ ok: false, text: "请先在上方配置卡中填写 MiniMax API Key" });
       return;
     }
     setMmCloning(true);
@@ -64,7 +70,7 @@ export function MinimaxVoicePanel({ plugin, voiceSelect }: { plugin: PluginInfo;
         mmCloneFile,
         vid,
         mmGlobalKey,
-        MM_GLOBAL_BASE,
+        mmBase,
         mmShowAdvanced && mmPromptFile ? mmPromptFile : undefined,
         mmShowAdvanced && mmPromptText.trim() ? mmPromptText.trim() : undefined,
       );
@@ -93,13 +99,13 @@ export function MinimaxVoicePanel({ plugin, voiceSelect }: { plugin: PluginInfo;
   /** 刷新账号音色列表（克隆音色须先合成过一次才会出现） */
   async function handleMmRefreshVoices() {
     if (!mmGlobalKey) {
-      setMmManageMsg({ ok: false, text: "请先在上方配置卡中填写 MiniMax 国际版 API Key" });
+      setMmManageMsg({ ok: false, text: "请先在上方配置卡中填写 MiniMax API Key" });
       return;
     }
     setMmVoicesLoading(true);
     setMmManageMsg(null);
     try {
-      const raw = await minimaxGlobalGetVoices(mmGlobalKey, MM_GLOBAL_BASE);
+      const raw = await minimaxGlobalGetVoices(mmGlobalKey, mmBase);
       const j = JSON.parse(raw) as {
         system_voice?: MmAccountVoice[];
         voice_cloning?: MmAccountVoice[];
@@ -123,11 +129,11 @@ export function MinimaxVoicePanel({ plugin, voiceSelect }: { plugin: PluginInfo;
     const { type, id } = mmDeleteTarget;
     setMmDeleteTarget(null);
     if (!mmGlobalKey) {
-      setMmManageMsg({ ok: false, text: "请先在上方配置卡中填写 MiniMax 国际版 API Key" });
+      setMmManageMsg({ ok: false, text: "请先在上方配置卡中填写 MiniMax API Key" });
       return;
     }
     try {
-      await minimaxGlobalDeleteVoice(mmGlobalKey, MM_GLOBAL_BASE, type, id);
+      await minimaxGlobalDeleteVoice(mmGlobalKey, mmBase, type, id);
       setMmAccountVoices((v) =>
         v
           ? {

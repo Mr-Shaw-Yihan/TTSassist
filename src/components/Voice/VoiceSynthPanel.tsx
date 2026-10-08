@@ -536,8 +536,8 @@ export function VoiceSynthPanel() {
               {cur.voices.map((v) => (
                 <option key={v.id} value={v.id}>{v.label}</option>
               ))}
-              {/* 国际版：合并本地持久化的克隆音色（首次合成前账号列表查不到） */}
-              {cur.id === "minimax-tts-global" &&
+              {/* MiniMax（国际版/国内流式版）：合并本地持久化的克隆音色（首次合成前账号列表查不到） */}
+              {(cur.id === "minimax-tts-global" || cur.id === "minimax-tts-stream") &&
                 (settings?.minimax_global_cloned_voices ?? [])
                   .filter((id) => !cur.voices.some((v) => v.id === id))
                   .map((id) => (
@@ -572,16 +572,16 @@ export function VoiceSynthPanel() {
             {/* 通用插件配置卡（manifest 声明驱动，保存即生效）：标题统一为「API 密钥」 */}
             {cur.config && <PluginConfigPanel pluginId={cur.id} pluginName={cur.name} title="API 密钥" />}
 
-            {/* 国内版阉割提示：暂不提供音色克隆 */}
+            {/* minimax-tts（国内整段版）未接入音色克隆：指向支持克隆的流式插件 */}
             {cur.id === "minimax-tts" && (
               <div className="rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/20 px-3 py-2 text-[11px] leading-relaxed text-[var(--amber-600)]">
-                国内版为<b>阉割版</b>，暂不提供音色克隆。如需克隆自己的音色，请安装并使用 MiniMax 国际版插件。
+                本插件（国内整段版）暂未接入音色克隆，仅可选系统音色。如需克隆自己的音色，请安装并使用 <b>MiniMax 流式 TTS</b> 插件（国内版，支持克隆）。
               </div>
             )}
 
-            {/* 音色管理区（含「当前音色」下拉）：国际版走 MinimaxVoicePanel（克隆+账号管理），
+            {/* 音色管理区（含「当前音色」下拉）：MiniMax 国际版/国内流式版走 MinimaxVoicePanel（克隆+账号管理），
                 本地引擎并入 VoiceManager（装/卸/导入音色包），其余云引擎用「音色管理」分区卡 */}
-            {cur.id === "minimax-tts-global" ? (
+            {cur.id === "minimax-tts-global" || cur.id === "minimax-tts-stream" ? (
               <MinimaxVoicePanel plugin={cur} voiceSelect={voiceSelectNode} />
             ) : cur.has_voice_management ? (
               <VoiceManager
