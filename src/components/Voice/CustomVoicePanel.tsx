@@ -24,6 +24,12 @@ export function CustomVoicePanel({ items, currentVoiceId, onSelect, onSave, onDe
 
   function handleSave() {
     if (!canSave) return;
+    // 音色 ID 必须是可见 ASCII 无空格（fish 为十六进制串、edge 为短名等）；
+    // 拦下「把名称填进 ID 框」的反填手滑，避免列表展示与传给插件的值双双出错
+    if (!/^[\x21-\x7e]+$/.test(trimmedId)) {
+      setError("音色 ID 应为不含空格的非中文标识串（如 afbe646a…），是不是和名称填反了？");
+      return;
+    }
     if (items.some((x) => x.id === trimmedId)) {
       setError("该音色 ID 已保存过，请直接在上列表选用");
       return;
