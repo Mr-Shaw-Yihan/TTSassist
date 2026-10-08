@@ -57,22 +57,10 @@ $ConfigDecl = @{
             )
         },
         @{
-            key         = "stream"
-            type        = "select"
-            label       = "合成模式"
-            description = "流式：PCM 分块边合成边播放，首响更快；非流式：整段合成后播放。用于同引擎前后对比（默认流式）"
-            env         = "FISH_AUDIO_STREAM_MODE"
-            required    = $false
-            options     = @(
-                @{ value = "on";  label = "流式（边合边播·默认）" },
-                @{ value = "off"; label = "非流式（整段对比）" }
-            )
-        },
-        @{
             key         = "voice_override"
             type        = "text"
             label       = "自定义音色 ID"
-            description = "fish.audio 模型库中的音色模型 ID（32 位十六进制），填写后覆盖「当前音色」下拉；留空不覆盖"
+            description = "在 https://fish.audio/zh-CN/app/my-voices/ 查看你的音色模型 ID（32 位十六进制），填写后覆盖「当前音色」下拉；留空不覆盖"
             env         = "FISH_AUDIO_VOICE_OVERRIDE"
         },
         @{

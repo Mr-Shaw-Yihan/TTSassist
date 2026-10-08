@@ -1,12 +1,12 @@
 // Fish Audio TTS 插件 — 调用 api.fish.audio 云端语音合成（S2.1 系列）。
 //
-// 双管线：
-//   - 阻塞式 va_tts_synthesize：POST /v1/tts（MP3，整段收全）；
-//   - 流式式 va_tts_stream_*：POST /v1/tts format=pcm 的分块响应边收边播——
+// 合成模式：流式唯一。
+//   - 流式 va_tts_stream_*：POST /v1/tts format=pcm 的分块响应边收边播——
 //     官方文档明确「已握全文时低延迟首选 HTTP streaming」（WS tts-live 是给
 //     LLM 增量出字场景的）；宿主流式管线只认 pcm_s16le 块，正合 HTTP 分块 PCM。
-//   宿主按 plugin_config["stream"]（manifest 声明的配置字段）择路：
-//   缺省=流式优先，"off"=回落阻塞管线。
+//   - 阻塞式 va_tts_synthesize（MP3 整段）保留为实现宿主加载校验所必需的
+//     8 符号导出（缺一不可），作为异常路径兜底存在；不提供配置开关，
+//     宿主对本插件默认走流式（plugin_config 无 "stream" 声明 → 缺省流式）。
 //
 // 环境变量（由宿主通用插件配置机制按 manifest.config 声明注入）：
 //   FISH_AUDIO_API_KEY        必填，fish.audio → Settings → API Keys 创建
