@@ -14,12 +14,13 @@ $ErrorActionPreference = "Stop"
 
 $PluginId   = "minimax-tts-stream"
 $PluginName = "MiniMax 流式 TTS（边合边播）"
-$Version    = "0.1.0"
+$Version    = "0.1.1"
 $MinAppVer  = "1.8.0"
-$Desc       = "MiniMax 云端语音合成流式版：WebSocket 边合成边出块，首响更快（国内/国际双区）。需 API Key，50+ 音色、40 种语言"
+$Desc       = "MiniMax 云端语音合成流式版：WebSocket 边合成边出块，首响更快（国内/国际双区）。需 API Key，50+ 音色、40 种语言。配置可切回非流式对比"
 
 # 通用插件配置声明（宿主 ≥1.8.0 据此渲染设置面板并注入环境变量）。
 # 注意 env 名独立于 minimax-tts / minimax-tts-global，避免宿主必填 env 冲突检测拒载。
+# stream 字段由宿主读取 plugin_config[engine].stream 决定流式/阻塞管线（env 声明为占位，插件不消费）。
 $ConfigDecl = @{
     help_url = "https://platform.minimaxi.com/user-center/basic-information/interface-key"
     fields   = @(
@@ -30,6 +31,18 @@ $ConfigDecl = @{
             description = "从 MiniMax 开放平台获取（国内/国际版通用）"
             env         = "MINIMAX_STREAM_API_KEY"
             required    = $true
+        },
+        @{
+            key         = "stream"
+            type        = "select"
+            label       = "合成模式"
+            description = "流式：边合成边播放，首响更快；非流式：整段合成后播放。用于同引擎前后对比（默认流式）"
+            env         = "MINIMAX_STREAM_MODE"
+            required    = $false
+            options     = @(
+                @{ value = "on";  label = "流式（边合边播·默认）" },
+                @{ value = "off"; label = "非流式（整段对比）" }
+            )
         },
         @{
             key         = "region"

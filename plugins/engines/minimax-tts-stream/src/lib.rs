@@ -13,7 +13,7 @@
 plugin_api::va_tts_plugin! {
     id: "minimax-tts-stream",
     name: "MiniMax 流式 TTS（边合边播）",
-    version: "0.1.0",
+    version: "0.1.1",
     audio_format: "mp3",
     voices: minimax_tts_core::voices_list,
     synthesize: synthesize,

@@ -1,7 +1,7 @@
 [package]
 name = "minimax-tts-stream"
-version = "0.1.0"
-description = "MiniMax 流式 TTS 插件 — WebSocket T2A v2 边合成边出块（国内/国际双区）"
+version = "0.1.1"
+description = "MiniMax 流式 TTS 插件 — WebSocket T2A v2 边合成边出块（国内/国际双区，配置可切非流式对比）"
 edition = "2021"
 
 [lib]
