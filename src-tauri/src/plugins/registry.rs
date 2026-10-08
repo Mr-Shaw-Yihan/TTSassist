@@ -29,6 +29,11 @@ pub struct RegistryEntry {
 pub struct Registry {
     #[serde(default)]
     pub plugins: Vec<RegistryEntry>,
+    /// 用户主动卸载过的【内置插件 id】黑名单：bootstrap 自动安装内置 zip 时跳过这些 id，
+    /// 使“本体自带插件可卸载”真正生效（否则下次启动会因 zip 仍在 resources 而重装回来）。
+    /// 用户从商店/拖包显式再安装某插件时，install_zip 会把其 id 从本名单移除。
+    #[serde(default)]
+    pub suppressed: Vec<String>,
 }
 
 /// 读注册表。文件不存在/解析失败返回空注册表（容错优先）。
@@ -75,6 +80,7 @@ mod tests {
                 installed_at: "2026-08-04T10:00:00+08:00".into(),
                 pending_zip: None,
             }],
+            ..Default::default()
         };
         save_registry(dir.path(), &r).unwrap();
         let back = load_registry(dir.path());
@@ -99,6 +105,7 @@ mod tests {
                 installed_at: "2026-08-04T10:00:00+08:00".into(),
                 pending_zip: None,
             }],
+            ..Default::default()
         };
         let json = format!("\u{FEFF}{}", serde_json::to_string(&r).unwrap());
         std::fs::write(dir.path().join(FILE), json).unwrap();

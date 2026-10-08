@@ -1,7 +1,7 @@
 // MiniMax TTS API 共享核心库。
 //
-// 封装 MiniMax Text-to-Audio V2 HTTP API 的调用逻辑，供国内版（minimax-tts）
-// 和国际版（minimax-tts-global）两个插件 crate 复用。
+// 封装 MiniMax Text-to-Audio V2 HTTP API 的调用逻辑，供国际版（minimax-tts-global）
+// 和国内流式版（minimax-tts-stream，阻塞兜底路径）两个插件 crate 复用。
 //
 // 国内版端点：https://api.minimaxi.com/v1/t2a_v2
 // 国际版端点：https://api.minimax.io/v1/t2a_v2

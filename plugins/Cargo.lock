@@ -705,15 +705,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "minimax-tts"
-version = "0.2.1"
-dependencies = [
- "minimax-tts-core",
- "plugin-api",
- "serde_json",
-]
-
-[[package]]
 name = "minimax-tts-core"
 version = "0.1.0"
 dependencies = [
@@ -735,7 +726,7 @@ dependencies = [
 
 [[package]]
 name = "minimax-tts-stream"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "minimax-tts-core",
  "plugin-api",

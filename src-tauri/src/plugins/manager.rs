@@ -209,6 +209,10 @@ impl PluginManager {
             best.len()
         );
         for (manifest, zip_path) in best {
+            // 用户曾主动卸载过该内置插件 → 不再自动重装（本体自带插件可卸载的落地）
+            if reg.suppressed.iter().any(|s| s == &manifest.id) {
+                continue;
+            }
             let already = reg.plugins.iter().any(|e| {
                 e.id == manifest.id
                     && e.version == manifest.version
@@ -672,9 +676,12 @@ impl PluginManager {
         }
         let was_loaded = self.is_loaded(id);
 
-        // 1. 注册表移除
+        // 1. 注册表移除 + 记入内置卸载黑名单（防下次启动 bootstrap 把 resources 里的内置 zip 又装回来）
         let mut reg = registry::load_registry(&self.plugins_root);
         reg.plugins.retain(|e| e.id != id);
+        if !reg.suppressed.iter().any(|s| s == id) {
+            reg.suppressed.push(id.to_string());
+        }
         registry::save_registry(&self.plugins_root, &reg)?;
 
         // 2. 删除目录（dll 被占用时容忍失败，启动时孤儿清理兜底）
@@ -719,6 +726,7 @@ impl PluginManager {
 
             let mut reg = registry::load_registry(&self.plugins_root);
             let rel = format!("pending/{id}.zip");
+            reg.suppressed.retain(|s| s != &id); // 用户主动安装：撤销卸载黑名单
             if let Some(e) = reg.plugins.iter_mut().find(|e| e.id == id) {
                 e.pending_zip = Some(rel);
             } else {
@@ -736,6 +744,7 @@ impl PluginManager {
         // 直接安装：覆盖文件 + 注册 + 立即加载
         copy_staged_to(&staged, &self.plugins_root)?;
         let mut reg = registry::load_registry(&self.plugins_root);
+        reg.suppressed.retain(|s| s != &id); // 用户主动安装：撤销卸载黑名单
         if let Some(e) = reg.plugins.iter_mut().find(|e| e.id == id) {
             e.version = staged.manifest.version.clone();
             e.pending_zip = None;
@@ -898,6 +907,7 @@ mod tests {
                 installed_at: "2026-08-04T10:00:00+08:00".into(),
                 pending_zip: None,
             }],
+            ..Default::default()
         };
         registry::save_registry(&data_dir.join("plugins"), &reg).unwrap();
     }
@@ -1080,6 +1090,46 @@ mod tests {
             reg.plugins.iter().filter(|e| e.id == "test-plugin").count(),
             1,
             "重复引导不应产生重复注册"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn bootstrap_卸载内置后不再自动重装() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugins_root = dir.path().join("plugins");
+        std::fs::create_dir_all(&plugins_root).unwrap();
+        let bundled = dir.path().join("bundled").join("plugins");
+        std::fs::create_dir_all(&bundled).unwrap();
+        let zip = bundled.join("test-plugin-0.1.0.zip");
+        make_test_zip(&zip, "test-plugin");
+
+        let pm = PluginManager::load_all(&plugins_root, None);
+        let mut reg = registry::load_registry(&plugins_root);
+        pm.bootstrap_bundled_zips(&mut reg, &[bundled.clone()]);
+        assert!(pm.is_installed("test-plugin"), "首轮内置引导应装上");
+
+        // 用户卸载 → 记入抑制名单
+        pm.uninstall("test-plugin").unwrap();
+        let after = registry::load_registry(&plugins_root);
+        assert!(
+            after.suppressed.iter().any(|s| s == "test-plugin"),
+            "卸载应把 id 记入黑名单"
+        );
+
+        // 再引导：同一内置 zip 不应重装回来
+        let mut reg2 = registry::load_registry(&plugins_root);
+        let reloaded = pm.bootstrap_bundled_zips(&mut reg2, &[bundled.clone()]);
+        assert!(!reloaded.contains("test-plugin"), "已卸载内置不应被 bootstrap 重装");
+        assert!(!pm.is_installed("test-plugin"), "抑制生效：注册表无此插件");
+
+        // 从商店/拖包显式再安装 → 撤销抑制并注册
+        pm.install_zip(&zip, None).unwrap();
+        assert!(pm.is_installed("test-plugin"), "显式安装应重新注册");
+        let reg3 = registry::load_registry(&plugins_root);
+        assert!(
+            !reg3.suppressed.iter().any(|s| s == "test-plugin"),
+            "显式安装应把 id 移出黑名单"
         );
     }
 

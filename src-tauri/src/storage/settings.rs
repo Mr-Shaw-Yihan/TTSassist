@@ -105,10 +105,11 @@ pub fn load_settings(data_dir: &Path) -> Settings {
 }
 
 /// 旧硬编码插件 Key → plugin_config 的迁移映射。
-/// 一次性历史包袱清理代码：宿主删除 minimax 硬编码两个版本后可删。
+/// 一次性历史包袱清理代码。国内版插件已由 minimax-tts（整段）升级为
+/// minimax-tts-stream（流式，v0.3.0 起国内整段版已从内置移除），故旧国内键平移到流式插件。
 const LEGACY_PLUGIN_KEY_MAP: &[(&str, &str, &str)] = &[
     // (settings 旧键, 插件 id, plugin_config 字段 key)
-    ("minimax_api_key", "minimax-tts", "api_key"),
+    ("minimax_api_key", "minimax-tts-stream", "api_key"),
     ("minimax_global_api_key", "minimax-tts-global", "api_key"),
 ];
 
@@ -311,7 +312,7 @@ mod tests {
         )
         .unwrap();
         let s = load_settings(&d);
-        assert_eq!(s.plugin_config["minimax-tts"]["api_key"], "k1", "国内版 Key 应搬入");
+        assert_eq!(s.plugin_config["minimax-tts-stream"]["api_key"], "k1", "国内版 Key 应搬入流式继任插件");
         assert_eq!(s.plugin_config["minimax-tts-global"]["api_key"], "k2", "国际版 Key 应搬入");
         assert!(s.minimax_api_key.is_empty(), "旧键应清空");
         assert!(s.minimax_global_api_key.is_empty());
@@ -326,11 +327,11 @@ mod tests {
         // 新面板已填值时旧键不覆盖（旧值作废丢弃）
         std::fs::write(
             d.join("settings.json"),
-            r#"{"minimax_api_key":"old","plugin_config":{"minimax-tts":{"api_key":"new"}}}"#,
+            r#"{"minimax_api_key":"old","plugin_config":{"minimax-tts-stream":{"api_key":"new"}}}"#,
         )
         .unwrap();
         let s3 = load_settings(&d);
-        assert_eq!(s3.plugin_config["minimax-tts"]["api_key"], "new");
+        assert_eq!(s3.plugin_config["minimax-tts-stream"]["api_key"], "new");
     }
 
     #[test]

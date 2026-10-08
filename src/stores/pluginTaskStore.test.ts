@@ -61,8 +61,8 @@ describe("pluginTaskStore", () => {
 
   it("startVoice 成功：kind=voice，调 installVoice(pluginId, voiceId)", async () => {
     mockedRunVoice.mockResolvedValueOnce("音色已安装");
-    const msg = await usePluginTaskStore.getState().startVoice("minimax-tts", "v-01", "御姐音");
-    expect(mockedRunVoice).toHaveBeenCalledWith("minimax-tts", "v-01");
+    const msg = await usePluginTaskStore.getState().startVoice("test-tts-plugin", "v-01", "御姐音");
+    expect(mockedRunVoice).toHaveBeenCalledWith("test-tts-plugin", "v-01");
     expect(msg).toBe("音色已安装");
     expect(usePluginTaskStore.getState().task).toMatchObject({ kind: "voice", voiceId: "v-01", status: "done" });
   });
@@ -103,10 +103,10 @@ describe("pluginTaskStore", () => {
 
   it("retry：voice 错误 → 携带 voiceId 重新走 startVoice", async () => {
     mockedRunVoice.mockRejectedValueOnce("boom");
-    await expect(usePluginTaskStore.getState().startVoice("minimax-tts", "v-9", "音")).rejects.toBe("boom");
+    await expect(usePluginTaskStore.getState().startVoice("test-tts-plugin", "v-9", "音")).rejects.toBe("boom");
     mockedRunVoice.mockResolvedValueOnce("重试成功");
     const r = await usePluginTaskStore.getState().retry();
-    expect(mockedRunVoice).toHaveBeenLastCalledWith("minimax-tts", "v-9");
+    expect(mockedRunVoice).toHaveBeenLastCalledWith("test-tts-plugin", "v-9");
     expect(r).toBe("重试成功");
   });
 
@@ -130,12 +130,12 @@ describe("pluginTaskStore", () => {
 
   it("applyProgress：voice 任务下 voice_id 不匹配时忽略", () => {
     usePluginTaskStore.setState({
-      task: { pluginId: "minimax-tts", kind: "voice", voiceId: "v-1", label: "音", percent: 20, message: "m", status: "running" },
+      task: { pluginId: "test-tts-plugin", kind: "voice", voiceId: "v-1", label: "音", percent: 20, message: "m", status: "running" },
     });
-    usePluginTaskStore.getState().applyProgress({ plugin_id: "minimax-tts", kind: "voice", voice_id: "v-2", percent: 88, message: "x" });
+    usePluginTaskStore.getState().applyProgress({ plugin_id: "test-tts-plugin", kind: "voice", voice_id: "v-2", percent: 88, message: "x" });
     expect(usePluginTaskStore.getState().task).toMatchObject({ percent: 20, message: "m" });
     // 命中当前 voiceId 才更新
-    usePluginTaskStore.getState().applyProgress({ plugin_id: "minimax-tts", kind: "voice", voice_id: "v-1", percent: 55, message: "y" });
+    usePluginTaskStore.getState().applyProgress({ plugin_id: "test-tts-plugin", kind: "voice", voice_id: "v-1", percent: 55, message: "y" });
     expect(usePluginTaskStore.getState().task).toMatchObject({ percent: 55, message: "y" });
   });
 
