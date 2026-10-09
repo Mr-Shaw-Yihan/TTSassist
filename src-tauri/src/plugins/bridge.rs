@@ -285,14 +285,18 @@ pub fn native_stop_playback(app: &AppHandle) {
     }
 }
 
-/// 合成并播放（async，供本体遥控直接 await）：走现有合成管线 + emit playback:play 让主窗播扬声器。
-/// 与后端麦克风避免双份（generate_tts_impl 内已按需发麦克风）。
+/// 合成并播放（async，供本体遥控直接 await）：统一走流式管线。
+/// - 插件导出流式三符号 → 宿主边合边播（已发播放态事件），不再 emit `playback:play`；
+/// - 其余引擎 → 内部回落阻塞管线（`host_played=false`），仍由主窗播扬声器。
+/// 与后端麦克风避免双份（两条管线内部各自按需发麦克风）。
 pub async fn native_synthesize(app: &AppHandle, text: &str) -> Result<(), String> {
     if text.trim().is_empty() {
         return Err("文本不能为空".to_string());
     }
-    let msg = crate::commands::tts::generate_tts_impl(app, text).await?;
-    let _ = app.emit("playback:play", msg.audio_path);
+    let res = crate::commands::tts_stream::generate_tts_stream_impl(app, text).await?;
+    if !res.host_played {
+        let _ = app.emit("playback:play", res.message.audio_path);
+    }
     Ok(())
 }
 

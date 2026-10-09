@@ -19,7 +19,7 @@ use std::sync::mpsc::{channel, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::commands::tts::SynthesizingFlag;
 use crate::commands::AppState;
@@ -93,7 +93,17 @@ pub fn tts_stream_stop(app: AppHandle) {
 
 #[tauri::command]
 pub async fn generate_tts_stream(text: String, app: AppHandle) -> Result<StreamTtsResult, String> {
-    let text = text.trim().to_string();
+    generate_tts_stream_impl(&app, &text).await
+}
+
+/// generate_tts_stream 核心实现（Tauri 命令与宿主能力桥共用）：
+/// 导出流式符号的插件边合边播（`host_played=true`）；
+/// 其余引擎内部回落阻塞管线（`host_played=false`，扬声器由前端整段播）。
+pub async fn generate_tts_stream_impl(
+    app: &AppHandle,
+    raw_text: &str,
+) -> Result<StreamTtsResult, String> {
+    let text = raw_text.trim().to_string();
     if text.is_empty() {
         return Err("文本为空".into());
     }
@@ -164,6 +174,14 @@ pub async fn generate_tts_stream(text: String, app: AppHandle) -> Result<StreamT
 
     // 3. 登记活跃会话 + 播放线程开局（回执设备打开结果）
     let _active_guard = ActiveGuard::new(Arc::clone(&plugin), session);
+
+    // 归档路径先算：播放线程开局时要把「正在播哪个文件」告诉订阅方
+    let fid = gen_id("m");
+    std::fs::create_dir_all(data_dir.join("audio"))
+        .map_err(|e| format!("创建音频目录失败: {e}"))?;
+    let tmp_pcm = data_dir.join(format!("audio/{fid}.pcm.tmp"));
+    let wav_rel = format!("audio/{fid}.wav");
+
     let (ack_tx, ack_rx) = channel();
     let has_mic_target = mic_send_enabled && !mic_device.is_empty();
     let mic_target = if has_mic_target {
@@ -177,6 +195,8 @@ pub async fn generate_tts_stream(text: String, app: AppHandle) -> Result<StreamT
         speaker_volume: speaker_volume.clamp(0.0, 1.0),
         mic: mic_target,
         ack: ack_tx,
+        app: app.clone(),
+        wav_rel: wav_rel.clone(),
     });
     let (spk_ok, mic_ok) = ack_rx
         .recv_timeout(PLAYER_ACK_TIMEOUT)
@@ -188,11 +208,6 @@ pub async fn generate_tts_stream(text: String, app: AppHandle) -> Result<StreamT
     }
 
     // 4. 拉块循环（blocking 线程）：块 → 播放 + 追加临时 PCM 文件
-    let fid = gen_id("m");
-    std::fs::create_dir_all(data_dir.join("audio"))
-        .map_err(|e| format!("创建音频目录失败: {e}"))?;
-    let tmp_pcm = data_dir.join(format!("audio/{fid}.pcm.tmp"));
-    let wav_rel = format!("audio/{fid}.wav");
     let engine_for_log = engine_id.clone();
     let text_len = text.chars().count();
     let pull_task = {
@@ -358,7 +373,7 @@ fn wav_io(e: std::io::Error) -> String {
 
 // ── 播放线程（rodio OutputStream 非 Send，参考 mic.rs 关进专用线程）──
 
-/// 开局参数（generate_tts_stream → 播放线程）
+/// 开局参数（generate_tts_stream_impl → 播放线程）
 pub struct BeginSpec {
     pub sample_rate: u32,
     pub channels: u16,
@@ -368,6 +383,11 @@ pub struct BeginSpec {
     pub mic: Option<(String, f32)>,
     /// 开局回执：(扬声器已打开, 虚拟麦克风已打开)
     pub ack: Sender<(bool, bool)>,
+    /// 应用句柄：`rodio::OutputStream` 不是 Send，但 `AppHandle` 是，
+    /// 播放态事件就在这个线程里发
+    pub app: AppHandle,
+    /// 本次流式归档的音频相对路径（`playback:started` 的载荷，能力桥据此聚合播放态）
+    pub wav_rel: String,
 }
 
 enum PlayerCmd {
@@ -418,6 +438,19 @@ struct PlaySession {
     channels: u16,
     sinks: Vec<DeviceSink>,
     finishing: bool,
+    app: AppHandle,
+    /// 开局时宿主是否发过 `va:play:start`（决定收尾要不要发对应的那一套 stop）
+    announced: bool,
+}
+
+/// 宿主播完/中断时的播放态收尾：只补发开局时发过 start 的那一套。
+/// 前端整段播放路径自己会发一套，两边不发两套是 `announced` 标志存在的全部意义。
+fn announce_play_stop(s: &PlaySession) {
+    if !s.announced {
+        return;
+    }
+    let _ = s.app.emit("va:play:stop", ());
+    let _ = s.app.emit("playback:stopped", ());
 }
 
 fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
@@ -426,7 +459,9 @@ fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(PlayerCmd::Begin(spec)) => {
                 // 新流替换旧流（未播完的尾巴直接切断，与虚拟麦克风 Play 语义一致）
-                active = None;
+                if let Some(prev) = active.take() {
+                    announce_play_stop(&prev);
+                }
                 let mut sinks: Vec<DeviceSink> = Vec::new();
                 let mut spk_ok = false;
                 match rodio::OutputStream::try_default() {
@@ -460,12 +495,23 @@ fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
                     }
                 }
                 let _ = spec.ack.send((spk_ok, mic_ok));
+                let app = spec.app.clone();
+                let wav_rel = spec.wav_rel.clone();
+                // 只在扬声器真开成时发：开不成时 host_played=false，
+                // 前端会整段播放并自行发一套事件（两边都发会双计）
+                let announced = spk_ok;
+                if announced {
+                    let _ = app.emit("va:play:start", ());
+                    let _ = app.emit("playback:started", wav_rel.clone());
+                }
                 if !sinks.is_empty() {
                     active = Some(PlaySession {
                         sample_rate: spec.sample_rate,
                         channels: spec.channels,
                         sinks,
                         finishing: false,
+                        app,
+                        announced,
                     });
                 }
             }
@@ -485,15 +531,30 @@ fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
                     s.finishing = true;
                 }
             }
-            Ok(PlayerCmd::Abort) => active = None,
+            Ok(PlayerCmd::Abort) => {
+                if let Some(prev) = active.take() {
+                    announce_play_stop(&prev);
+                }
+            }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                if let Some(s) = &mut active {
-                    if s.finishing && s.sinks.iter().all(|ds| ds.sink.empty()) {
-                        active = None; // 排空完成，收尾释放设备
+                let drained = active
+                    .as_mut()
+                    .map(|s| s.finishing && s.sinks.iter().all(|ds| ds.sink.empty()))
+                    .unwrap_or(false);
+                if drained {
+                    // 排空完成：先报停止再释放设备，订阅方不会看到「播完还在播」
+                    if let Some(prev) = active.take() {
+                        announce_play_stop(&prev);
                     }
                 }
             }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                // 发送端已全部 drop（主命令走到尽头）：补发停止事件后退出
+                if let Some(prev) = active.take() {
+                    announce_play_stop(&prev);
+                }
+                break;
+            }
         }
     }
 }
