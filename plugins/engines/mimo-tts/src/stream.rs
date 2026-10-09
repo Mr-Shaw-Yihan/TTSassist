@@ -346,4 +346,132 @@ mod tests {
         assert_eq!(info["sample_rate"], 24000);
         assert_eq!(info["channels"], 1);
     }
+
+    /// 把探针 PCM 封成 WAV 落到临时目录，供人耳试听（只手动跑，不进常规门禁）
+    fn dump_probe_wav(pcm: &[u8], tag: &str) {
+        let path = std::env::temp_dir().join(format!("mimo-probe-{tag}.wav"));
+        let mut out = Vec::with_capacity(pcm.len() + 44);
+        let rate = crate::client::STREAM_SAMPLE_RATE;
+        let data_len = pcm.len() as u32;
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + data_len).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&rate.to_le_bytes());
+        out.extend_from_slice(&(rate * 2).to_le_bytes());
+        out.extend_from_slice(&2u16.to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&data_len.to_le_bytes());
+        out.extend_from_slice(pcm);
+        std::fs::write(&path, &out).ok();
+        println!("[probe] 试听文件: {}", path.display());
+    }
+
+    /// 探针待合成文本：默认短句，可用 `MIMO_PROBE_TEXT` 临时换长句。
+    /// 首块耗时跟文本长度强相关（兼容模式是全文推理完才出块），要测长句预算
+    /// 不该为此改代码（改一次就忘一次）。
+    fn probe_text(default: &str) -> String {
+        std::env::var("MIMO_PROBE_TEXT")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| default.to_string())
+    }
+
+    /// 实网探针①：预置音色应当是"多块"真流式。
+    /// 跑法：plugins/scripts/test-mimo-stream.ps1（或手动 cargo test --lib -- --ignored --nocapture）
+    /// 注意用 `--release`：debug 下 rustls + 大 base64 慢一到两个量级，
+    /// 实测同一只克隆探针 debug 要 60s+、release 只要 0.8s，拿 debug 数字做超时决策会误判。
+    #[test]
+    #[ignore = "需真实 MIMO_TTS_API_KEY，手动运行"]
+    fn 实网探针_预置音色应为多块流式() {
+        let key = std::env::var("MIMO_TTS_API_KEY").expect("请先设置 MIMO_TTS_API_KEY");
+        let text = probe_text("你好，这是一段流式合成的探针。今天天气不错，适合出门散步，我们边走边多聊几句。");
+        let body = crate::client::build_stream_request_body(
+            &crate::client::configured_model(),
+            &text,
+            Some(crate::client::DEFAULT_VOICE),
+            None,
+        );
+        let session = StreamSession::open(key.trim().to_string(), body).expect("打开流式会话失败");
+        let t0 = Instant::now();
+        let mut chunks = 0usize;
+        let mut first_ms = 0u64;
+        let mut pcm = Vec::<u8>::new();
+        loop {
+            match session.next_chunk() {
+                Ok(b) if b.is_empty() => break,
+                Ok(b) => {
+                    if chunks == 0 {
+                        first_ms = t0.elapsed().as_millis() as u64;
+                    }
+                    chunks += 1;
+                    pcm.extend_from_slice(&b);
+                }
+                Err(e) => panic!("拉块失败: {e}"),
+            }
+        }
+        let ms_total = t0.elapsed().as_millis();
+        let audio_ms = pcm.len() as u64 * 1000 / (crate::client::STREAM_SAMPLE_RATE as u64 * 2);
+        println!("[probe] 首块 {first_ms}ms / 块数 {chunks} / 音频 {audio_ms}ms / 总耗时 {ms_total}ms");
+        assert!(!pcm.starts_with(b"RIFF"), "流式块不应带 WAV 容器头");
+        assert_eq!(pcm.len() % 2, 0, "PCM 必须 2 字节对齐");
+        assert!(chunks > 1, "预置音色未拿到多块：服务端可能退化为整段返回（持续如此需重估流式收益）");
+        dump_probe_wav(&pcm, "preset");
+    }
+
+    /// 实网探针②：克隆音色（服务端兼容模式）首块必须被处理成可播 PCM。
+    /// `strip_wav_container` 已在 worker 首块处生效，故这里断言"拿不到 RIFF 开头"。
+    /// 需额外设置 VA_CLONE_SAMPLE 指向一段 5–10 秒人声样本。
+    #[test]
+    #[ignore = "需真实 MIMO_TTS_API_KEY + VA_CLONE_SAMPLE，手动运行"]
+    fn 实网探针_克隆音色首块不得带容器头() {
+        let key = std::env::var("MIMO_TTS_API_KEY").expect("请先设置 MIMO_TTS_API_KEY");
+        let sample = std::env::var("VA_CLONE_SAMPLE").expect("请先设置 VA_CLONE_SAMPLE=样本绝对路径");
+        assert!(
+            std::path::Path::new(&sample).exists(),
+            "VA_CLONE_SAMPLE 指向的文件不存在: {sample}"
+        );
+        let text = probe_text("这是一段克隆音色的流式探针，用来确认开头没有爆音。");
+        let (model, voice) = crate::client::resolve_voice(Some("clone")).expect("克隆请求体构造失败");
+        let body = crate::client::build_stream_request_body(&model, &text, voice.as_deref(), None);
+        let session = StreamSession::open(key.trim().to_string(), body).expect("打开流式会话失败");
+        // 计时必须记：兼容模式（克隆）的“首块前等待”就是 FIRST_CHUNK_TIMEOUT 能不能立住的唯一实测证据
+        let t0 = Instant::now();
+        let mut chunks = 0usize;
+        let mut first_ms = 0u64;
+        let mut first_head = [0u8; 4];
+        let mut got_first = false;
+        let mut pcm = Vec::<u8>::new();
+        loop {
+            match session.next_chunk() {
+                Ok(b) if b.is_empty() => break,
+                Ok(b) => {
+                    if !got_first {
+                        first_ms = t0.elapsed().as_millis() as u64;
+                        // 取 min：首块极端情况下可能不足 4 字节，不能因为探针自己越界而误报失败
+                        let n = b.len().min(4);
+                        first_head[..n].copy_from_slice(&b[..n]);
+                        got_first = true;
+                    }
+                    chunks += 1;
+                    pcm.extend_from_slice(&b);
+                }
+                Err(e) => panic!("克隆流式拉块失败: {e}"),
+            }
+        }
+        let ms_total = t0.elapsed().as_millis();
+        let audio_ms = pcm.len() as u64 * 1000 / (crate::client::STREAM_SAMPLE_RATE as u64 * 2);
+        println!(
+            "[probe] 克隆：块数 {chunks} / 首块 {first_ms}ms / 音频 {audio_ms}ms / 总耗时 {ms_total}ms / 首块前 4 字节 {:?}",
+            first_head
+        );
+        assert!(chunks >= 1, "克隆音色未返回任何音频块");
+        assert_ne!(&first_head, b"RIFF", "首块仍是 WAV 容器头：strip_wav_container 未生效");
+        assert_eq!(pcm.len() % 2, 0, "PCM 必须 2 字节对齐");
+        dump_probe_wav(&pcm, "clone");
+    }
 }
