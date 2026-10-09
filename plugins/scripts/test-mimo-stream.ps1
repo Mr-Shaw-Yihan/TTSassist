@@ -33,59 +33,63 @@ $TargetDir  = Join-Path $RepoRoot "plugins\target"
 # 本脚本要改的环境变量先在此存旧值，退出时在 finally 里逐个恢复（Key 也不能漏）：
 # 用 `pwsh -File` 跑时子进程一死就干净了，但 dot-source（`. .\test-mimo-stream.ps1`）
 # 会把明文 Key、关掉证书吊销检查等设置长时间留在调用者会话里，后续任何子进程都会继承。
+# 控制台上 UTF-8 那一下也是同样性质的全局修改，一并存旧值。
 $PrevKey = $env:MIMO_TTS_API_KEY
 $PrevCloneSample = $env:VA_CLONE_SAMPLE
 $PrevRevoke = $env:CARGO_HTTP_CHECK_REVOKE
 $PrevTargetDir = $env:CARGO_TARGET_DIR
+$PrevEncoding = [Console]::OutputEncoding
 
-# -- 1. Key：显式 env 优先，否则读本机 settings.json（mimo_api_key 或 plugin_config 里的新位置）--
-if (-not $env:MIMO_TTS_API_KEY) {
-    $settingsPath = Join-Path $env:APPDATA "com.voiceassist.app\settings.json"
-    if (Test-Path $settingsPath) {
-        $raw = (Get-Content $settingsPath -Raw).TrimStart([char]0xFEFF)
-        $obj = $raw | ConvertFrom-Json
-        $k = $obj.plugin_config.'mimo-tts'.api_key
-        if (-not $k) { $k = $obj.mimo_api_key }
-        if ($k) { $env:MIMO_TTS_API_KEY = $k }
-    }
-}
-if (-not $env:MIMO_TTS_API_KEY) {
-    Write-Host "[SKIP] 拿不到 MIMO_TTS_API_KEY：本机 settings.json 里没有，也没设环境变量" -ForegroundColor Yellow
-    exit 1
-}
-Write-Host "[OK] API Key 就绪（长度 $($env:MIMO_TTS_API_KEY.Length)）" -ForegroundColor Green
+# 从取 Key 开始就进 try：`[SKIP]` 两条早退分支原先放在 try 之外用 `exit 1` 收场，
+# 而 dot-source 实测 **脚本里的 exit 并不会结束调用者进程**（调用者接着往下跑，
+# 退出码还被吞成 0），于是明文 Key 与 `$ErrorActionPreference = Stop` 照样留在调用者会话里。
+# 改成 throw 后所有出口都经过 finally，恢复逻辑只有一份。
+try {
+    # Push-Location 必须在 try 里：目录不存在时也要走到 finally 的恢复逻辑
+    Push-Location $PluginDir
+    # cargo 打的是 UTF-8，控制台默认按 GBK 解码会把 [probe] 行变成乱码；
+    # 实测数字要抄进文档，乱码等于没观测，故跑前把控制台切到 UTF-8。
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+    $env:CARGO_HTTP_CHECK_REVOKE = "false"
+    $env:CARGO_TARGET_DIR = $TargetDir
 
-# -- 2. 克隆样本：仅在 -Clone 时需要 --
-if ($Clone -and -not $env:VA_CLONE_SAMPLE) {
-    $settingsPath = Join-Path $env:APPDATA "com.voiceassist.app\settings.json"
-    if (Test-Path $settingsPath) {
-        $raw = (Get-Content $settingsPath -Raw).TrimStart([char]0xFEFF)
-        $rel = ($raw | ConvertFrom-Json).clone_voice_path
-        if ($rel) {
-            $abs = Join-Path (Join-Path $env:APPDATA "com.voiceassist.app") $rel
-            if (Test-Path $abs) { $env:VA_CLONE_SAMPLE = $abs }
+    # -- 1. Key：显式 env 优先，否则读本机 settings.json（mimo_api_key 或 plugin_config 里的新位置）--
+    if (-not $env:MIMO_TTS_API_KEY) {
+        $settingsPath = Join-Path $env:APPDATA "com.voiceassist.app\settings.json"
+        if (Test-Path $settingsPath) {
+            $raw = (Get-Content $settingsPath -Raw).TrimStart([char]0xFEFF)
+            $obj = $raw | ConvertFrom-Json
+            $k = $obj.plugin_config.'mimo-tts'.api_key
+            if (-not $k) { $k = $obj.mimo_api_key }
+            if ($k) { $env:MIMO_TTS_API_KEY = $k }
         }
     }
-}
-if ($Clone -and -not $env:VA_CLONE_SAMPLE) {
-    Write-Host "[SKIP] -Clone 需要克隆样本，但本机没导入过（或文件已删）" -ForegroundColor Yellow
-    exit 1
-}
+    if (-not $env:MIMO_TTS_API_KEY) {
+        Write-Host "[SKIP] 拿不到 MIMO_TTS_API_KEY：本机 settings.json 里没有，也没设环境变量" -ForegroundColor Yellow
+        throw "缺少 MIMO_TTS_API_KEY"
+    }
+    Write-Host "[OK] API Key 就绪（长度 $($env:MIMO_TTS_API_KEY.Length)）" -ForegroundColor Green
 
-# -- 3. 跑探针 --
-# 环境变量只在此赋值（旧值已在文件头存好）；`[SKIP]` 分支走 exit 结束进程，同样不会残留。
-$env:CARGO_HTTP_CHECK_REVOKE = "false"
-$env:CARGO_TARGET_DIR = $TargetDir
+    # -- 2. 克隆样本：仅在 -Clone 时需要 --
+    if ($Clone -and -not $env:VA_CLONE_SAMPLE) {
+        $settingsPath = Join-Path $env:APPDATA "com.voiceassist.app\settings.json"
+        if (Test-Path $settingsPath) {
+            $raw = (Get-Content $settingsPath -Raw).TrimStart([char]0xFEFF)
+            $rel = ($raw | ConvertFrom-Json).clone_voice_path
+            if ($rel) {
+                $abs = Join-Path (Join-Path $env:APPDATA "com.voiceassist.app") $rel
+                if (Test-Path $abs) { $env:VA_CLONE_SAMPLE = $abs }
+            }
+        }
+    }
+    if ($Clone -and -not $env:VA_CLONE_SAMPLE) {
+        Write-Host "[SKIP] -Clone 需要克隆样本，但本机没导入过（或文件已删）" -ForegroundColor Yellow
+        throw "缺少克隆样本 VA_CLONE_SAMPLE"
+    }
 
-# 探针是两个 #[ignore] 的独立测试，必须按 -Clone 选着跑：不加名称过滤就会连克隆探针一起跑，
-# 而克隆探针没有样本会直接 panic，于是“只测预置”这种最常用的跑法必然红（实测踩过）。
-# 另外 cargo 打的是 UTF-8，控制台默认按 GBK 解码会把 [probe] 行变成乱码；
-# 实测数字要抄进文档，乱码等于没观测，故跑前把控制台切到 UTF-8。
-$PrevEncoding = [Console]::OutputEncoding
-[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-# Push-Location 必须在 try 里：目录不存在时也要走到 finally 的恢复逻辑
-try {
-    Push-Location $PluginDir
+    # -- 3. 跑探针 --
+    # 探针是两个 #[ignore] 的独立测试，必须按 -Clone 选着跑：不加名称过滤就会连克隆探针一起跑，
+    # 而克隆探针没有样本会直接 panic，于是“只测预置”这种最常用的跑法必然红（实测踩过）。
     # 参数拼成显式 [string[]] 再滑传：写成 `$x = if(...){@("a")}` 会被降级成字符串，
     # 滑传后参数静默丢失（实测踩过：过滤条件看起来完全没生效）。
     $CargoArgs = [string[]]@("test", "--lib")
