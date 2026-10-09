@@ -125,23 +125,20 @@ pub fn run() {
                 crate::perf::drain_startup_pending();
             }
 
-            // 克隆样本通用环境变量：宿主只把“已导入样本的绝对路径”告诉插件，
+            // 克隆样本通用环境变量：宿主只把「已导入样本的绝对路径」告诉插件，
             // 格式/大小/用法全部由插件自决（基座不认识任何引擎，见 AGENTS.md 基座合同）。
             // API Key 不再在此硬编码注入：改由各插件 manifest 的 config 声明，
-            // 统一走下方 plugin_manager.inject_config_env（旧 MIMO_API_KEY 顶层注入已删）。
+            // 统一走下方 plugin_manager.inject_config_env。
             {
-                let sample = if settings.clone_voice_path.is_empty() {
-                    String::new()
+                let sample_abs: Option<std::path::PathBuf> = if settings.clone_voice_path.is_empty() {
+                    None
                 } else {
-                    data_dir
-                        .join(&settings.clone_voice_path)
-                        .to_string_lossy()
-                        .into_owned()
+                    let p = data_dir.join(&settings.clone_voice_path);
+                    p.exists().then_some(p)
                 };
-                if sample.is_empty() || !std::path::Path::new(&sample).exists() {
-                    std::env::remove_var("VA_CLONE_SAMPLE");
-                } else {
-                    std::env::set_var("VA_CLONE_SAMPLE", &sample);
+                match sample_abs {
+                    Some(p) => crate::commands::clone_voice::announce_clone_sample(&p),
+                    None => crate::commands::clone_voice::clear_clone_sample(),
                 }
             }
 

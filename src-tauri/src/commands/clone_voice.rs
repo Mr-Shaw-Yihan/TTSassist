@@ -1,10 +1,23 @@
-// 克隆音色样本导入/删除命令。
+// 克隆音色样本导入/删除命令：宿主只管「一份通用样本文件」的存储与告知，
+// 哪个引擎用它、支持哪些格式、多大上限，全部由插件自己判定（基座不认引擎身份）。
 // 首版只支持一个克隆样本。
 
 use std::path::Path;
 use tauri::{AppHandle, State};
 use crate::commands::AppState;
 use crate::sync::{notify_changed, EVENT_SETTINGS_CHANGED};
+
+/// 样本绝对路径经通用环境变量 `VA_CLONE_SAMPLE` 告知插件（与 API Key 同一路数：
+/// 插件运行期 std::env::var 读取，改完即生效，无需重启）。
+pub(crate) fn announce_clone_sample(abs_path: &Path) {
+    std::env::set_var("VA_CLONE_SAMPLE", abs_path);
+}
+
+/// 样本删除后撤销告知：留一个指向已消失文件的 env 会让插件报「样本文件不存在」，
+/// 不如直接 remove，让插件据此给出「请先导入样本」的文案。
+pub(crate) fn clear_clone_sample() {
+    std::env::remove_var("VA_CLONE_SAMPLE");
+}
 
 /// 导入克隆音色样本：复制本地文件到 voice_samples/ 下，
 /// 并把样本路径与用户起的名字写进 settings。
@@ -18,10 +31,11 @@ pub fn import_clone_voice(
     let data_dir = &state.data_dir;
     let src = Path::new(&file_path);
 
-    // 限制大小：MiMo 文档要求 ≤10MB
+    // 通用防呆上限 20MB：宿主不检查引擎各自的限制（如某云端引擎要求 ≤10MB），
+    // 精确校验由插件在合成时给出中文原因，避免把引擎知识写进基座。
     let meta = std::fs::metadata(src).map_err(|e| format!("读取样本文件失败: {e}"))?;
-    if meta.len() > 10 * 1024 * 1024 {
-        return Err("样本文件过大，MiMo 限 10MB 以内".into());
+    if meta.len() > 20 * 1024 * 1024 {
+        return Err("样本文件过大（上限 20MB），请截取更短的音频".into());
     }
 
     let ext = src
@@ -29,8 +43,9 @@ pub fn import_clone_voice(
         .and_then(|e| e.to_str())
         .map(|s| s.to_lowercase())
         .unwrap_or_else(|| "mp3".into());
-    if !matches!(ext.as_str(), "mp3" | "wav") {
-        return Err("仅支持 mp3 或 wav 格式样本".into());
+    // 常见音频容器一律放行：能不能真用由插件判断（它才知道自家引擎支持哪些 MIME）
+    if !matches!(ext.as_str(), "mp3" | "wav" | "m4a" | "flac" | "ogg") {
+        return Err("样本仅支持 mp3 / wav / m4a / flac / ogg 格式".into());
     }
 
     let target_dir = data_dir.join("voice_samples");
@@ -69,6 +84,7 @@ pub fn import_clone_voice(
         *guard = new_settings;
     }
 
+    announce_clone_sample(&dest); // dest 是上面复制出来的样本绝对路径
     notify_changed(&app, EVENT_SETTINGS_CHANGED);
     Ok(())
 }
@@ -109,6 +125,7 @@ pub fn remove_clone_voice(
         *guard = new_settings;
     }
 
+    clear_clone_sample();
     notify_changed(&app, EVENT_SETTINGS_CHANGED);
     Ok(())
 }

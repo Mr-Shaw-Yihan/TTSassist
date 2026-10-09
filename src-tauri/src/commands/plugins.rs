@@ -26,6 +26,29 @@ pub fn list_plugins(plugins: State<'_, PluginManager>) -> Vec<PluginInfo> {
     plugins.list()
 }
 
+/// 当前引擎被卸载后的兜底选择（判据只看能力，不看引擎身份）：
+/// 1. 只在「已加载 + tts_engine 类型」里挑；
+/// 2. 优先没有必填配置项的（= 免配置开箱即用，如免费云端引擎；需 Key 的排在后面）；
+/// 3. 同优先级按 id 字典序，保证同一状态每次都给出同一个答案。
+/// 返回 None = 一个可用引擎都没有，调用方应保持用户原值并给出指引文案。
+pub(crate) fn pick_fallback_engine(list: &[PluginInfo]) -> Option<String> {
+    let needs_config = |p: &PluginInfo| {
+        p.config
+            .as_ref()
+            .map(|c| c.fields.iter().any(|f| f.required))
+            .unwrap_or(false)
+    };
+    let mut usable: Vec<&PluginInfo> = list
+        .iter()
+        .filter(|p| p.loaded && p.plugin_type == "tts_engine")
+        .collect();
+    if usable.is_empty() {
+        return None;
+    }
+    usable.sort_by(|a, b| needs_config(a).cmp(&needs_config(b)).then_with(|| a.id.cmp(&b.id)));
+    Some(usable[0].id.clone())
+}
+
 /// 卸载插件：注册表移除 + 删目录 + 清理 plugin_config 条目与环境变量。
 /// 已加载的 dll 常驻到进程退出，返回文案告知用户是否需要重启。
 #[tauri::command]
@@ -103,7 +126,50 @@ pub fn uninstall_plugin(
         }
     }
 
-    plugins.uninstall(&id).map_err(|e| e.to_string())
+    let outcome = plugins.uninstall(&id).map_err(|e| e.to_string())?;
+
+    // 卸载兜底：被卸的正是当前引擎时自动切到可用引擎，避免用户下次合成撞「引擎不可用」。
+    // registry 已在 uninstall 里移除该条目，list() 天然不会再选中它。
+    let was_current = state
+        .settings
+        .read()
+        .map(|s| s.tts_engine == id)
+        .unwrap_or(false);
+    let notice = if was_current {
+        let list = plugins.list();
+        match pick_fallback_engine(&list) {
+            Some(next) => {
+                let next_name = list
+                    .iter()
+                    .find(|p| p.id == next)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| next.clone());
+                let updated = crate::storage::settings::update_setting(
+                    &state.data_dir,
+                    "tts_engine",
+                    serde_json::json!(next),
+                )
+                .map_err(|e| format!("{e}"))?;
+                if let Ok(mut g) = state.settings.write() {
+                    *g = updated;
+                }
+                notify_changed(&app, EVENT_SETTINGS_CHANGED);
+                Some(format!("当前引擎已卸载，语音合成已自动切换到「{next_name}」。"))
+            }
+            None => Some(
+                "当前引擎已卸载且没有可用的替代引擎：请到「插件」页安装任一语音合成引擎，\
+                 或在语音中心切换默认引擎。"
+                    .to_string(),
+            ),
+        }
+    } else {
+        None
+    };
+
+    Ok(match notice {
+        Some(msg) => format!("{outcome} {msg}"),
+        None => outcome,
+    })
 }
 
 // ── 通用插件配置（manifest 声明 → 设置页通用面板）────────────────
@@ -937,8 +1003,89 @@ pub async fn import_voice_pack(
 
 #[cfg(test)]
 mod tests {
-    use super::{clean_failed_resources_inner, cmp_version, import_offline_resources_inner};
+    use super::{
+        clean_failed_resources_inner, cmp_version, import_offline_resources_inner, PluginInfo,
+    };
+    use crate::plugins::manifest::{PluginConfigDecl, PluginConfigField};
     use std::cmp::Ordering::*;
+
+    /// 造一条插件视图：loaded 决定是否可用，required 决定是否「需要填配置」
+    fn info(id: &str, loaded: bool, plugin_type: &str, required: bool) -> PluginInfo {
+        let config = if required {
+            Some(PluginConfigDecl {
+                help_url: None,
+                fields: vec![PluginConfigField {
+                    key: "api_key".into(),
+                    r#type: "secret".into(),
+                    label: "API Key".into(),
+                    description: String::new(),
+                    placeholder: String::new(),
+                    env: format!("VA_TEST_{id}_KEY").to_uppercase().replace('-', "_"),
+                    required: true,
+                    options: None,
+                }],
+            })
+        } else {
+            None
+        };
+        PluginInfo {
+            id: id.into(),
+            name: id.into(),
+            version: "0.1.0".into(),
+            description: String::new(),
+            loaded,
+            error: None,
+            voices: vec![],
+            audio_format: "wav".into(),
+            path: String::new(),
+            plugin_type: plugin_type.into(),
+            category: "remote".into(),
+            has_setup: false,
+            setup_status: None,
+            has_voice_management: false,
+            requirements: None,
+            config,
+        }
+    }
+
+    #[test]
+    fn 兜底引擎_优先免配置的可用插件() {
+        let list = vec![
+            info("needs-key", true, "tts_engine", true),
+            info("free-but-slower", true, "tts_engine", false),
+            info("not-loaded", false, "tts_engine", false),
+        ];
+        assert_eq!(super::pick_fallback_engine(&list).as_deref(), Some("free-but-slower"));
+    }
+
+    #[test]
+    fn 兜底引擎_同优先级按id字典序() {
+        let list = vec![
+            info("zzz-free", true, "tts_engine", false),
+            info("aaa-free", true, "tts_engine", false),
+        ];
+        assert_eq!(super::pick_fallback_engine(&list).as_deref(), Some("aaa-free"), "结果须确定性");
+    }
+
+    #[test]
+    fn 兜底引擎_忽略非tts插件与未加载项() {
+        let list = vec![
+            info("some-asr", true, "asr_engine", false),
+            info("broken", false, "tts_engine", false),
+        ];
+        assert_eq!(super::pick_fallback_engine(&list), None, "一个可用引擎都没有时不改用户设置");
+    }
+
+    #[test]
+    fn 样本env设置与移除() {
+        // 设计 §六 的「导入后 env 存在、删除后 env 移除」：helper 是纯 env 副作用，
+        // 直接给它的契约定测试（命令本身需 AppHandle/State，不适合单测）。
+        // 全仓只有本测试读写 VA_CLONE_SAMPLE，并行跑不会互相干扰。
+        crate::commands::clone_voice::announce_clone_sample(std::path::Path::new("C:/va-test/clone.wav"));
+        assert_eq!(std::env::var("VA_CLONE_SAMPLE").unwrap(), "C:/va-test/clone.wav");
+        crate::commands::clone_voice::clear_clone_sample();
+        assert!(std::env::var("VA_CLONE_SAMPLE").is_err(), "删除样本后必须撤销告知");
+    }
 
     #[test]
     fn 版本号比较() {
