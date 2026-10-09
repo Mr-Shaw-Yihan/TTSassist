@@ -141,7 +141,7 @@ function App() {
   const warmupAskedRef = useRef(false);
   useEffect(() => {
     if (!settings || warmupAskedRef.current) return;
-    const engineId = settings.tts_engine ?? "mimo";
+    const engineId = settings.tts_engine ?? "edge-tts";
     void (async () => {
       try {
         const plugins = await listPlugins();

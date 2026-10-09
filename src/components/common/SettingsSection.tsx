@@ -92,7 +92,7 @@ export function SubPanel({
 }
 
 /** 密钥输入框：密码 + 👁 显隐切换，失焦提交。样式与插件配置卡（PluginConfigPanel）一致，
- *  供内置引擎（MiMo / MOSS）填写 API Key，与插件引擎的密钥填写观感统一。 */
+ *  供内置引擎填写 API Key，与插件引擎的密钥填写观感统一。 */
 export function SecretInput({
   value,
   onCommit,

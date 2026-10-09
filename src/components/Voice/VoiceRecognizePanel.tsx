@@ -24,7 +24,7 @@ export function VoiceRecognizePanel() {
     <div className="space-y-3">
       {asrEngines.length === 0 ? (
         <div className="rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3.5 py-3 text-[11px] leading-relaxed text-[var(--ink-500)]">
-          暂无语音识别引擎。请到「插件」页安装 ASR 插件（如 MiMo ASR），装好后即可在此选择与测试。
+          暂无语音识别引擎。请到「插件」页安装 ASR 插件，装好后即可在此选择与测试。
         </div>
       ) : (
         asrEngines.map((p) => (

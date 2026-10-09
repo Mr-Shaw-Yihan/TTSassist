@@ -1,5 +1,5 @@
 // Zustand store：全局共享的前端状态。
-// 本阶段先放 settings（含 MiMo API Key），后续阶段加 messages/favorites。
+// 本阶段先放 settings（含各引擎 API Key），后续阶段加 messages/favorites。
 
 import { create } from "zustand";
 import { updateSetting } from "../services/invoke";

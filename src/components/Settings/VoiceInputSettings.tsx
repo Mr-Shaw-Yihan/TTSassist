@@ -158,7 +158,7 @@ export function VoiceInputSettings() {
         <label className="mb-1 block text-[11px] text-[var(--ink-300)]">识别插件</label>
         {loadedPlugins.length === 0 ? (
           <p className="rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-[11px] text-[var(--ink-500)]">
-            暂无可用的语音识别插件，请先在插件页安装（如 MiMo ASR）。
+            暂无可用的语音识别插件，请先在插件页安装。
           </p>
         ) : (
           <select

@@ -1,4 +1,4 @@
-// 语音中心 · TTS 合成面板：默认引擎选择 + 逐引擎配置（MiMo 内置 / MOSS 内置 / 插件引擎）。
+// 语音中心 · TTS 合成面板：默认引擎选择 + 逐引擎配置（内置 MOSS / 插件引擎）。
 // 从设置页「语音合成」区整体析出，行为保持一致；MiniMax 国际克隆/管理交由 MinimaxVoicePanel 承担。
 // 引擎以 EngineCard 同构呈现；本地引擎环境未就绪时仍走页内确认卡（在线下载 / 导入离线资源包），与原实现一致。
 
@@ -7,49 +7,24 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { usePluginTaskStore } from "../../stores/pluginTaskStore";
 import {
   listPlugins,
-  importCloneVoice,
-  removeCloneVoice,
-  pickAudioFile,
   preloadVoice,
   promptEngineWarmup,
   importResourcePackFlow,
-  getRemoteConfig,
 } from "../../services/invoke";
 import type { PluginInfo, MossVoice } from "../../types";
 import { Field, SubPanel, SecretInput } from "../common/SettingsSection";
 import { EngineCard } from "./EngineCard";
 import { MinimaxVoicePanel } from "./MinimaxVoicePanel";
+import { CloneSamplePanel } from "./CloneSamplePanel";
 import { PluginSetupPanel } from "../Plugins/PluginSetupPanel";
 import { PluginConfigPanel } from "../Settings/PluginConfigPanel";
 import { ResourcePackLinks } from "../Plugins/ResourcePackLinks";
 import { VoiceManager } from "../Settings/VoiceManager";
 import { toast } from "../common/Toast";
 
-const PRESET_VOICES = [
-  { id: "mimo_default", label: "默认 (mimo_default)" },
-  { id: "冰糖", label: "冰糖（女声）" },
-  { id: "茉莉", label: "茉莉（女声）" },
-  { id: "苏打", label: "苏打（男声）" },
-  { id: "白桦", label: "白桦（男声）" },
-];
-
 export function VoiceSynthPanel() {
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
-  const setSettings = useSettingsStore((s) => s.setSettings);
-
-  // MiMo 克隆/邀请
-  const [importing, setImporting] = useState(false);
-  const [cloneName, setCloneName] = useState(settings?.clone_voice_name ?? "");
-  const [copied, setCopied] = useState(false);
-  // MiMo 邀请码：远程配置动态下发（后端 24h 缓存，断网退回缓存/内置默认值）
-  // 初值用当前有效码（与内置兜底/在线值一致），拉取成功后被覆盖；避免拉取前闪现旧失效码
-  const [inviteCode, setInviteCode] = useState("5P9J2B");
-  useEffect(() => {
-    getRemoteConfig()
-      .then((c) => setInviteCode(c.mimo_invite_code))
-      .catch(() => {});
-  }, []);
 
   // MOSS 音色库管理
   const [addName, setAddName] = useState("");
@@ -78,9 +53,8 @@ export function VoiceSynthPanel() {
   // 正在预加载的音色（切换已装音色时的瞬时指示）
   const [preloadingVoice, setPreloadingVoice] = useState<string | null>(null);
 
-  const currentVoice = settings?.tts_model ?? "mimo_default";
   const mossVoices = settings?.moss_voices ?? [];
-  const engineId = settings?.tts_engine ?? "mimo";
+  const engineId = settings?.tts_engine ?? "edge-tts";
 
   /** 取插件音色的干净展示名（去掉"· 待下载"后缀） */
   function voiceLabel(plugin: PluginInfo, voiceId: string): string {
@@ -181,21 +155,6 @@ export function VoiceSynthPanel() {
     }
   }
 
-  async function copyInvite() {
-    try {
-      await navigator.clipboard.writeText(inviteCode);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    } catch {
-      const ta = document.createElement("textarea");
-      ta.value = inviteCode;
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand("copy"); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch {}
-      document.body.removeChild(ta);
-    }
-  }
-
   // MOSS 音色库 CRUD
   async function saveVoiceList(list: MossVoice[]) {
     await patch("moss_voices", list);
@@ -236,46 +195,6 @@ export function VoiceSynthPanel() {
     setEditingId(null);
   }
 
-  // MiMo 预置/克隆音色
-  async function onPickVoice(v: string) {
-    if (v !== "clone") {
-      await patch("tts_model", v);
-    }
-  }
-  async function onImportClone() {
-    const filePath = await pickAudioFile();
-    if (!filePath) return;
-    const name = window.prompt("给这个克隆音色起个名字：", cloneName || "我的音色");
-    if (!name || !name.trim()) return;
-    setImporting(true);
-    try {
-      await importCloneVoice(filePath, name.trim());
-      setCloneName(name.trim());
-      await patch("tts_model", "clone");
-      const { getSettings } = await import("../../services/invoke");
-      setSettings(await getSettings());
-    } catch (e) {
-      toast(`导入克隆样本失败：${e}`, "err");
-    } finally {
-      setImporting(false);
-    }
-  }
-  async function onRemoveClone() {
-    if (!confirm("确认删除克隆音色样本？将切回默认音色。")) return;
-    try {
-      await removeCloneVoice();
-      await patch("tts_model", "mimo_default");
-      setCloneName("");
-      const { getSettings } = await import("../../services/invoke");
-      setSettings(await getSettings());
-    } catch (e) {
-      toast(`删除失败：${e}`, "err");
-    }
-  }
-  async function onSaveApiKey(v: string) {
-    await patch("mimo_api_key", v.trim());
-  }
-
   return (
     <div className="space-y-3">
       {/* 默认引擎选择 */}
@@ -285,7 +204,6 @@ export function VoiceSynthPanel() {
           onChange={(e) => handleEngineChange(e.target.value)}
           className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
         >
-          <option value="mimo">MiMo（小米）</option>
           <option value="moss">Moss-TTS（Mossland）</option>
           {plugins
             .filter((p) => p.loaded && p.plugin_type === "tts_engine")
@@ -294,102 +212,6 @@ export function VoiceSynthPanel() {
             ))}
         </select>
       </Field>
-
-      {/* ── MiMo 内置引擎 ── */}
-      {engineId === "mimo" && (
-        <EngineCard kind="tts" name="MiMo（小米）" category="remote">
-          <SubPanel
-            title="API 密钥"
-            desc="填入小米 MiMo 平台的 API Key 用于云端合成。"
-            right={
-              <a
-                href={`https://platform.xiaomimimo.com?ref=${inviteCode}`}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-lg border border-[var(--ink-200)] px-2 py-1 text-[11px] text-[var(--ink-700)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)]"
-              >
-                获取 API Key ↗
-              </a>
-            }
-          >
-            <SecretInput
-              value={settings?.mimo_api_key ?? ""}
-              onCommit={onSaveApiKey}
-              placeholder="sk-..."
-            />
-            <div className="mt-2 flex items-center gap-2 text-xs text-[var(--ink-500)]">
-              <span>填写邀请码</span>
-              <button
-                onClick={copyInvite}
-                title="点击复制邀请码"
-                className={[
-                  "inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono tracking-wider transition-all",
-                  copied
-                    ? "border-[var(--amber-500)] bg-[var(--amber-200)]/40 text-[var(--amber-600)]"
-                    : "border-[var(--ink-200)] bg-[var(--paper-card)] text-[var(--ink-700)] hover:border-[var(--amber-500)] hover:text-[var(--amber-600)]",
-                ].join(" ")}
-              >
-                {inviteCode}
-                <span className={["text-[10px]", copied ? "text-[var(--amber-600)]" : "text-[var(--ink-300)]"].join(" ")}>
-                  {copied ? "✓ 已复制" : "⧉"}
-                </span>
-              </button>
-              <span>获得 10R 额度</span>
-            </div>
-          </SubPanel>
-
-          <SubPanel title="音色管理" desc="选择默认朗读音色。">
-            <select
-              value={currentVoice}
-              onChange={(e) => onPickVoice(e.target.value)}
-              className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
-            >
-              {PRESET_VOICES.map((v) => (
-                <option key={v.id} value={v.id}>{v.label}</option>
-              ))}
-              {settings?.clone_voice_path && (
-                <option value="clone">
-                  克隆：{settings?.clone_voice_name || "未命名"}
-                </option>
-              )}
-            </select>
-          </SubPanel>
-
-          <SubPanel
-            title="音色克隆"
-            desc="导入一段 5–10 秒的本地说话音频（mp3/wav，≤10MB），MiMo 会用它合成相似音色。每次合成都要把样本传给 MiMo，速度比预置音色慢。"
-          >
-            {settings?.clone_voice_path ? (
-              <div className="space-y-2">
-                <div className="rounded-xl border border-[var(--ink-200)] bg-[var(--ink-100)]/50 px-3 py-2 text-xs text-[var(--ink-500)]">
-                  当前样本：<span className="font-medium text-[var(--ink-900)]">{settings.clone_voice_name || "未命名"}</span>
-                </div>
-                <button
-                  onClick={onImportClone}
-                  disabled={importing}
-                  className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-xs text-[var(--ink-700)] hover:border-[var(--amber-500)] hover:text-[var(--amber-600)] transition-colors disabled:opacity-50"
-                >
-                  {importing ? "导入中…" : "替换样本"}
-                </button>
-                <button
-                  onClick={onRemoveClone}
-                  className="w-full rounded-xl px-3 py-2 text-xs text-[var(--seal)] hover:bg-[var(--seal)]/10 transition-colors"
-                >
-                  删除克隆样本
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={onImportClone}
-                disabled={importing}
-                className="w-full rounded-xl bg-[var(--ink-900)] px-3 py-2 text-xs text-[var(--paper)] transition-colors hover:bg-[var(--ink-700)] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {importing ? "导入中…" : "+ 导入样本"}
-              </button>
-            )}
-          </SubPanel>
-        </EngineCard>
-      )}
 
       {/* ── MOSS 内置引擎 ── */}
       {engineId === "moss" && (
@@ -499,11 +321,20 @@ export function VoiceSynthPanel() {
       )}
 
       {/* ── 插件引擎配置（音色表来自插件本身，通用） ── */}
-      {engineId !== "mimo" && engineId !== "moss" && (() => {
+      {engineId !== "moss" && (() => {
         const cur = plugins.find((p) => p.id === engineId && p.loaded);
         if (!cur) {
-          // 当前引擎是插件但不可用：未安装（卸载/换机）或加载失败。给警示卡片 + 一键切回内置引擎
+          // 当前引擎是插件但不可用：未安装（卸载/换机）或加载失败。给警示卡片 + 一键切到可用引擎
           const failed = plugins.find((p) => p.id === engineId);
+          // 与宿主卸载兜底（commands/plugins.rs 的 pick_fallback_engine）同口径：
+          // 已加载 + tts_engine + 环境已就绪，优先免必填配置，同优先级按 id 字典序。
+          // 不往这里贴任何引擎名（基座合同）。
+          const usable = (p: PluginInfo) =>
+            p.loaded && p.plugin_type === "tts_engine" && (!p.has_setup || p.setup_status?.ready === true);
+          const needsKey = (p: PluginInfo) => !!p.config?.fields.some((f) => f.required);
+          const alt = plugins
+            .filter(usable)
+            .sort((a, b) => Number(needsKey(a)) - Number(needsKey(b)) || (a.id < b.id ? -1 : 1))[0];
           return (
             <div className="rounded-lg border border-[var(--seal)]/40 bg-[var(--seal)]/10 px-3 py-2.5">
               <p className="text-xs font-medium text-[var(--seal)]">
@@ -512,14 +343,16 @@ export function VoiceSynthPanel() {
               <p className="mt-1 text-[11px] leading-relaxed text-[var(--ink-500)]">
                 {failed
                   ? `原因：${failed.error ?? "未知"}。可到插件管理页查看详情，或先切换到其他引擎。`
-                  : `配置中记录的引擎「${engineId}」对应的插件尚未安装（可能已卸载或在别的设备上安装）。语音合成暂不可用，可先切回内置引擎，或到插件管理页安装。`}
+                  : `配置中记录的引擎「${engineId}」对应的插件尚未安装（可能已卸载或在别的设备上安装）。语音合成暂不可用，可先切到其他引擎，或到插件管理页安装。`}
               </p>
-              <button
-                onClick={() => handleEngineChange("mimo")}
-                className="mt-2 rounded-lg bg-[var(--ink-900)] px-3 py-1.5 text-[11px] font-medium text-[var(--paper)] transition-colors hover:bg-[var(--ink-700)]"
-              >
-                切换回 MiMo 引擎
-              </button>
+              {alt && (
+                <button
+                  onClick={() => handleEngineChange(alt.id)}
+                  className="mt-2 rounded-lg bg-[var(--ink-900)] px-3 py-1.5 text-[11px] font-medium text-[var(--paper)] transition-colors hover:bg-[var(--ink-700)]"
+                >
+                  切换到「{alt.name}」
+                </button>
+              )}
             </div>
           );
         }
@@ -588,6 +421,19 @@ export function VoiceSynthPanel() {
             ) : (
               <SubPanel title="音色管理">{voiceSelectNode}</SubPanel>
             )}
+
+            {/* 克隆样本卡：插件自述驱动——`voices` 里有 id="clone" 就显示，
+                不往任何硬编码集合里加引擎名（基座合同 §3.6-1） */}
+            {(() => {
+              const cloneVoice = cur.voices.find((v) => v.id === "clone");
+              if (!cloneVoice) return null;
+              return (
+                <CloneSamplePanel
+                  selected={(settings?.plugin_voices?.[cur.id] ?? "") === cloneVoice.id}
+                  onImported={() => handlePluginVoiceChange(cur, cloneVoice.id)}
+                />
+              );
+            })()}
 
             {/* 未安装音色：页内确认卡片（确认前不改配置） */}
             {pendingVoice && pendingVoice.pluginId === cur.id && (

@@ -84,7 +84,7 @@ export function VoiceInputButton({ onResult, onSend, compact = false }: Props) {
           void showInfo({
             title: "还没有可用的语音识别引擎",
             message:
-              "请先到「插件库」安装语音识别插件（如 MiMo ASR），\n安装后在「语音」页将其设为当前识别引擎。",
+              "请先到「插件库」安装语音识别插件，\n安装后在「语音」页将其设为当前识别引擎。",
           });
           return;
         }

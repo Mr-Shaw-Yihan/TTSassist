@@ -236,6 +236,8 @@ export async function installAppUpdate(path: string): Promise<void> {
  *  断网时退回缓存或内置默认值，永远返回可用值 */
 export interface RemoteConfig {
   mimo_invite_code: string;
+  /** 按插件 id 覆盖 help_url（后端已消费；前端只作透传展示，无则用插件自带兜底） */
+  plugin_help_url?: Record<string, string>;
 }
 
 /** 取远程配置；force=true 跳过缓存强制刷新 */

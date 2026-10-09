@@ -306,7 +306,7 @@ export function SubtitlePage() {
             ))}
           </select>
           {loadedAsr.length === 0 && (
-            <Hint>暂无可用识别引擎，请先在「插件」页安装 ASR 插件（如 MiMo ASR）。</Hint>
+            <Hint>暂无可用识别引擎，请先在「插件」页安装 ASR 插件。</Hint>
           )}
         </Row>
         <Row label="识别语言">
