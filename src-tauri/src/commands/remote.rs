@@ -59,6 +59,12 @@ pub(crate) struct CacheFile {
 }
 
 /// 缓存里的 help_url 覆盖表（`data` 保持私有，只把表递出去）
+///
+/// 此处刻意**不做协议白名单**：值最终只经由前端 `openUrl()` 落地，而本应用
+/// 只授予了 `opener:default`（= `allow-open-url` + `allow-default-urls`），其 scope
+/// 仅放行 `http(s)://` / `mailto:` / `tel:`，其余（`file:` 等）在插件层就被拒。
+/// 再在代码里重复过一道反而会多出一种“被默默丢掉”的排查坑；
+/// 要改 capability 的权限集时请先回看本段注释。
 impl CacheFile {
     pub(crate) fn help_url_override(&self, plugin_id: &str) -> Option<String> {
         self.data
@@ -124,6 +130,11 @@ fn now_secs() -> u64 {
 /// `help_url` 生效值：本地缓存里的远程覆盖表优先，否则退回 manifest 静态兜底。
 /// 只读缓存、不发网络请求（调用方是同步命令）；没缓存/没拉到覆盖 = 不覆盖。
 /// 设计动机（见插件化与流式默认设计文档 §3.2-4）：保住「不发版就能换运营链接」。
+///
+/// 注：本函数**不看缓存 `fetched_at` 是否过 TTL**——它是同步命令里的只读入口，
+/// 无权触发联网刷新；对它而言只有“用过期覆盖值”与“退 manifest 静态兜底”两个选项，
+/// 而后者是**更旧**的值，所以拿“过期但更新的覆盖”严格优于拿“新鲜但陈旧的兜底”。
+/// 缓存新鲜度的判定职责属于写入方 `get_remote_config_inner`。
 pub(crate) fn effective_help_url(
     data_dir: &Path,
     plugin_id: &str,
