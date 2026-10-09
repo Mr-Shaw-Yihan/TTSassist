@@ -54,7 +54,9 @@ export function VoiceSynthPanel() {
   const [preloadingVoice, setPreloadingVoice] = useState<string | null>(null);
 
   const mossVoices = settings?.moss_voices ?? [];
-  const engineId = settings?.tts_engine ?? "edge-tts";
+  // 没拿到设置前用空串，不拿任何引擎名兜底：默认引擎是宿主的职责
+  //（Settings::default 已给出），前端再兜一层只会多一处基座里的引擎身份字面量
+  const engineId = settings?.tts_engine ?? "";
 
   /** 取插件音色的干净展示名（去掉"· 待下载"后缀） */
   function voiceLabel(plugin: PluginInfo, voiceId: string): string {
@@ -80,28 +82,27 @@ export function VoiceSynthPanel() {
 
   /** 切换插件音色：
    *  - 已安装 → 立即切换 + 后台预加载（有瞬时指示）；
-   *  - 未安装 → 先弹页内确认卡片，确认并【安装成功后】才切换（确认前不动配置）。 */
-  function handlePluginVoiceChange(plugin: PluginInfo, voiceId: string) {
+   *  - 未安装 → 先弹页内确认卡片，确认并【安装成功后】才切换（确认前不动配置）。
+   *  已经落定的切换会回传 patch 的 Promise，供调用方（如克隆样本卡）串行等它写完。 */
+  function handlePluginVoiceChange(plugin: PluginInfo, voiceId: string): Promise<void> | undefined {
     // 无音色管理能力的插件（云端引擎）：音色即开即用，直接切换
     if (!plugin.has_voice_management) {
-      void patch("plugin_voices", {
+      return patch("plugin_voices", {
         ...(settings?.plugin_voices ?? {}),
         [plugin.id]: voiceId,
       });
-      return;
     }
     const installed = plugin.setup_status?.voices ?? [];
     if (installed.includes(voiceId)) {
-      void patch("plugin_voices", {
-        ...(settings?.plugin_voices ?? {}),
-        [plugin.id]: voiceId,
-      });
       // 后台预加载（秒级），失败不拦截——合成时还会幂等补齐
       setPreloadingVoice(voiceId);
       preloadVoice(plugin.id, voiceId)
         .catch(() => {})
         .finally(() => setPreloadingVoice((v) => (v === voiceId ? null : v)));
-      return;
+      return patch("plugin_voices", {
+        ...(settings?.plugin_voices ?? {}),
+        [plugin.id]: voiceId,
+      });
     }
     // 未安装：有任务在跑就不开新确认（入口禁用语义）
     if (taskRunning) return;
@@ -324,6 +325,9 @@ export function VoiceSynthPanel() {
       {engineId !== "moss" && (() => {
         const cur = plugins.find((p) => p.id === engineId && p.loaded);
         if (!cur) {
+          // 设置或插件列表还没到位就不下结论：plugins 初值是空数组、listPlugins 是异步的，
+          // 直接往下判定会让每次进页的首帧都闪一张「插件未安装」红卡
+          if (!engineId || plugins.length === 0) return null;
           // 当前引擎是插件但不可用：未安装（卸载/换机）或加载失败。给警示卡片 + 一键切到可用引擎
           const failed = plugins.find((p) => p.id === engineId);
           // 与宿主卸载兜底（commands/plugins.rs 的 pick_fallback_engine）同口径：
@@ -331,10 +335,15 @@ export function VoiceSynthPanel() {
           // 不往这里贴任何引擎名（基座合同）。
           const usable = (p: PluginInfo) =>
             p.loaded && p.plugin_type === "tts_engine" && (!p.has_setup || p.setup_status?.ready === true);
-          const needsKey = (p: PluginInfo) => !!p.config?.fields.some((f) => f.required);
+          // 「缺必填」要同时问「用户填了没有」，与宿主 missing_required_config 同口径：
+          // 只看「声明过必填」会把已填好 Key 的引擎错排到后面
+          const missingKey = (p: PluginInfo) =>
+            !!p.config?.fields.some(
+              (f) => f.required && !(settings?.plugin_config?.[p.id]?.[f.key] ?? "").trim(),
+            );
           const alt = plugins
             .filter(usable)
-            .sort((a, b) => Number(needsKey(a)) - Number(needsKey(b)) || (a.id < b.id ? -1 : 1))[0];
+            .sort((a, b) => Number(missingKey(a)) - Number(missingKey(b)) || (a.id < b.id ? -1 : 1))[0];
           return (
             <div className="rounded-lg border border-[var(--seal)]/40 bg-[var(--seal)]/10 px-3 py-2.5">
               <p className="text-xs font-medium text-[var(--seal)]">
@@ -427,10 +436,20 @@ export function VoiceSynthPanel() {
             {(() => {
               const cloneVoice = cur.voices.find((v) => v.id === "clone");
               if (!cloneVoice) return null;
+              const usingClone = (settings?.plugin_voices?.[cur.id] ?? "") === cloneVoice.id;
               return (
                 <CloneSamplePanel
-                  selected={(settings?.plugin_voices?.[cur.id] ?? "") === cloneVoice.id}
+                  selected={usingClone}
                   onImported={() => handlePluginVoiceChange(cur, cloneVoice.id)}
+                  /* 样本没了 = 克隆音色当下不可用，得把选择退回去。
+                     宿主 remove_clone_voice 只管样本文件，认不出「哪个音色依赖样本」
+                    （那是插件 voices 的自述），只有这里能判；不退回的话用户每次合成
+                     都会撞到插件侧「未导入克隆音色样本」的错 */
+                  onRemoved={() => {
+                    if (!usingClone) return;
+                    const next = cur.voices.find((v) => v.id !== cloneVoice.id);
+                    if (next) return handlePluginVoiceChange(cur, next.id);
+                  }}
                 />
               );
             })()}

@@ -141,7 +141,10 @@ function App() {
   const warmupAskedRef = useRef(false);
   useEffect(() => {
     if (!settings || warmupAskedRef.current) return;
-    const engineId = settings.tts_engine ?? "edge-tts";
+    // 直接用设置里的引擎：默认值由宿主 Settings::default 给出，前端不再拿引擎名兜底
+    //（上方守卫已确保 settings 非空，写 `?? "某引擎"` 是不可达的死代码，且会往基座
+    //  里多留一处引擎身份字面量）
+    const engineId = settings.tts_engine;
     void (async () => {
       try {
         const plugins = await listPlugins();

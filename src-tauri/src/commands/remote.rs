@@ -134,7 +134,7 @@ fn now_secs() -> u64 {
 /// 注：本函数**不看缓存 `fetched_at` 是否过 TTL**——它是同步命令里的只读入口，
 /// 无权触发联网刷新；对它而言只有“用过期覆盖值”与“退 manifest 静态兜底”两个选项，
 /// 而后者是**更旧**的值，所以拿“过期但更新的覆盖”严格优于拿“新鲜但陈旧的兜底”。
-/// 缓存新鲜度的判定职责属于写入方 `get_remote_config_inner`。
+/// 缓存新鲜度的判定职责属于写入方 `get_remote_config_inner`（启动时由 `prime_cache` 走一次）。
 pub(crate) fn effective_help_url(
     data_dir: &Path,
     plugin_id: &str,
@@ -176,6 +176,20 @@ async fn get_remote_config_inner(data_dir: &Path, force: bool) -> RemoteConfig {
     }
     // 拉取失败：有缓存用缓存（哪怕过期），否则内置默认值
     cache.map(|c| c.data).unwrap_or_default()
+}
+
+/// 启动时后台预热缓存：把远程配置拉下来落盘，**返回值不消费**。
+///
+/// 为什么必须有它：`effective_help_url` 是同步命令里的只读入口、自己无权联网，
+/// 缓存只能由这里写入。原先唯一调用点是「语音中心」挂载时拉邀请码的前端封装，
+/// 引擎插件化后邀请码已无前端消费点——若继续依赖前端调用，就留下一条
+/// 「前端不调 → 覆盖表永远为空 → 不发版换链接的能力实际失效」的隐式依赖
+///（全新安装根本没有缓存，连过期值都退不到）。写侧与读侧同归宿主，才不再依赖
+/// 某个页面是否被打开过。失败/超时静默：读侧会退 manifest 静态兜底。
+pub(crate) fn prime_cache(data_dir: PathBuf) {
+    tauri::async_runtime::spawn(async move {
+        get_remote_config_inner(&data_dir, false).await;
+    });
 }
 
 // ── 局域网遥控可达性：自检 + 防火墙一键放行 ────────────────

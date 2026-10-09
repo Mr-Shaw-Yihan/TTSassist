@@ -231,19 +231,11 @@ export async function installAppUpdate(path: string): Promise<void> {
 }
 
 // ── 远程配置 ─────────────────────────────────────
-
-/** 远程配置（邀请码等运营数据）：后端双通道拉取 + 24h 缓存，
- *  断网时退回缓存或内置默认值，永远返回可用值 */
-export interface RemoteConfig {
-  mimo_invite_code: string;
-  /** 按插件 id 覆盖 help_url（后端已消费；前端只作透传展示，无则用插件自带兜底） */
-  plugin_help_url?: Record<string, string>;
-}
-
-/** 取远程配置；force=true 跳过缓存强制刷新 */
-export async function getRemoteConfig(force = false): Promise<RemoteConfig> {
-  return invoke<RemoteConfig>("get_remote_config", { force });
-}
+// 这里**不再提供 invoke 封装**：远程配置（运营数据，如按插件 id 覆盖 help_url）
+// 现在由宿主启动时预热缓存、并在 get_plugin_config 里就地算好生效，
+// 前端拿到的就是生效值，无需知道远程配置这层存在。
+//（留一个没人调的 getRemoteConfig 只会让人误以为“页面得自己去拉一次”，
+//  而缓存真的没人拉就永远不会写——覆盖能力会默默失效。）
 
 // ── 局域网遥控可达性（移动端遥控器）─────────────
 

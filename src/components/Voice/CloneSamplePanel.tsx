@@ -11,11 +11,14 @@ import { toast } from "../common/Toast";
 export function CloneSamplePanel({
   selected,
   onImported,
+  onRemoved,
 }: {
   /** 当前是否已选用克隆音色 */
   selected: boolean;
   /** 导入成功后把当前音色切到克隆（切法由父组件按通用机制决定） */
-  onImported: () => void;
+  onImported: () => void | Promise<void>;
+  /** 删除样本后把不再可用的克隆音色退回去（退回哪里由父组件按插件 voices 决定） */
+  onRemoved: () => void | Promise<void>;
 }) {
   const settings = useSettingsStore((s) => s.settings);
   const setSettings = useSettingsStore((s) => s.setSettings);
@@ -32,8 +35,9 @@ export function CloneSamplePanel({
     setImporting(true);
     try {
       await importCloneVoice(filePath, name.trim());
-      onImported();
-      // 后端已改写 clone_voice_path/name，重拉一次保证上屏
+      // 顺序不能反：先等父组件把音色切到 clone（patch 自带后端回读），
+      // 再重拉一次兼并样本字段。先重拉会把刚写下的音色选择刷掉（两写者抢）
+      await onImported();
       setSettings(await getSettings());
     } catch (e) {
       toast(`导入克隆样本失败：${e}`, "err");
@@ -46,6 +50,8 @@ export function CloneSamplePanel({
     if (!window.confirm("确认删除克隆音色样本？")) return;
     try {
       await removeCloneVoice();
+      // 同导入：先让父组件把选中音色退回（可能触发一次 patch），再重拉作为终态
+      await onRemoved();
       setSettings(await getSettings());
     } catch (e) {
       toast(`删除失败：${e}`, "err");

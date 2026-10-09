@@ -173,6 +173,10 @@ pub fn run() {
             // 补注入 load_all 期间挂起的能力桥（attach 回调需取到已 manage 的 PluginManager）
             app.state::<plugins::PluginManager>().attach_pending_bridges();
 
+            // 远程配置预热：后台拉一次并写本地缓存，供 get_plugin_config 的 help_url
+            // 覆盖读取（那条命令是同步的、不能联网）。失败静默，不阻塞启动
+            commands::remote::prime_cache(data_dir.clone());
+
             // 移动端遥控（本体常驻服务）：WS 服务 + mDNS 广播。须在 HostBridge/AppState/
             // MicPlayback 就绪后启动（native_* 能力依赖三者）；RemoteCore 供 remote_session_info 读取
             let remote_shared = remote::spawn(app.handle().clone(), data_dir.clone());
