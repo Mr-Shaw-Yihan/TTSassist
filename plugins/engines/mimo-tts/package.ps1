@@ -25,7 +25,7 @@ $Desc       = "小米 MiMo 云端语音合成（流式版）：SSE 边合成边�
 # 而官方档位会变；text 才能做到"上新档位改一个字符串、不发版"。
 # help_url 是静态兜底，运行期会被远程配置 plugin_help_url 覆盖（换邀请码免发版）。
 # 必须用 [ordered]：PS7(.NET Core) 每进程随机化字符串哈希，普通 hashtable 的
-# ConvertTo-Json 键序跳进程不稳定，manifest 就每次不一样 → zip sha 跟着变。
+# ConvertTo-Json 键序跨进程不稳定，manifest 就每次不一样 → zip sha 跟着变。
 # （模板 minimax-tts-stream 就是 @{，那份内置 zip 与索引 checksum 的漂移根源在此）
 $ConfigDecl = [ordered]@{
     help_url = "https://platform.xiaomimimo.com?ref=5P9J2B"
@@ -103,7 +103,9 @@ $ZipPath = Join-Path $DistDir "$PluginId-$Version.zip"
 # 刷新 dll 的 mtime——字节一样、zip sha 却变。索引 checksum 记的是 zip 的 sha，
 # 于是"没改代码只重跑一次打包"就会让索引和产物漂移（在线安装直接校验失败）。
 # 固定成同一时刻后，同一份产物必然得到同一份 zip。
-$Epoch = Get-Date "2020-01-01 00:00:00Z"
+# 用不带 Z 的字面量：带 Z 会被当 UTC 再换算成本地时间，跨时区构建机写出的
+# DOS 时间就不一样了（[datetime] 强转得到 Kind=Unspecified，不做换算）。
+$Epoch = [datetime]'2020-01-01T00:00:00'
 Get-ChildItem $StageDir | ForEach-Object { $_.LastWriteTime = $Epoch }
 Compress-Archive -Path (Join-Path $StageDir "*") -DestinationPath $ZipPath -Force
 Write-Host "Package complete: $ZipPath" -ForegroundColor Green

@@ -46,7 +46,7 @@
       "version": "0.1.0",
       "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/mimo-tts-0.1.0.zip",
       "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/mimo-tts-0.1.0.zip",
-      "checksum": "629ebf898f8f6bb04e8a1d70f38dc5f060557ff18aac7f53259afb3df82dcbe2",
+      "checksum": "47d76f45f35afcc346a03d4f4cf2050661d114b6cd2c49388129feb8ede74e6d",
       "description": "小米 MiMo 云端语音合成（流式版）：SSE 边合成边播、首响更快，需 API Key，预置音色 + 本地样本音色克隆（本体内置自动安装，可卸载）",
       "plugin_type": "tts_engine"
     },

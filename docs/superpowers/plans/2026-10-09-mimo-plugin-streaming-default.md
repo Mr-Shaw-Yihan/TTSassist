@@ -572,7 +572,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 子代理审查发现两个本计划自写的问题，已修（commit 在 4f6fe95 之后）：
 
-1. **环境变量读取从纯函数里剥出来**（Windows CRT 下并发测试跳着 `set_var/remove_var`
+1. **环境变量读取从纯函数里剥出来**（Windows CRT 下并发测试交叉着 `set_var/remove_var`
    同一个变量不是线程安全的）。新签名：
    - `configured_model_from(raw: Option<String>) -> String`（纯），`configured_model()` 只做 env 薄壳
    - `resolve_voice_from(model: &str, voice: Option<&str>, sample_raw: Option<String>)`（纯），
@@ -1145,7 +1145,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 |---|---|---|
 | 1 插件协议层 | 完成（含审查修正） | `4f6fe95` `ee89e05` |
 | 2 流式会话 + 双导出 | 完成（含审查修正 I-1..I-4） | `3c2fcec` `96acedb` |
-| 3 打包与内置分发 | 完成（审查 Approved；含 zip 可复现修正） | `a3df6d2` `c4dfb5f` |
+| 3 打包与内置分发 | 完成（两轮审查均 Approved；含 zip 可复现修正） | `a3df6d2` `c4dfb5f` `82337ec` + 后续收口 |
 | 4–13 | 未开始 | — |
 
 下一个动作：**Task 4 Step 1**（在 `plugins/engines/mimo-tts/src/stream.rs` 的 `mod tests` 末尾追加两个
@@ -1421,14 +1421,22 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 | 发现 | 现象 | 根因 | 处置 |
 |---|---|---|---|
-| **键序不稳定**（真因） | dll sha 不变、zip sha 每次不同 | `$ConfigDecl` 用普通 hashtable `@{}`，而 PS7(.NET Core) **每进程随机化字符串哈希**，`ConvertTo-Json` 出来的键序跳进程不同 → manifest 字节变 | `$ConfigDecl` 与其两个 field 子表全改 `[ordered]@{}`，产物变成声明序 |
+| **键序不稳定**（真因） | dll sha 不变、zip sha 每次不同 | `$ConfigDecl` 用普通 hashtable `@{}`，而 PS7(.NET Core) **每进程随机化字符串哈希**，`ConvertTo-Json` 出来的键序跨进程不同 → manifest 字节变 | `$ConfigDecl` 与其两个 field 子表全改 `[ordered]@{}`，产物变成声明序 |
 | **条目 mtime** | 内容不变、仅 dll 被重新 touch 后重打包 → zip 变 | `Compress-Archive` 把条目 `LastWriteTime` 写进 zip | 压缩前把 `$StageDir` 内文件时间戳归一到固定 `$Epoch`（2020-01-01） |
 
 修后实测：连跑两次 zip sha 相同（`f3508873…` 两次一致）；把 dll 的 mtime 拨回两天前再跑仍确定。
 **仅剩的不可复现源是 dll 本身**——链接器往 PE 头写 `TimeDateStamp`，任何一次重链接都会改变 dll 字节。
 这不是脚本缺陷，而是“不能假装二进制可复现”：所以 **每次重新构建插件都必须同步刷新索引 checksum**。
+
+复审（针对 `c4dfb5f`）结论仍为 Approved，采纳一条 Minor：`Get-Date "2020-01-01 00:00:00Z"` 带 `Z` 会被当 UTC
+再换算成本地时间（本机 UTC+8 → 写入 08:00），跨时区构建机会产出不同字节；改用
+`$Epoch = [datetime]'2020-01-01T00:00:00'`（Kind=Unspecified，不做换算）。复审同时实测确认：
+宿主解包不看条目时间戳（`install.rs` 按 `by_index` 顺序读、`manager.rs` 排序排的是路径、
+版本取舍用 `version_less_than`），所以归一时间戳对安装零影响。
+
 最终入库产物：dll sha `93468539a346d1c5c3faf1d1cd04ce7fdd8c32f4404c6743d3b0b186d21d5c36`、
-zip sha `629ebf898f8f6bb04e8a1d70f38dc5f060557ff18aac7f53259afb3df82dcbe2`（提交 `c4dfb5f`）。
+zip sha `47d76f45f35afcc346a03d4f4cf2050661d114b6cd2c49388129feb8ede74e6d`（连跑两次相等、
+且 zip 内 `manifest.checksum` == zip 内 dll 实际 sha，宿主内置安装的强校验能过）。
 
 基线既有问题（**本次故意不动**，需用户决策）：
 
