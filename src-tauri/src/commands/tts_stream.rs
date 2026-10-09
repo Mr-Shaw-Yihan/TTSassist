@@ -75,18 +75,29 @@ impl Drop for ActiveGuard {
     }
 }
 
-/// 中止当前流式合成（若在跑）：会话停止 + 立即静音播放
-#[tauri::command]
-pub fn tts_stream_stop(app: AppHandle) {
+/// 中止当前流式合成（若在跑）：会话停止 + 立即静音播放。
+/// Tauri 命令与宿主能力桥（`native_stop_playback`）共用：宿主的 rodio 流式播放
+/// 既不是前端 HTMLAudio、也不是 MicPlayback，两条既有停止链都碰不到它。
+pub fn stop_active_stream(app: &AppHandle) {
     let active = active_stream_slot()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .take();
     if let Some(a) = active {
         a.plugin.stream_stop(&a.session);
-        app.state::<StreamPlayer>().abort();
+        // try_state 而非 state：本函数会从插件 C ABI 回调线程被调进，
+        // 拿不到管理状态时不能 panic（拿不到也就没什么可中止的）
+        if let Some(player) = app.try_state::<StreamPlayer>() {
+            player.abort();
+        }
         log_info!("流式合成已被用户中止");
     }
+}
+
+/// 中止当前流式合成（若在跑）：会话停止 + 立即静音播放
+#[tauri::command]
+pub fn tts_stream_stop(app: AppHandle) {
+    stop_active_stream(&app);
 }
 
 // ── 主命令 ───────────────────────────────────────────────
@@ -198,9 +209,18 @@ pub async fn generate_tts_stream_impl(
         app: app.clone(),
         wav_rel: wav_rel.clone(),
     });
-    let (spk_ok, mic_ok) = ack_rx
-        .recv_timeout(PLAYER_ACK_TIMEOUT)
-        .map_err(|_| "流式播放线程无响应".to_string())?;
+    let (spk_ok, mic_ok) = match ack_rx.recv_timeout(PLAYER_ACK_TIMEOUT) {
+        Ok(v) => v,
+        Err(_) => {
+            // 开局回执超时不能直接 return：播放线程随后仍会发 va:play:start 并把会话
+            // 挂进 active，而拉块任务从未启动（不会有 Chunk/Finish）——那一对 start 永远
+            // 等不到 stop（悬浮球始终波纹、遥控看到脏播放态）。Abort 走同一条通道，
+            // FIFO 保证它排在 Begin 之后，announce_play_stop 会补发 stop。
+            // 真卡死到连 Begin 都没走完时，start 也还没发，状态天然一致。
+            cleanup_failed_stream(app, &plugin, &session, &tmp_pcm);
+            return Err("流式播放线程无响应".into());
+        }
+    };
     if !spk_ok {
         log_warn!("流式播放：扬声器打开失败，合成完成后将由前端整段播放");
     } else if !mic_ok && has_mic_target {
@@ -501,6 +521,9 @@ fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
                 // 前端会整段播放并自行发一套事件（两边都发会双计）
                 let announced = spk_ok;
                 if announced {
+                    // 注意：此刻 WAV 尚未落盘（步骤 5 才写），载荷只是「本次将归档到哪个路径」的
+                    // 标识；现有消费方（bridge 聚合播放态、state_json 反查收藏 id）不取文件，
+                    // 后续若要做「边播边取/进度显示」需改成播完再发或带时长
                     let _ = app.emit("va:play:start", ());
                     let _ = app.emit("playback:started", wav_rel.clone());
                 }
@@ -549,7 +572,8 @@ fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                // 发送端已全部 drop（主命令走到尽头）：补发停止事件后退出
+                // 兜底路径（正常生命周期不可达：StreamPlayer 被 manage，其 tx 与进程同寿，
+                // 拉块任务只 drop 自己的副本）：真到了这一步就补发停止事件后退出
                 if let Some(prev) = active.take() {
                     announce_play_stop(&prev);
                 }

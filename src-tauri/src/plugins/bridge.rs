@@ -277,12 +277,15 @@ pub fn native_list_favorites(app: &AppHandle) -> String {
     serde_json::Value::Array(items).to_string()
 }
 
-/// 停止播放：主窗监听 playback:stop 停扬声器（并回报 playback:stopped），虚拟麦克风侧直接停
+/// 停止播放：主窗监听 playback:stop 停扬声器（并回报 playback:stopped），虚拟麦克风侧直接停，
+/// 宿主自己的流式播放（rodio，不经前端）也必须在这里收口——否则遥控/主窗的「停止」
+/// 对宿主已接管的流式播放是空操作（声音停不下来，且前端还会无条件替宿主发一套 stopped 把状态说假）
 pub fn native_stop_playback(app: &AppHandle) {
     let _ = app.emit("playback:stop", ());
     if let Some(mic) = app.try_state::<MicPlayback>() {
         mic.stop();
     }
+    crate::commands::tts_stream::stop_active_stream(app);
 }
 
 /// 合成并播放（async，供本体遥控直接 await）：统一走流式管线。
