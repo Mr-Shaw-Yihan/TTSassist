@@ -61,10 +61,6 @@ pub enum TtsError {
     /// 音频文件写入失败
     #[error("音频写入失败: {0}")]
     WriteFile(String),
-
-    /// settings.tts_engine 里配置的引擎名不存在
-    #[error("未知的引擎: {0}")]
-    UnknownEngine(String),
 }
 
 // ── 引擎接口 ────────────────────────────────────

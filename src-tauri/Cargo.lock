@@ -4985,7 +4985,6 @@ name = "voiceassist"
 version = "1.8.7"
 dependencies = [
  "async-trait",
- "base64 0.22.1",
  "chrono",
  "cpal",
  "futures-util",

@@ -158,7 +158,11 @@ pub fn save_settings(data_dir: &Path, settings: &Settings) -> Result<()> {
 pub fn update_setting(data_dir: &Path, key: &str, value: serde_json::Value) -> Result<Settings> {
     let mut s = load_settings(data_dir);
     match key {
-        "tts_engine" => if let Some(v) = value.as_str() { s.tts_engine = v.to_string() },
+        // 引擎不得被写成空串（与 load_settings 同口径：空串视为不改，
+        // 否则会命中插件查表分支报「引擎「」不可用」）
+        "tts_engine" => if let Some(v) = value.as_str() {
+            if !v.is_empty() { s.tts_engine = v.to_string() }
+        },
         "tts_model" => if let Some(v) = value.as_str() { s.tts_model = v.to_string() },
         "playback_volume" => if let Some(v) = value.as_f64() { s.playback_volume = v as f32 },
         "hotkey_show_window" => if let Some(v) = value.as_str() { s.hotkey_show_window = v.to_string() },
@@ -266,6 +270,17 @@ mod tests {
         let s = load_settings(&d);
         assert_eq!(s.tts_engine, Settings::default().tts_engine, "空串应归一到默认引擎");
         assert!(!s.tts_engine.is_empty());
+    }
+
+    #[test]
+    fn 写入空串引擎视为不改() {
+        let dir = tempdir().unwrap();
+        let d = dir.path().to_path_buf();
+        // 读盘归一只护住启动路径，写盘得另挡：update_setting 不经过那段 filter
+        save_settings(&d, &Settings { tts_engine: "demo-tts".into(), ..Settings::default() }).unwrap();
+        let back = update_setting(&d, "tts_engine", serde_json::json!("")).unwrap();
+        assert_eq!(back.tts_engine, "demo-tts", "空串应视为不改");
+        assert_eq!(load_settings(&d).tts_engine, "demo-tts", "落盘与返回一致");
     }
 
     #[test]
