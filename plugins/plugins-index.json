@@ -36,7 +36,7 @@
       "version": "0.1.1",
       "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/mimo-asr-0.1.1.zip",
       "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/mimo-asr-0.1.1.zip",
-      "checksum": "51110de79bb7fedd65d72360e8885bf44b5886465fbc1110123a2fb3e892eadb",
+      "checksum": "e08480fd12640d884c369f46e15d5bbdfa44b8d6b9b9d7bd6f1a77b43db54a7c",
       "description": "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测（v0.1.1 起 API Key 改走通用插件配置声明）",
       "plugin_type": "asr_engine"
     },
