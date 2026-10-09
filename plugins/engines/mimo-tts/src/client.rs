@@ -234,11 +234,6 @@ pub fn build_clone_voice_uri_from(sample_raw: Option<String>) -> Result<String, 
     ))
 }
 
-/// 环境变量薄壳：从 `VA_CLONE_SAMPLE` 取样本路径
-pub fn build_clone_voice_uri() -> Result<String, String> {
-    build_clone_voice_uri_from(std::env::var("VA_CLONE_SAMPLE").ok())
-}
-
 /// 流式元信息 JSON（宿主据此装配播放器；当前契约只认 pcm_s16le）
 pub fn stream_info_json() -> String {
     format!(

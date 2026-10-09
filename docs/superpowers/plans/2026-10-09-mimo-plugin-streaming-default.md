@@ -574,7 +574,9 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
    - `configured_model_from(raw: Option<String>) -> String`（纯），`configured_model()` 只做 env 薄壳
    - `resolve_voice_from(model: &str, voice: Option<&str>, sample_raw: Option<String>)`（纯），
      `resolve_voice(voice)` 为薄壳
-   - `build_clone_voice_uri_from(sample_raw: Option<String>)`（纯），`build_clone_voice_uri()` 为薄壳
+   - `build_clone_voice_uri_from(sample_raw: Option<String>)`（纯）。原本还有一个
+     `build_clone_voice_uri()` 薄壳，因 `resolve_voice` 已经把 `VA_CLONE_SAMPLE` 递下来，
+     它成了无人调用的死代码 → **已删除**（零 warning 是门禁项）。
    **Task 2/4 调用时用薄壳版本**（`resolve_voice(voice)`），它们不依赖测试环境。
 2. **测试不再把 `MIMO_TTS_MODEL` 设成与默认值同字面量串**（那是空断言，env 就算没读也能过）；
    改用哨兵 `"mimo-v9.9-tts-sentinel"`  断言。`configured_model()` / `resolve_voice()` 薄壳因此
@@ -1101,7 +1103,23 @@ git commit -m "feat(插件): mimo-tts 流式会话与双导出（SSE worker + �
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 
---
+### 实施时的修正（计划代码有四处编译不过，已就地修正）
+
+1. **`reqwest::blocking::Response` 没有 `take()` 方法**（它本身就实现 `std::io::Read`）：
+   `BufReader::new(resp.take())` → `BufReader::new(resp)`。原写法报
+   `` `Response` is not an iterator ``（`take` 被当成 `Iterator::take` 去解）。
+2. **`Arc<AtomicBool>` 不能既 move 进线程闭包又放进 `Self`**（`Arc` 不实现 `Copy`，E0382）：
+   照 minimax-core 的写法补一行 `let worker_stop = Arc::clone(&stop);` 并用 `worker_stop` 进闭包。
+3. **`assert_eq!(reg.next_chunk(id).unwrap(), Vec::new())` 类型推断歧义**（E0282/E0283）：
+   改为 `let got = reg.next_chunk(id).unwrap(); assert!(got.is_empty(), …)`。
+4. Task 1 遗留的 `build_clone_voice_uri()` 薄壳在本 Task 接上导出后仍无人调用
+   （`resolve_voice` 已把 `VA_CLONE_SAMPLE` 递给 `_from`）→ 已删除，保证零 warning。
+
+实测结果：`cargo test -p mimo-tts` = **21 passed / 0 failed / 0 warning**；
+`cargo build -p mimo-tts --release` 产出 `plugins\target\release\mimo_tts.dll`（3548 KB）；
+宿主 `cargo test --lib` 保持 **170 passed / 4 ignored**（本 Task 未动宿主）。
+
+---
 
 ## Task 3：打包脚本与内置分发（zip → resources → 插件索引）
 
