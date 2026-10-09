@@ -26,26 +26,55 @@ pub fn list_plugins(plugins: State<'_, PluginManager>) -> Vec<PluginInfo> {
     plugins.list()
 }
 
+/// 必填配置项是否还缺值（能力位判据，不涉引擎身份）：
+/// 与前端「待配置」标记同口径（`InstalledCard` 用 `required && !已填.trim()`），
+/// 只问「声明了必填」不够，还要问「用户填了没有」，否则兜底会把用户切到一个仍需填 Key 的引擎。
+pub(crate) fn missing_required_config(
+    p: &PluginInfo,
+    cfg: &std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+) -> bool {
+    p.config.as_ref().map_or(false, |c| {
+        c.fields.iter().filter(|f| f.required).any(|f| {
+            !cfg.get(&p.id)
+                .and_then(|m| m.get(&f.key))
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false)
+        })
+    })
+}
+
+/// 本地引擎运行环境未就绪 = 当下不能出声，不参与兜底（判据仍只用能力位：
+/// `has_setup` 为假时直接视为就绪，云端引擎不受影响）。
+fn setup_ready(p: &PluginInfo) -> bool {
+    !p.has_setup
+        || p.setup_status
+            .as_ref()
+            .and_then(|s| s.get("ready"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+}
+
 /// 当前引擎被卸载后的兜底选择（判据只看能力，不看引擎身份）：
-/// 1. 只在「已加载 + tts_engine 类型」里挑；
-/// 2. 优先没有必填配置项的（= 免配置开箱即用，如免费云端引擎；需 Key 的排在后面）；
+/// 1. 只在「已加载 + tts_engine 类型 + 运行环境就绪」里挑（未下环境的本地引擎不选）；
+/// 2. 优先必填项已填齐的（= 开箱就能出声；还缺 Key 的排在后面）；
 /// 3. 同优先级按 id 字典序，保证同一状态每次都给出同一个答案。
 /// 返回 None = 一个可用引擎都没有，调用方应保持用户原值并给出指引文案。
-pub(crate) fn pick_fallback_engine(list: &[PluginInfo]) -> Option<String> {
-    let needs_config = |p: &PluginInfo| {
-        p.config
-            .as_ref()
-            .map(|c| c.fields.iter().any(|f| f.required))
-            .unwrap_or(false)
-    };
+pub(crate) fn pick_fallback_engine(
+    list: &[PluginInfo],
+    cfg: &std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+) -> Option<String> {
     let mut usable: Vec<&PluginInfo> = list
         .iter()
-        .filter(|p| p.loaded && p.plugin_type == "tts_engine")
+        .filter(|p| p.loaded && p.plugin_type == "tts_engine" && setup_ready(p))
         .collect();
     if usable.is_empty() {
         return None;
     }
-    usable.sort_by(|a, b| needs_config(a).cmp(&needs_config(b)).then_with(|| a.id.cmp(&b.id)));
+    usable.sort_by(|a, b| {
+        missing_required_config(a, cfg)
+            .cmp(&missing_required_config(b, cfg))
+            .then_with(|| a.id.cmp(&b.id))
+    });
     Some(usable[0].id.clone())
 }
 
@@ -130,46 +159,62 @@ pub fn uninstall_plugin(
 
     // 卸载兜底：被卸的正是当前引擎时自动切到可用引擎，避免用户下次合成撞「引擎不可用」。
     // registry 已在 uninstall 里移除该条目，list() 天然不会再选中它。
-    let was_current = state
+    // 读不到内存设置时不猜也不硬切（可能把用户从一个可用引擎上切走），只在文案里说明未确认。
+    let current = state
         .settings
         .read()
-        .map(|s| s.tts_engine == id)
-        .unwrap_or(false);
-    let notice = if was_current {
-        let list = plugins.list();
-        match pick_fallback_engine(&list) {
-            Some(next) => {
-                let next_name = list
-                    .iter()
-                    .find(|p| p.id == next)
-                    .map(|p| p.name.clone())
-                    .unwrap_or_else(|| next.clone());
-                let updated = crate::storage::settings::update_setting(
-                    &state.data_dir,
-                    "tts_engine",
-                    serde_json::json!(next),
-                )
-                .map_err(|e| format!("{e}"))?;
-                if let Ok(mut g) = state.settings.write() {
-                    *g = updated;
+        .map(|s| (s.tts_engine == id, s.plugin_config.clone()))
+        .ok();
+    let notice = match current {
+        Some((false, _)) => None,
+        None => Some(
+            "当前引擎已卸载；未能确认它是否为正在使用的引擎，未自动切换，请到语音中心确认。"
+                .to_string(),
+        ),
+        Some((true, cfg)) => {
+            let list = plugins.list();
+            match pick_fallback_engine(&list, &cfg) {
+                Some(next) => {
+                    let picked = list.iter().find(|p| p.id == next);
+                    let next_name = picked
+                        .map(|p| p.name.clone())
+                        .unwrap_or_else(|| next.clone());
+                    // 切换落盘失败不得推翻已成功的卸载（磁盘上已经卸掉了），否则前端
+                    // 会把「半成功」报成失败、既不刷新列表也不广播设置变更
+                    match crate::storage::settings::update_setting(
+                        &state.data_dir,
+                        "tts_engine",
+                        serde_json::json!(next),
+                    ) {
+                        Ok(updated) => {
+                            if let Ok(mut g) = state.settings.write() {
+                                *g = updated;
+                            }
+                            notify_changed(&app, EVENT_SETTINGS_CHANGED);
+                            // 选中的引擎仍缺必填项时如实告知，不含糊宣称「切完就能出声」
+                            let extra = if picked.map(|p| missing_required_config(p, &cfg)).unwrap_or(false) {
+                                "它还需要在设置里填好必填项才能出声。"
+                            } else {
+                                ""
+                            };
+                            Some(format!("当前引擎已卸载，语音合成已自动切换到「{next_name}」。{extra}"))
+                        }
+                        Err(e) => Some(format!(
+                            "当前引擎已卸载，但自动切换失败（{e}），请到语音中心选一个可用引擎。"
+                        )),
+                    }
                 }
-                notify_changed(&app, EVENT_SETTINGS_CHANGED);
-                Some(format!("当前引擎已卸载，语音合成已自动切换到「{next_name}」。"))
+                None => Some(
+                    "当前引擎已卸载，且没有可用的替代引擎：请到「插件」页安装任一语音合成引擎。"
+                        .to_string(),
+                ),
             }
-            None => Some(
-                "当前引擎已卸载且没有可用的替代引擎：请到「插件」页安装任一语音合成引擎，\
-                 或在语音中心切换默认引擎。"
-                    .to_string(),
-            ),
         }
-    } else {
-        None
     };
 
-    Ok(match notice {
-        Some(msg) => format!("{outcome} {msg}"),
-        None => outcome,
-    })
+    // 被卸的就是当前引擎时，兜底文案直接取代 uninstall 返回的「本次会话内仍可使用，重启后
+    // 彻底移除」：两句同现会把用户绕晕，且既然已经切走，会话内继续用旧 dll 也已不相关
+    Ok(notice.unwrap_or(outcome))
 }
 
 // ── 通用插件配置（manifest 声明 → 设置页通用面板）────────────────
@@ -1004,7 +1049,8 @@ pub async fn import_voice_pack(
 #[cfg(test)]
 mod tests {
     use super::{
-        clean_failed_resources_inner, cmp_version, import_offline_resources_inner, PluginInfo,
+        clean_failed_resources_inner, cmp_version, import_offline_resources_inner,
+        missing_required_config, PluginInfo,
     };
     use crate::plugins::manifest::{PluginConfigDecl, PluginConfigField};
     use std::cmp::Ordering::*;
@@ -1048,23 +1094,131 @@ mod tests {
         }
     }
 
+    /// 造一条「声明了配置但字段全可选」的视图（全 optional = 开箱就能出声，不能被判成需配置）
+    fn info_optional_config(id: &str) -> PluginInfo {
+        let mut p = info(id, true, "tts_engine", true);
+        if let Some(c) = p.config.as_mut() {
+            for f in &mut c.fields {
+                f.required = false;
+            }
+        }
+        p
+    }
+
+    /// 造一条带运行环境的本地引擎视图（ready = 环境/模型是否已下齐）
+    fn info_setup(id: &str, ready: bool) -> PluginInfo {
+        let mut p = info(id, true, "tts_engine", false);
+        p.has_setup = true;
+        p.setup_status = Some(serde_json::json!({ "ready": ready }));
+        p
+    }
+
+    /// 造一份 plugin_config：filled 里的插件 id 视为「api_key 已填」
+    fn cfg_of(
+        filled: &[&str],
+    ) -> std::collections::HashMap<String, std::collections::HashMap<String, String>> {
+        filled
+            .iter()
+            .map(|id| {
+                let mut m = std::collections::HashMap::new();
+                m.insert("api_key".to_string(), "sk-filled".to_string());
+                (id.to_string(), m)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn 缺值判定与前端待配置同口径() {
+        // 前端 InstalledCard 的口径：f.required && !(plugin_config[id][f.key] ?? "").trim()
+        let p = info("needs-key", true, "tts_engine", true);
+        assert!(missing_required_config(&p, &cfg_of(&[])), "声明了必填但一值未存 = 缺");
+        assert!(!missing_required_config(&p, &cfg_of(&["needs-key"])), "填了 = 不缺");
+        // 纯空白按未填算（trim 后为空）
+        let mut ws = cfg_of(&[]);
+        ws.insert(
+            "needs-key".to_string(),
+            [("api_key".to_string(), "   ".to_string())]
+                .into_iter()
+                .collect(),
+        );
+        assert!(missing_required_config(&p, &ws), "纯空白算未填");
+        // 无配置声明 / 字段全可选 = 永远不缺
+        assert!(!missing_required_config(&info("free", true, "tts_engine", false), &cfg_of(&[])));
+        assert!(!missing_required_config(&info_optional_config("opt"), &cfg_of(&[])));
+    }
+
     #[test]
     fn 兜底引擎_优先免配置的可用插件() {
+        let cfg = cfg_of(&[]);
         let list = vec![
             info("needs-key", true, "tts_engine", true),
             info("free-but-slower", true, "tts_engine", false),
             info("not-loaded", false, "tts_engine", false),
         ];
-        assert_eq!(super::pick_fallback_engine(&list).as_deref(), Some("free-but-slower"));
+        assert_eq!(
+            super::pick_fallback_engine(&list, &cfg).as_deref(),
+            Some("free-but-slower")
+        );
+        // 唯一可用引擎虽然需要 Key，但它仍会被选中（有总比没有好，由文案负责告知“还需填”）
+        let only = vec![info("needs-key", true, "tts_engine", true)];
+        assert_eq!(
+            super::pick_fallback_engine(&only, &cfg).as_deref(),
+            Some("needs-key"),
+            "不能因为「声明过配置」就把它淘汰掉"
+        );
+        // 填齐后同样可选
+        assert_eq!(
+            super::pick_fallback_engine(&only, &cfg_of(&["needs-key"])).as_deref(),
+            Some("needs-key")
+        );
     }
 
     #[test]
     fn 兜底引擎_同优先级按id字典序() {
+        let cfg = cfg_of(&[]);
         let list = vec![
             info("zzz-free", true, "tts_engine", false),
             info("aaa-free", true, "tts_engine", false),
         ];
-        assert_eq!(super::pick_fallback_engine(&list).as_deref(), Some("aaa-free"), "结果须确定性");
+        assert_eq!(
+            super::pick_fallback_engine(&list, &cfg).as_deref(),
+            Some("aaa-free"),
+            "结果须确定性"
+        );
+        // 全都缺配置时，优先级并列，答案仍须按字典序确定
+        let list2 = vec![
+            info("mmm-needs-key", true, "tts_engine", true),
+            info("aaa-needs-key", true, "tts_engine", true),
+        ];
+        assert_eq!(super::pick_fallback_engine(&list2, &cfg).as_deref(), Some("aaa-needs-key"));
+    }
+
+    #[test]
+    fn 兜底引擎_跳过环境未就绪的本地引擎() {
+        let cfg = cfg_of(&[]);
+        let list = vec![
+            info_setup("local-not-ready", false),
+            info("cloud-free", true, "tts_engine", false),
+        ];
+        assert_eq!(
+            super::pick_fallback_engine(&list, &cfg).as_deref(),
+            Some("cloud-free"),
+            "本地引擎没下环境 = 当下不能出声，不该被切过去"
+        );
+        // 只有未就绪本地引擎时给出 None（等同“没有可用替代”，不拿它冒充兼容选项）
+        assert_eq!(
+            super::pick_fallback_engine(&[info_setup("local-not-ready", false)], &cfg),
+            None
+        );
+        // 环境就绪后它就是候选（免配置声明也算免配置）
+        assert_eq!(
+            super::pick_fallback_engine(&[info_setup("local-ready", true)], &cfg).as_deref(),
+            Some("local-ready")
+        );
+        assert_eq!(
+            super::pick_fallback_engine(&[info_optional_config("opt")], &cfg).as_deref(),
+            Some("opt")
+        );
     }
 
     #[test]
@@ -1073,18 +1227,11 @@ mod tests {
             info("some-asr", true, "asr_engine", false),
             info("broken", false, "tts_engine", false),
         ];
-        assert_eq!(super::pick_fallback_engine(&list), None, "一个可用引擎都没有时不改用户设置");
-    }
-
-    #[test]
-    fn 样本env设置与移除() {
-        // 设计 §六 的「导入后 env 存在、删除后 env 移除」：helper 是纯 env 副作用，
-        // 直接给它的契约定测试（命令本身需 AppHandle/State，不适合单测）。
-        // 全仓只有本测试读写 VA_CLONE_SAMPLE，并行跑不会互相干扰。
-        crate::commands::clone_voice::announce_clone_sample(std::path::Path::new("C:/va-test/clone.wav"));
-        assert_eq!(std::env::var("VA_CLONE_SAMPLE").unwrap(), "C:/va-test/clone.wav");
-        crate::commands::clone_voice::clear_clone_sample();
-        assert!(std::env::var("VA_CLONE_SAMPLE").is_err(), "删除样本后必须撤销告知");
+        assert_eq!(
+            super::pick_fallback_engine(&list, &cfg_of(&[])),
+            None,
+            "一个可用引擎都没有时不改用户设置"
+        );
     }
 
     #[test]

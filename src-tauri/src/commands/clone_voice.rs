@@ -66,6 +66,9 @@ pub fn import_clone_voice(
     let rel_path = format!("voice_samples/clone.{ext}");
     let dest = data_dir.join(&rel_path);
     std::fs::copy(src, &dest).map_err(|e| format!("复制样本失败: {e}"))?;
+    // 文件一落地就告知插件：复制成功而后续设置写入失败时，磁盘上已经有样本，
+    // 让 env 与文件保持同一时序，插件不会出现「有样本文件却读不到路径」
+    announce_clone_sample(&dest); // dest 是上面复制出来的样本绝对路径
 
     // 连续写两个键，第二次 update 返回的即最终状态
     crate::storage::settings::update_setting(data_dir, "clone_voice_path", serde_json::json!(rel_path))
@@ -84,7 +87,6 @@ pub fn import_clone_voice(
         *guard = new_settings;
     }
 
-    announce_clone_sample(&dest); // dest 是上面复制出来的样本绝对路径
     notify_changed(&app, EVENT_SETTINGS_CHANGED);
     Ok(())
 }
@@ -128,4 +130,18 @@ pub fn remove_clone_voice(
     clear_clone_sample();
     notify_changed(&app, EVENT_SETTINGS_CHANGED);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn 样本env设置与移除() {
+        // 设计 §六 的「导入后 env 存在、删除后 env 移除」：helper 是纯 env 副作用，
+        // 直接给它的契约定测试（命令本身需 AppHandle/State，不适合单测）。
+        // 全仓只有本测试读写 VA_CLONE_SAMPLE，并行跑不会互相干扰。
+        crate::commands::clone_voice::announce_clone_sample(std::path::Path::new("C:/va-test/clone.wav"));
+        assert_eq!(std::env::var("VA_CLONE_SAMPLE").unwrap(), "C:/va-test/clone.wav");
+        crate::commands::clone_voice::clear_clone_sample();
+        assert!(std::env::var("VA_CLONE_SAMPLE").is_err(), "删除样本后必须撤销告知");
+    }
 }
