@@ -1146,13 +1146,14 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 | 1 插件协议层 | 完成（含审查修正） | `4f6fe95` `ee89e05` |
 | 2 流式会话 + 双导出 | 完成（含审查修正 I-1..I-4） | `3c2fcec` `96acedb` |
 | 3 打包与内置分发 | 完成（两轮审查均 Approved；含 zip 可复现修正） | `a3df6d2` `c4dfb5f` `82337ec` + 后续收口 |
-| 4 实网探针 + 冒烟脚本 | 完成（**已真跑**，RIFF 问题已关掉；三轮审查——第一轮 1C/1I/5M、第二轮 1I/3M、第三轮 1I 均收口） | `f9cacd2` `6140aa3` `9babe7d` `5075fc9` `54b176f` `7692d3d` `f3042da` |
-| 5–13 | 未开始 | — |
+| 4 实网探针 + 冒烟脚本 | 完成（**已真跑**，RIFF 问题已关掉；三轮审查——第一轮 1C/1I/5M、第二轮 1I/3M、第三轮 1I 均收口） | `f9cacd2` `6140aa3` `9babe7d` `5075fc9` `54b176f` `7692d3d` `f3042da` `7747fad` |
+| 5 mimo-asr 补 config + 宿主换注入 | 完成（**6 文件同提交已核对**；审查 1 Important / 1 Minor，Important 按“不采纳”处置并转为新硬约束） | `c1ce899` |
+| 6–13 | 未开始 | — |
 
-下一个动作：**Task 5 Step 1**（给 `plugins/engines/mimo-asr/package.ps1` 补 `config` 声明并重打包，
-**与宿主换注入（`src-tauri/src/lib.rs` 删 `MIMO_API_KEY` 顶层注入、改 `VA_CLONE_SAMPLE` 启动注入）同一个 commit**）。
-这是全计划唯一“拆成两次提交就直接把 ASR 弄坏”的配对（设计 §七 硬约束）：提交前用 `git status --short`
-核对该 Task 的 6 个文件确实在同一个 `git add` 里。
+下一个动作：**Task 6 Step 1**（宿主删内置 MiMo 引擎、默认引擎改 edge-tts；顺带收口 Task 5 留下的两个尾巴：
+把 `plugins/engines/mimo-asr/Cargo.toml` 的 `0.1.0` 升到 `0.1.1`，**并与重打包、刷新索引 checksum 同一个 commit**）。
+⚠ **Task 6 必须先于 Task 7**：`mimo_api_key` 现在仍被内置 MiMo TTS 直接读（`tts/mod.rs`、`commands/tts.rs`），
+而 Task 7 的迁移是“搬入 plugin_config 后清空旧键”——顺序反了会把内置 MiMo TTS 弄坏（见 Task 5 实施记录）。
 另需回看：探针遗留项已全部回答——`hound` 实测没用到、已连同 `serde` 删除；
 但 `FIRST_CHUNK_TIMEOUT=120s` 的余量已改写：release 下出现过一次 **49.2s** 的克隆首块离群值（同文本其余都是 1.6~1.8s），
 所以余量只有 2.4 倍而不是旧说法的 13 倍——**已登记为 Task 13 真机验收前的待决策项**（若出现克隆长句超时就提到 180~240s，仍小于 `REQUEST_TIMEOUT=300s`）。
@@ -1974,6 +1975,46 @@ git commit -m "feat(插件): mimo-asr 声明 config 并重打包 + 宿主删 MIM
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
+
+---
+
+### Task 5 实施记录（已完成，提交 `c1ce899`）
+
+6 个文件全部落在**同一个 commit**（设计 §七 硬约束），`git status --short` 核对过：
+`package.ps1` / `plugins-index.json` / `mimo-asr-0.1.1.zip`（新增）/ `mimo-asr-0.1.0.zip`（删除）/ `lib.rs` / `commands/settings.rs`。
+
+与计划代码的差异（均为实测/可复现所需）：
+
+1. **`$ConfigDecl` 改用 `[ordered]@{}`（计划写的是普通 `@{`）**。PS7(.NET Core) 每进程随机化字符串哈希，
+   普通 hashtable 的 `ConvertTo-Json` 键序跨进程不稳定 → manifest 每次不一样 → zip sha 漂移。
+   这跟 Task 3 查出的 `minimax-tts-stream` 内置 zip 与索引 checksum 漂移是同一根因。
+2. **补上 zip 条目 mtime 归一（`$Epoch = [datetime]'2020-01-01T00:00:00'`）与 zip SHA-256 打印**（与 mimo-tts 同构）；
+   计划只要求版本/`config`/`-Depth 6` 三处，但不归一 mtime 则“没改代码只重跑一次打包”就会弄脏索引。
+
+实测（全部零网络，不跑 ASR 集成测试）：
+
+| 项 | 结果 |
+|---|---|
+| zip 内 manifest.json | `config.fields` 为**真数组**（`-Depth 6` 生效）；首 4 字节 `7b 0d 0a 20` = `{\r\n`，**无 BOM** |
+| 可复现 | 连跑两次 `package.ps1`，zip SHA-256 均为 `51110de7…892eadb`；两条 zip 条目 mtime 都是 `2020-01-01T00:00:00` |
+| 索引 | `verify-index.ps1 -SkipDist` → `mimo-asr 0.1.1 OK`（仅剩既有基线 `minimax-tts-stream RES-CK`，按约定不动） |
+| 宿主 | `cargo test --lib` = **170 passed / 0 failed / 4 ignored / 0 warning**（本 Task 未增删测试）；`cargo check --lib` 无 warning |
+| 守卫 | `check-log-hygiene.ps1`、`check-bom.ps1` 均 `✓` exit 0 |
+| 字段名对齐 | `config.help_url` / `fields[].{key,type,label,description,env,required}` 与 `plugins/manifest.rs` 的 `PluginConfigDecl`/`PluginConfigField` 完全对得上；无 `deny_unknown_fields`，`type` 是 `String` 不是枚举（`"secret"` 恒合法） |
+
+#### Task 5 审查收口（CodeReview 子代理：1 Important / 1 Minor）
+
+硬约束（同提交）、索引一致性、manifest 可解析、宿主无 warning、守卫全绿均实测通过。两条待处置：
+
+| 编号 | 问题 | 处置与理由 |
+|---|---|---|
+| T5-I-1 | 本 commit 删了 `mimo_api_key → MIMO_API_KEY` 的两处注入，而把遗留顶层 Key 搬进 `plugin_config` 要到 Task 7 才做 → 分支当前提交上，已有用户的新装 mimo-asr 会报“未配置 MIMO_API_KEY”（可手动在插件面板重填自救，因为 config 声明已生效） | **不采纳“在 Task 5 补一份迁移”**。按计划 Step 1②/Step 4 实读：Task 7 已设成审查者要求的语义（`mimo_api_key` **两行**映射同时喂 `mimo-tts` 与 `mimo-asr`，靠 `let snapshot = s.clone()` 避免第二条读到已清空的值）；若在本 Task 先做一份“复制不清空”，到 Task 7 还得改成“搬移并清空”，属两套语义冲突 + 返工。中间态不影响任何已发布版本（发布走 Task 13 全量门禁，Task 6~7 同批交付）。**按审查者给的第 2 选项处理：把约束写死——见下方新增硬约束** |
+| T5-M-1 | `plugins/engines/mimo-asr/Cargo.toml` 仍是 `0.1.0`，而 manifest/索引都是 `0.1.1` | 实测无功能影响：版本比对只存在于 TTS 的 `LoadedPlugin::load`（`loader.rs:163`），`asr_engine` 走的 `LoadedAsrPlugin::load` 根本不读 `va_plugin_version`；宿主展示/更新一律以 `manifest.version` 为准。**不在本 Task 动**：改 Cargo.toml 会重链接 dll → zip sha 变 → 必须连带刷索引 checksum（又是一个敏感同提交动作）。登记为遗留小项，归 Task 6（本来就要大量改 Rust 并重打包）一并收口 |
+
+**新增硬约束（由 T5-I-1 产生，Task 6/7 必须遵守）**：`mimo_api_key` 目前**仍被内置 MiMo TTS 消费**
+（`tts/mod.rs`、`commands/tts.rs` 直接读 `settings.mimo_api_key`），而 Task 7 的迁移是“**搬入后清空旧键**”
+→ **Task 6（删内置 MiMo）必须先于 Task 7 落地**，顺序反了就会把内置 MiMo TTS 弄坏。
+Task 7 落地前，分支上的 ASR Key 中间态属已接受风险（用户可在插件面板手动重填）。
 
 ## Task 6：宿主删内置 MiMo（引擎分发收口 + 默认引擎改 edge-tts）
 
