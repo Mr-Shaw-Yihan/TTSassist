@@ -30,7 +30,10 @@ use thiserror::Error;
 /// - `tts_engine == "edge"` → `"edge-tts"`，`edge_voice` → `plugin_voices["edge-tts"]`
 /// - `tts_engine == "mimo"` → `"mimo-tts"`，`tts_model` → `plugin_voices["mimo-tts"]`
 ///
-/// 直接改 settings.json 文件（不经过 Settings 结构体——新结构体已无这些旧字段）。
+/// 直接改 settings.json 文件（不经过 Settings 结构体）：`edge_voice` 结构体里已无此字段，
+/// 只能按原始 JSON 搬。旧音色字段 `tts_model` 仍是结构体字段，清掉它是为了让音色回到唯一
+/// 真相 `plugin_voices`；随后读设置会用默认值补回、并随遗留 Key 迁移一起写回，但它不参与
+/// 插件合成——完整启动序列的真实终态由 settings.rs 的启动序列测试钉住。
 /// 注意：默认值改 `edge-tts` 只影响全新安装与缺字段的情况，**不会把老用户悄悄换引擎**。
 pub fn migrate_legacy_engine(data_dir: &Path) {
     let path = data_dir.join("settings.json");
@@ -206,7 +209,40 @@ mod tests {
         let v = read_json(dir.path());
         assert_eq!(v["tts_engine"], "mimo-tts");
         assert_eq!(v["plugin_voices"]["mimo-tts"], "冰糖", "旧 tts_model 应搬进插件音色表");
+        // 仅就本函数而言旧字段被清除；完整启动序列里它会被读设置的默认值补回（不参与合成），
+        // 终态与幂等由 settings.rs「老mimo用户完整启动序列终态」钉住
         assert!(v.get("tts_model").is_none(), "旧字段应被清除");
+    }
+
+    #[test]
+    fn 迁移_mimo空音色落到插件自述id() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"tts_engine":"mimo","tts_model":""}"#,
+        )
+        .unwrap();
+
+        migrate_legacy_engine(dir.path());
+
+        let v = read_json(dir.path());
+        assert_eq!(v["plugin_voices"]["mimo-tts"], "mimo_default", "空串同样归一到插件自述默认音色");
+    }
+
+    #[test]
+    fn 迁移_mimo已有插件音色则不覆盖() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"tts_engine":"mimo","tts_model":"冰糖","plugin_voices":{"mimo-tts":"茉莉"}}"#,
+        )
+        .unwrap();
+
+        migrate_legacy_engine(dir.path());
+
+        let v = read_json(dir.path());
+        assert_eq!(v["tts_engine"], "mimo-tts");
+        assert_eq!(v["plugin_voices"]["mimo-tts"], "茉莉", "用户在新面板选过的音色不被旧字段覆盖");
     }
 
     #[test]

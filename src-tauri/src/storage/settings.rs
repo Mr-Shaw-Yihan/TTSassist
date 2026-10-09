@@ -107,7 +107,7 @@ pub fn load_settings(data_dir: &Path) -> Settings {
 /// 旧硬编码插件 Key → plugin_config 的迁移映射。
 /// 一次性历史包袱清理代码。国内版插件已由 minimax-tts（整段）升级为
 /// minimax-tts-stream（流式，v0.3.0 起国内整段版已从内置移除），故旧国内键平移到流式插件。
-/// 一个旧键可以映射多个插件（MiMo Key 同时喂 TTS 与 ASR），此时逐条搬同一份快照值。
+/// 一个旧键可以映射多个插件（同一个引擎的 Key 同时喂 TTS 与 ASR），此时逐条搬同一份快照值。
 const LEGACY_PLUGIN_KEY_MAP: &[(&str, &str, &str)] = &[
     // (settings 旧键, 插件 id, plugin_config 字段 key)
     ("minimax_api_key", "minimax-tts-stream", "api_key"),
@@ -397,6 +397,45 @@ mod tests {
         assert_eq!(s.plugin_config["mimo-tts"]["api_key"], "new", "用户已填的不覆盖");
         assert_eq!(s.plugin_config["mimo-asr"]["api_key"], "old", "没填过的仍搬入");
         assert!(s.mimo_api_key.is_empty());
+    }
+
+    /// 完整启动序列（与 lib.rs setup 同序：先标识迁移改文件，再读设置并搬 Key）。
+    /// 只测单函数会给出虚假信心——本条钉住老 MiMo 用户升级后的真实终态与二次启动幂等。
+    #[test]
+    fn 老mimo用户完整启动序列终态() {
+        let dir = tempdir().unwrap();
+        let d = dir.path().to_path_buf();
+        std::fs::write(
+            d.join("settings.json"),
+            r#"{"tts_engine":"mimo","tts_model":"冰糖","mimo_api_key":"km"}"#,
+        )
+        .unwrap();
+        crate::plugins::migrate_legacy_engine(&d);
+        let s = load_settings(&d);
+        assert_eq!(s.tts_engine, "mimo-tts");
+        assert_eq!(s.plugin_voices["mimo-tts"], "冰糖", "音色唯一真相应在 plugin_voices");
+        assert_eq!(s.plugin_config["mimo-tts"]["api_key"], "km");
+        assert_eq!(s.plugin_config["mimo-asr"]["api_key"], "km");
+        assert!(s.mimo_api_key.is_empty());
+
+        // 搬 Key 会触发整体写回：tts_model 作为结构体通用字段被默认值补回。
+        // 它不再参与合成（插件引擎只读 plugin_voices），故记录终态而非要求它消失。
+        let raw = std::fs::read_to_string(d.join("settings.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["tts_model"], "default");
+        assert_eq!(v["plugin_voices"]["mimo-tts"], "冰糖");
+        assert_eq!(v["mimo_api_key"], "");
+
+        // 二次启动必须幂等：不重写文件、不再改内存值
+        crate::plugins::migrate_legacy_engine(&d);
+        let s2 = load_settings(&d);
+        assert_eq!(
+            raw,
+            std::fs::read_to_string(d.join("settings.json")).unwrap(),
+            "二次启动不应重写设置文件"
+        );
+        assert_eq!(s2.plugin_config, s.plugin_config);
+        assert_eq!(s2.plugin_voices, s.plugin_voices);
     }
 
     #[test]
