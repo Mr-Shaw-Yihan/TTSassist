@@ -1145,14 +1145,22 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 |---|---|---|
 | 1 插件协议层 | 完成（含审查修正） | `4f6fe95` `ee89e05` |
 | 2 流式会话 + 双导出 | 完成（含审查修正 I-1..I-4） | `3c2fcec` `96acedb` |
-| 3–13 | 未开始 | — |
+| 3 打包与内置分发 | 完成（审查 Approved；含 zip 可复现修正） | `a3df6d2` `c4dfb5f` |
+| 4–13 | 未开始 | — |
 
-下一个动作：**Task 3 Step 1**（写 `plugins/engines/mimo-tts/package.ps1`，模板 = `plugins/engines/minimax-tts-stream/package.ps1`）。
+下一个动作：**Task 4 Step 1**（在 `plugins/engines/mimo-tts/src/stream.rs` 的 `mod tests` 末尾追加两个
+`#[ignore]` 实网探针，再写 `plugins/scripts/test-mimo-stream.ps1`）。**这步要真实的 `MIMO_TTS_API_KEY`**，
+拿不到 Key 就只能提交探针代码、不能宣称观测完成（探针要真跑，拿到几块 / 首块是不是 WAV 这两件事必须实装回答）。
+另需回看：`FIRST_CHUNK_TIMEOUT=120s` 是否够长句首块（探针实测后定）；`hound` 依赖到本 Task 才真正被用到。
 
 交接提醒（容易错的三件事）：
 1. 每条 `cargo` 命令都必须先显式设 `CARGO_TARGET_DIR`（宿主用 `src-tauri\target`，插件用 `plugins\target`，两者不可互换）——曾有会话把全局 target 指到别的工作树，直接覆盖了别人的 exe。
 2. 提交一律逐文件 `git add`，禁止 `git add -A`/`.`；`src-tauri/resources/plugins/*.zip` 是跟踪文件，新 zip 必须逐个 add（连删除也要 add）。
 3. 每个 Task 的期望测试数写在各 Task 末尾，对不上就是漏删/漏测；当前基线：宿主 170 passed / 4 ignored（Task 6 后应降为 161），mimo-tts 24 passed / 0 warning。
+4. `verify-index.ps1 -SkipDist` 的基线不是全绿：`minimax-tts-stream` 那条 `RES-CK` 是仓库既有问题（见 Task 3 实施记录）。
+   判定本 Task 成败只看自己那一行是否 `OK`，不要为了让表格全绿去改别人的条目。
+5. 任何重新构建插件 dll 的动作都会改变 zip sha（PE `TimeDateStamp`）；**打包与刷新索引 checksum 是同一个动作**，
+   不能拆开提交（Task 3 的最终产物已在 `c4dfb5f` 一次锁死）。
 
 ---
 
@@ -1405,6 +1413,39 @@ git commit -m "feat(内置分发): mimo-tts 插件打包脚本 + 内置 zip + �
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
+
+### Task 3 实施时的修正（审查后收口）
+
+审查结论 Approved，无 Critical。但审查者实测“同一段代码不改、重跑 package.ps1，zip sha 会变”，
+跟进后找到两个变异源，**都必须在本期修掉**（否则 Task 13 门禁与在线安装校验必然漂移）：
+
+| 发现 | 现象 | 根因 | 处置 |
+|---|---|---|---|
+| **键序不稳定**（真因） | dll sha 不变、zip sha 每次不同 | `$ConfigDecl` 用普通 hashtable `@{}`，而 PS7(.NET Core) **每进程随机化字符串哈希**，`ConvertTo-Json` 出来的键序跳进程不同 → manifest 字节变 | `$ConfigDecl` 与其两个 field 子表全改 `[ordered]@{}`，产物变成声明序 |
+| **条目 mtime** | 内容不变、仅 dll 被重新 touch 后重打包 → zip 变 | `Compress-Archive` 把条目 `LastWriteTime` 写进 zip | 压缩前把 `$StageDir` 内文件时间戳归一到固定 `$Epoch`（2020-01-01） |
+
+修后实测：连跑两次 zip sha 相同（`f3508873…` 两次一致）；把 dll 的 mtime 拨回两天前再跑仍确定。
+**仅剩的不可复现源是 dll 本身**——链接器往 PE 头写 `TimeDateStamp`，任何一次重链接都会改变 dll 字节。
+这不是脚本缺陷，而是“不能假装二进制可复现”：所以 **每次重新构建插件都必须同步刷新索引 checksum**。
+最终入库产物：dll sha `93468539a346d1c5c3faf1d1cd04ce7fdd8c32f4404c6743d3b0b186d21d5c36`、
+zip sha `629ebf898f8f6bb04e8a1d70f38dc5f060557ff18aac7f53259afb3df82dcbe2`（提交 `c4dfb5f`）。
+
+基线既有问题（**本次故意不动**，需用户决策）：
+
+- `verify-index.ps1 -SkipDist` 在基线就有 1 条失败：`minimax-tts-stream` 报 `RES-CK`（索引 `0ad7d968…`，
+  resources 里那份 zip 实际 `1d9e1ce7…`）。已核实在 `main` 的 `dc55a57` 就存在，本分支未碰过那个 zip。
+  **不把索引改成 `1d9e1ce7`**：`publish.ps1` 发版时是以“新构建的 dist zip”重算 checksum 并上传该 zip
+  作发布资产，所以索引里那个值很可能等于**线上真实资产**的 sha；改索引会把“CI 红灯”换成
+  “用户点在线安装必校验失败”。真正该做的是重跑该插件打包并走一次发布（zip+索引+资产三者同步），超出本计划范围。
+  它同时解释了上面那个键序缺陷如何制造漂移——模板脚本同样用 `@{}`。
+- `tauri.conf.json` 的 `bundle.resources` 是 `"resources/plugins/*.zip"` 通配，新 zip **无需登记**。
+
+有意未采纳（登记为下批重构候选）：
+
+1. 脚本末尾自动跑 `verify-index.ps1` 并非 0 即 throw——会被上面那条基线红灯直接噎死，无法使用。
+2. 脚本自己回写 `plugins-index.json`——`publish.ps1` 已经单写该文件，变双头写更容易不一致。
+3. 索引 description 与 manifest description 不同（多了“本体内置自动安装，可卸载”）：`publish.ps1` 下次发布
+   会以 manifest 为权威源覆盖索引——与现有 `minimax-tts-stream` 条目同口径，沿用惯例。
 
 ---
 
