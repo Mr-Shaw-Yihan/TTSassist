@@ -109,7 +109,7 @@ pub fn run() {
             let data_dir = app.path().app_data_dir()?;
             storage::ensure_data_dirs(&data_dir)?;
 
-            // 兼容迁移：老设置的内置 edge 引擎 → edge-tts 插件（幂等，直接改文件）
+            // 兼容迁移：老设置里的内置引擎标识 → 对应插件 id（幂等，直接改文件）
             plugins::migrate_legacy_engine(&data_dir);
 
             let settings: Settings = storage::settings::load_settings(&data_dir);
@@ -125,9 +125,24 @@ pub fn run() {
                 crate::perf::drain_startup_pending();
             }
 
-            // ASR 插件需要 API Key：通过环境变量传递（插件加载时读取）
-            if !settings.mimo_api_key.is_empty() {
-                std::env::set_var("MIMO_API_KEY", &settings.mimo_api_key);
+            // 克隆样本通用环境变量：宿主只把“已导入样本的绝对路径”告诉插件，
+            // 格式/大小/用法全部由插件自决（基座不认识任何引擎，见 AGENTS.md 基座合同）。
+            // API Key 不再在此硬编码注入：改由各插件 manifest 的 config 声明，
+            // 统一走下方 plugin_manager.inject_config_env（旧 MIMO_API_KEY 顶层注入已删）。
+            {
+                let sample = if settings.clone_voice_path.is_empty() {
+                    String::new()
+                } else {
+                    data_dir
+                        .join(&settings.clone_voice_path)
+                        .to_string_lossy()
+                        .into_owned()
+                };
+                if sample.is_empty() || !std::path::Path::new(&sample).exists() {
+                    std::env::remove_var("VA_CLONE_SAMPLE");
+                } else {
+                    std::env::set_var("VA_CLONE_SAMPLE", &sample);
+                }
             }
 
             // 宿主能力桥：先于插件加载 manage——插件 attach 期间即可调用

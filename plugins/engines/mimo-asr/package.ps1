@@ -15,9 +15,30 @@ $ErrorActionPreference = "Stop"
 
 $PluginId   = "mimo-asr"
 $PluginName = "MiMo ASR（小米·云端）"
-$Version    = "0.1.0"
+$Version    = "0.1.1"
 $MinAppVer  = "1.5.0"
 $Desc       = "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测"
+
+# 通用插件配置声明（宿主 ≥1.8.0 按 manifest 渲染设置面板并注入环境变量）。
+# 背景：v0.1.0 的 MIMO_API_KEY 靠宿主 lib.rs 从顶层 mimo_api_key 直接 set_var，
+# manifest 里没有任何 config 声明；宿主删掉那条注入后必须改走本机制，否则 ASR 失 Key。
+# min_app_version 不必提高：老宿主仍走顶层注入，新宿主走 config 注入，两条路都通。
+# 必须用 [ordered]：PS7(.NET Core) 每进程随机化字符串哈希，普通 hashtable 的
+# ConvertTo-Json 键序跨进程不稳定 → manifest 每次不一样 → zip sha 跟着漂移，
+# 索引 checksum 与产物就对不上（与 mimo-tts 同机制，见那边同款注释）。
+$ConfigDecl = [ordered]@{
+    help_url = "https://platform.xiaomimimo.com?ref=5P9J2B"
+    fields   = @(
+        [ordered]@{
+            key         = "api_key"
+            type        = "secret"
+            label       = "API Key"
+            description = "从小米 MiMo 开放平台获取（与 MiMo TTS 用的是同一个 Key）"
+            env         = "MIMO_API_KEY"
+            required    = $true
+        }
+    )
+}
 
 $PluginDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $WsTarget  = (Resolve-Path (Join-Path $PluginDir "..\..")).Path   # Cargo workspace 根（plugins/），共享构建产物 target 所在
@@ -58,20 +79,28 @@ $Manifest = [ordered]@{
     description     = $Desc
     category        = "remote"
     timeout_secs    = 120
+    config          = $ConfigDecl
 }
-# 注意：必须用无 BOM 写入
+# 注意：必须用无 BOM 写入；必须 -Depth 6（默认 Depth=2 会把 config.fields 的嵌套结构截成字符串）
 [System.IO.File]::WriteAllText(
     (Join-Path $StageDir "manifest.json"),
-    ($Manifest | ConvertTo-Json),
+    ($Manifest | ConvertTo-Json -Depth 6),
     $Utf8NoBom
 )
 
 # ── 3. 压缩 zip ──────────────────────────────────────
 Write-Host "[3/4] 打包 zip..." -ForegroundColor Cyan
 $ZipPath = Join-Path $DistDir "$PluginId-$Version.zip"
+# 时间戳归一：Compress-Archive 把条目 LastWriteTime 写进 zip，而 cargo 重链接会刷新 dll 的
+# mtime——字节一样、zip sha 却变。索引 checksum 记的是 zip 的 sha，于是不改代码只重跑一次
+# 打包就会让索引与产物漂移（在线安装直接校验失败）。固定成同一时刻后同产物必得同 zip。
+# 用不带 Z 的字面量：带 Z 会被当 UTC 再换算成本地时间，跨时区构建机写出的 DOS 时间就不一样了。
+$Epoch = [datetime]'2020-01-01T00:00:00'
+Get-ChildItem $StageDir | ForEach-Object { $_.LastWriteTime = $Epoch }
 Compress-Archive -Path (Join-Path $StageDir "*") -DestinationPath $ZipPath -Force
 Write-Host "打包完成: $ZipPath" -ForegroundColor Green
 Write-Host "  plugin.dll SHA-256: $Hash"
+Write-Host ("  索引 checksum 应用 zip SHA-256: {0}" -f (Get-FileHash $ZipPath -Algorithm SHA256).Hash.ToLower()) -ForegroundColor Yellow
 
 # 同步到安装包资源目录（tauri build 时内置进安装包，供"插件库"安装）
 $ResDir = Join-Path $PluginDir "..\..\..\src-tauri\resources\plugins"
