@@ -24,10 +24,13 @@ $Desc       = "小米 MiMo 云端语音合成（流式版）：SSE 边合成边�
 # model 用 text 而非 select：manifest 校验强制 select 必须给出非空 options，
 # 而官方档位会变；text 才能做到"上新档位改一个字符串、不发版"。
 # help_url 是静态兜底，运行期会被远程配置 plugin_help_url 覆盖（换邀请码免发版）。
-$ConfigDecl = @{
+# 必须用 [ordered]：PS7(.NET Core) 每进程随机化字符串哈希，普通 hashtable 的
+# ConvertTo-Json 键序跳进程不稳定，manifest 就每次不一样 → zip sha 跟着变。
+# （模板 minimax-tts-stream 就是 @{，那份内置 zip 与索引 checksum 的漂移根源在此）
+$ConfigDecl = [ordered]@{
     help_url = "https://platform.xiaomimimo.com?ref=5P9J2B"
     fields   = @(
-        @{
+        [ordered]@{
             key         = "api_key"
             type        = "secret"
             label       = "API Key"
@@ -35,7 +38,7 @@ $ConfigDecl = @{
             env         = "MIMO_TTS_API_KEY"
             required    = $true
         },
-        @{
+        [ordered]@{
             key         = "model"
             type        = "text"
             label       = "合成模型"
@@ -96,6 +99,12 @@ $Manifest = [ordered]@{
 # -- 3. Compress zip --
 Write-Host "[3/4] Packaging zip..." -ForegroundColor Cyan
 $ZipPath = Join-Path $DistDir "$PluginId-$Version.zip"
+# 时间戳归一：Compress-Archive 把条目的 LastWriteTime 写进 zip，而 cargo 重链接会
+# 刷新 dll 的 mtime——字节一样、zip sha 却变。索引 checksum 记的是 zip 的 sha，
+# 于是"没改代码只重跑一次打包"就会让索引和产物漂移（在线安装直接校验失败）。
+# 固定成同一时刻后，同一份产物必然得到同一份 zip。
+$Epoch = Get-Date "2020-01-01 00:00:00Z"
+Get-ChildItem $StageDir | ForEach-Object { $_.LastWriteTime = $Epoch }
 Compress-Archive -Path (Join-Path $StageDir "*") -DestinationPath $ZipPath -Force
 Write-Host "Package complete: $ZipPath" -ForegroundColor Green
 Write-Host "  plugin.dll SHA-256: $Hash"
