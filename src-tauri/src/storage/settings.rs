@@ -107,10 +107,13 @@ pub fn load_settings(data_dir: &Path) -> Settings {
 /// 旧硬编码插件 Key → plugin_config 的迁移映射。
 /// 一次性历史包袱清理代码。国内版插件已由 minimax-tts（整段）升级为
 /// minimax-tts-stream（流式，v0.3.0 起国内整段版已从内置移除），故旧国内键平移到流式插件。
+/// 一个旧键可以映射多个插件（MiMo Key 同时喂 TTS 与 ASR），此时逐条搬同一份快照值。
 const LEGACY_PLUGIN_KEY_MAP: &[(&str, &str, &str)] = &[
     // (settings 旧键, 插件 id, plugin_config 字段 key)
     ("minimax_api_key", "minimax-tts-stream", "api_key"),
     ("minimax_global_api_key", "minimax-tts-global", "api_key"),
+    ("mimo_api_key", "mimo-tts", "api_key"),
+    ("mimo_api_key", "mimo-asr", "api_key"),
 ];
 
 /// 把旧顶层 Key 键搬入 plugin_config 对应条目并清空旧键。
@@ -118,10 +121,13 @@ const LEGACY_PLUGIN_KEY_MAP: &[(&str, &str, &str)] = &[
 /// 返回是否发生了改动（调用方据此落盘）。
 fn migrate_legacy_plugin_keys(s: &mut Settings) -> bool {
     let mut changed = false;
+    // 快照：同一旧键映射到多个插件时，逐条都用原始值搬运（不能在循环里读已被清空的字段）
+    let snapshot = s.clone();
     for (legacy_key, plugin_id, field_key) in LEGACY_PLUGIN_KEY_MAP {
         let legacy_value = match *legacy_key {
-            "minimax_api_key" => s.minimax_api_key.clone(),
-            "minimax_global_api_key" => s.minimax_global_api_key.clone(),
+            "minimax_api_key" => snapshot.minimax_api_key.clone(),
+            "minimax_global_api_key" => snapshot.minimax_global_api_key.clone(),
+            "mimo_api_key" => snapshot.mimo_api_key.clone(),
             _ => String::new(),
         };
         if legacy_value.is_empty() {
@@ -142,6 +148,7 @@ fn migrate_legacy_plugin_keys(s: &mut Settings) -> bool {
         match *legacy_key {
             "minimax_api_key" => s.minimax_api_key = String::new(),
             "minimax_global_api_key" => s.minimax_global_api_key = String::new(),
+            "mimo_api_key" => s.mimo_api_key = String::new(),
             _ => {}
         }
         changed = true;
@@ -359,6 +366,37 @@ mod tests {
         .unwrap();
         let s3 = load_settings(&d);
         assert_eq!(s3.plugin_config["minimax-tts-stream"]["api_key"], "new");
+    }
+
+    #[test]
+    fn 旧mimo键同时喂两个插件() {
+        let dir = tempdir().unwrap();
+        let d = dir.path().to_path_buf();
+        // 真实状态：一个 MiMo Key 同时被 TTS 插件与 ASR 插件使用
+        std::fs::write(
+            d.join("settings.json"),
+            r#"{"mimo_api_key":"km"}"#,
+        )
+        .unwrap();
+        let s = load_settings(&d);
+        assert_eq!(s.plugin_config["mimo-tts"]["api_key"], "km");
+        assert_eq!(s.plugin_config["mimo-asr"]["api_key"], "km", "同一旧键映射多个插件时都要搬入");
+        assert!(s.mimo_api_key.is_empty(), "旧键应清空");
+    }
+
+    #[test]
+    fn 旧mimo键不覆盖已填配置() {
+        let dir = tempdir().unwrap();
+        let d = dir.path().to_path_buf();
+        std::fs::write(
+            d.join("settings.json"),
+            r#"{"mimo_api_key":"old","plugin_config":{"mimo-tts":{"api_key":"new"}}}"#,
+        )
+        .unwrap();
+        let s = load_settings(&d);
+        assert_eq!(s.plugin_config["mimo-tts"]["api_key"], "new", "用户已填的不覆盖");
+        assert_eq!(s.plugin_config["mimo-asr"]["api_key"], "old", "没填过的仍搬入");
+        assert!(s.mimo_api_key.is_empty());
     }
 
     #[test]
