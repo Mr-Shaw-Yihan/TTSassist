@@ -1146,7 +1146,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 | 1 插件协议层 | 完成（含审查修正） | `4f6fe95` `ee89e05` |
 | 2 流式会话 + 双导出 | 完成（含审查修正 I-1..I-4） | `3c2fcec` `96acedb` |
 | 3 打包与内置分发 | 完成（两轮审查均 Approved；含 zip 可复现修正） | `a3df6d2` `c4dfb5f` `82337ec` + 后续收口 |
-| 4 实网探针 + 冒烟脚本 | 完成（**已真跑**，RIFF 问题已关掉；审查后按 1 Critical/1 Important/5 Minor 收口） | `f9cacd2` `6140aa3` `9babe7d` |
+| 4 实网探针 + 冒烟脚本 | 完成（**已真跑**，RIFF 问题已关掉；两轮审查——第一轮 1 Critical/1 Important/5 Minor，第二轮 1 Important/3 Minor 均收口） | `f9cacd2` `6140aa3` `9babe7d` `5075fc9` `54b176f` |
 | 5–13 | 未开始 | — |
 
 下一个动作：**Task 5 Step 1**（给 `plugins/engines/mimo-asr/package.ps1` 补 `config` 声明并重打包，
@@ -1156,6 +1156,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 另需回看：探针遗留项已全部回答——`FIRST_CHUNK_TIMEOUT=120s` 按 release 口径余量 13 倍（不动）；
 `hound` 实测没用到、已连同 `serde` 删除。
 **跑探针请直接用脚本（默认 release）**：debug 下首块数字能在 1.9s~74s 乱跳，不能拿来定预算。
+**改完脚本必须真跑一次**：Task 4 第二轮就是靠真跑才抖出“预检拿 `running N tests` 去解析 `--list` 输出”
+这种眼睛看不出来的坑（`--list` 的结尾行实际是 `N tests, M benchmarks`）——只 `--list` 看一眼就推断解析格式等于没验收。
 若后续动了插件源码并重新打包，**打包与刷新索引 checksum 必须同提交**（见交接提醒第 5 条）。
 
 交接提醒（容易错的三件事）：
@@ -1765,7 +1767,24 @@ CI 跑的 `verify-index.ps1 -SkipDist` 不受源码改动影响 → 无不一致
 `tools/check-log-hygiene.ps1` = `✓`（exit 0）；`tools/check-bom.ps1` = `✓`（39 个 .json + 19 个 .ps1 合规）。
 （计划 Task 13 写的“单测 23 passed”口径少 1 条；Task 2 收口时实测就是 24，后续以 24 为准。）
 
-提交：`f9cacd2`（探针 + 冒烟脚本）、`6140aa3`（删无用依赖）、本记录与审查修正另计。
+提交：`f9cacd2`（探针 + 冒烟脚本）、`6140aa3`（删无用依赖）、`9babe7d`（上一轮审查修正）、`5075fc9`（改口径的文档）。
+
+#### Task 4 审查收口（第二轮复审：1 Important / 3 Minor，另自捡到 2 条）
+
+复审者先逐条核实了上一轮那 6 项“声称已修”的改动（含反向删豁免变红、四组合 profile 与命中数、Pop-Location 空栈 no-op），判定全部为真修好。本轮待修项：
+
+| 编号 | 问题 | 处置 |
+|---|---|---|
+| R2-I-1 | `finally` 注释承诺“全部恢复”，但 `$env:MIMO_TTS_API_KEY`（明文 Key）与 `$env:VA_CLONE_SAMPLE` 未回滚；dot-source 会把 Key 长期留在调用者会话 | 四个 env 旧值统一提到文件头捕获、finally 逐个恢复。实测：无旧值时跑完 `key=[<null>]`；有旧值（塞无效 Key）时异常路径跑完 `key=[SENTINEL]`，即“恢复旧值”而不是“抹掉” |
+| R2-M-1 | `pcm_ms` 里那个量实为“每秒字节数”却叫 `bytes_per_ms`，容易被后人“顺手修正”成 `/ 1000` | 更名 `bytes_per_second` 并留注释 |
+| R2-M-2 | `drain_session` 把收块循环统一后，失败文案丢了“是哪个探针”的指向 | 加 `tag` 参数，panic 文案变 `{tag}流式拉块失败: {e}`，两处调用分别传“预置”/“克隆” |
+| R2-M-3 | 名称过滤 0 命中时 cargo 仍返 exit 0 → 假绿 | 加 `--list` 预检计数，不等于期望值即 throw |
+| 自捡-1 | **上一轮交付的预检本身是错的**：它按真跑那行 `running N tests` 解析，而 libtest `--list` 输出结尾实际是 `N tests, M benchmarks`，根本没有那行 → 脚本无论怎么跑都在预检处 throw（完全不可用） | 改成不锚定行首的 `(\d+) tests?, (\d+) benchmarks`；实测 `--list` 带不存在的名过滤能读出 `Ran=0`、两条正常路径分别读出 2/1。**又一条“不真跑看不出来”：上轮只靠眼睛看了 `--list` 输出就推断了解析式** |
+| 自捡-2 | 同类泄漏：dot-source 后调用者的 `$ErrorActionPreference` 被改成 `Stop` 且不恢复（实测 BEFORE `Continue` → AFTER `Stop`） | 与 env 同处理：存旧值 + finally 换回；复测 AFTER 回到 `Continue` |
+
+本轮实测（全部 release，默认路径）：预置 字数 39 / 首块 16~178ms / 25~26 块；克隆 字数 25 / 首块 1652~1660ms / 1 块 / 首块前 4 字节 `[2, 0, 2, 0]`（仍为裸 PCM）。两条过滤路径各自 `test result: ok`（`-Clone` 为 2 passed / 24 filtered，默认 1 passed / 25 filtered）。
+门禁复测：`cargo test -p mimo-tts` = 24 passed / 0 failed / 2 ignored / 0 warning；`check-log-hygiene.ps1` `✓` exit 0；`check-bom.ps1` `✓` exit 0。
+提交：`54b176f`（本轮代码修正）。
 
 ---
 
