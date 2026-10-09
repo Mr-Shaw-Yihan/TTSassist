@@ -13,10 +13,5 @@ plugin-api = { path = "../../plugin-api" }
 # MiMo 是 HTTP SSE：用 blocking 客户端在 worker 线程里逐行读，
 # 不依赖宿主 tokio 运行时（存档分支用的是 async + futures_util，cdylib 内不宜）
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
-
-[dev-dependencies]
-# 探针把流式 PCM 落 wav 供试听（仅测试用，不进插件产物）
-hound = "3.5"
