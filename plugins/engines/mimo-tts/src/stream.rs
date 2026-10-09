@@ -354,13 +354,15 @@ mod tests {
     }
 
     /// 拉干一条会话：返回（块数, 首块耗时ms, 总耗时ms, 首块前 4 字节, 累计 PCM）。
+    /// `tag` 只用来让失败文案能看出是哪只探针（实测那行 panic 是抄进文档的唯一现场证据，
+    /// 不带指向就得回头翻是哪个探针跑的）。
     /// 计时从 `open()` 返回后才起算，而 `FIRST_CHUNK_TIMEOUT` 也是从会话建立后开始计时
     /// （stream.rs 里 `last_progress` 的初值就是 `Instant::now()`），两者口径一致——
     /// 拿首块耗时判超时预算是对的；但用户实际听见的延迟还包含握手与响应头，那部分不在本表里。
     /// 两只探针的收块循环原本逐行重复，抽出来顺带统一两个口径：
     /// 首块不足 4 字节时取 `min`（不能让探针自己越界 panic 而误报成“剥头失效”），
     /// 以及“空块=终态”的约定只写一遍。
-    fn drain_session(session: &StreamSession) -> (usize, u64, u64, [u8; 4], Vec<u8>) {
+    fn drain_session(session: &StreamSession, tag: &str) -> (usize, u64, u64, [u8; 4], Vec<u8>) {
         let t0 = Instant::now();
         let mut chunks = 0usize;
         let mut first_ms = 0u64;
@@ -378,7 +380,7 @@ mod tests {
                     chunks += 1;
                     pcm.extend_from_slice(&b);
                 }
-                Err(e) => panic!("拉块失败: {e}"),
+                Err(e) => panic!("{tag}流式拉块失败: {e}"),
             }
         }
         (chunks, first_ms, t0.elapsed().as_millis() as u64, first_head, pcm)
@@ -386,9 +388,11 @@ mod tests {
 
     /// 按插件自述的采样率/声道数算 PCM 时长（16bit = 2 字节）
     fn pcm_ms(pcm: &[u8]) -> u64 {
-        let bytes_per_ms =
+        // 这个乘出来是“每秒字节数”，调用式里先 * 1000 才是 ms；
+        // 名字写成 bytes_per_second 而不是 bytes_per_ms，以免被人“顺手修正”成 / 1000
+        let bytes_per_second =
             crate::client::STREAM_SAMPLE_RATE as u64 * 2 * crate::client::STREAM_CHANNELS as u64;
-        pcm.len() as u64 * 1000 / bytes_per_ms
+        pcm.len() as u64 * 1000 / bytes_per_second
     }
 
     /// 把探针 PCM 封成 WAV 落到临时目录，供人耳试听（只手动跑，不进常规门禁）
@@ -450,7 +454,7 @@ mod tests {
             None,
         );
         let session = StreamSession::open(key.trim().to_string(), body).expect("打开流式会话失败");
-        let (chunks, first_ms, ms_total, _first_head, pcm) = drain_session(&session);
+        let (chunks, first_ms, ms_total, _first_head, pcm) = drain_session(&session, "预置");
         // allowlog: 只打 profile/字数/耗时/块数；字数不是文本内容，不含 Key 与待合成文本
         println!(
             "[probe] 预置：profile {} / 字数 {} / 首块 {first_ms}ms / 块数 {chunks} / 音频 {}ms / 总耗时 {ms_total}ms",
@@ -481,7 +485,7 @@ mod tests {
         let body = crate::client::build_stream_request_body(&model, &text, voice.as_deref(), None);
         let session = StreamSession::open(key.trim().to_string(), body).expect("打开流式会话失败");
         // 计时必须记：兼容模式（克隆）的“首块前等待”就是 FIRST_CHUNK_TIMEOUT 能不能立住的唯一实测证据
-        let (chunks, first_ms, ms_total, first_head, pcm) = drain_session(&session);
+        let (chunks, first_ms, ms_total, first_head, pcm) = drain_session(&session, "克隆");
         // allowlog: 只打 profile/字数/耗时/块数/首块前 4 字节（纯音频字节）；不含 Key 与待合成文本
         println!(
             "[probe] 克隆：profile {} / 字数 {} / 块数 {chunks} / 首块 {first_ms}ms / 音频 {}ms / 总耗时 {ms_total}ms / 首块前 4 字节 {:?}",

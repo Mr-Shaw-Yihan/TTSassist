@@ -20,12 +20,23 @@ param(
     [switch]$Quick
 )
 
+# `$ErrorActionPreference` 也是会对调用者生效的全局设置（dot-source 实测会泄出去），
+# 与下方环境变量同处理：先存旧值，finally 里换回去。
+$PrevEAP = $ErrorActionPreference
 $ErrorActionPreference = "Stop"
 
 $ScriptsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot   = (Resolve-Path (Join-Path $ScriptsDir "..\..")).Path
 $PluginDir  = Join-Path $RepoRoot "plugins\engines\mimo-tts"
 $TargetDir  = Join-Path $RepoRoot "plugins\target"
+
+# 本脚本要改的环境变量先在此存旧值，退出时在 finally 里逐个恢复（Key 也不能漏）：
+# 用 `pwsh -File` 跑时子进程一死就干净了，但 dot-source（`. .\test-mimo-stream.ps1`）
+# 会把明文 Key、关掉证书吊销检查等设置长时间留在调用者会话里，后续任何子进程都会继承。
+$PrevKey = $env:MIMO_TTS_API_KEY
+$PrevCloneSample = $env:VA_CLONE_SAMPLE
+$PrevRevoke = $env:CARGO_HTTP_CHECK_REVOKE
+$PrevTargetDir = $env:CARGO_TARGET_DIR
 
 # -- 1. Key：显式 env 优先，否则读本机 settings.json（mimo_api_key 或 plugin_config 里的新位置）--
 if (-not $env:MIMO_TTS_API_KEY) {
@@ -62,10 +73,7 @@ if ($Clone -and -not $env:VA_CLONE_SAMPLE) {
 }
 
 # -- 3. 跑探针 --
-# 本脚本改过的环境变量在 finally 里全部恢复：用 `pwsh -File` 跑时是另一个进程无所谓，
-# 但 dot-source（`. .\test-mimo-stream.ps1`）会把“关掉证书吊销检查”等设置残留到调用者会话里。
-$PrevRevoke = $env:CARGO_HTTP_CHECK_REVOKE
-$PrevTargetDir = $env:CARGO_TARGET_DIR
+# 环境变量只在此赋值（旧值已在文件头存好）；`[SKIP]` 分支走 exit 结束进程，同样不会残留。
 $env:CARGO_HTTP_CHECK_REVOKE = "false"
 $env:CARGO_TARGET_DIR = $TargetDir
 
@@ -85,12 +93,30 @@ try {
     $CargoArgs += @("--", "--ignored", "--nocapture")
     if (-not $Clone) { $CargoArgs += "实网探针_预置" }
     $Profile_ = if ($Quick) { "debug" } else { "release" }
-    Write-Host "[RUN] mimo-tts #[ignore] 实网探针（Clone=$Clone / profile=$Profile_）" -ForegroundColor Cyan
+
+    # 预检：先 `--list` 数一遍要跑的探针（不触网、秒级）。名称过滤 0 命中时 cargo 仍返 exit 0，
+    # 不数一下就会在“探针改了名 / 过滤写错”时假绿着打印 [DONE]。
+    # 注意 `--list` 的输出格式与真跑不同：结尾是“N tests, M benchmarks”，
+    # **没有**真跑那行 “running N tests”（拿那个模式来解析会永远读不到，实测踩过）。
+    # 也不锚定行首：cargo 自己的 “     Running unittests ...” 行带缩进，两种行都可能在变。
+    $Expected = if ($Clone) { 2 } else { 1 }
+    $ListOut = cargo @([string[]]($CargoArgs + "--list")) 2>&1
+    $ListLine = $ListOut | Select-String -Pattern '(\d+) tests?, (\d+) benchmarks' | Select-Object -First 1
+    if (-not $ListLine) { throw "预检失败：`--list` 输出里读不到 'N tests, M benchmarks' 计数行（看上方 cargo 报错）" }
+    $Ran = [int]$ListLine.Matches[0].Groups[1].Value
+    if ($Ran -ne $Expected) {
+        throw "预检失败：期望跑 $Expected 只探针，实际匹配到 $Ran 只（探针改名或过滤名称写错）"
+    }
+
+    Write-Host "[RUN] mimo-tts #[ignore] 实网探针（Clone=$Clone / profile=$Profile_ / 应跑 $Expected 只）" -ForegroundColor Cyan
     cargo @CargoArgs
     if ($LASTEXITCODE -ne 0) { throw "探针未通过（见上方输出）。首块若报 RIFF 未剥离，检查 stream.rs worker 首块处理" }
 } finally {
     Pop-Location
     [Console]::OutputEncoding = $PrevEncoding
+    $ErrorActionPreference = $PrevEAP
+    if ($null -ne $PrevKey) { $env:MIMO_TTS_API_KEY = $PrevKey } else { Remove-Item Env:MIMO_TTS_API_KEY -ErrorAction SilentlyContinue }
+    if ($null -ne $PrevCloneSample) { $env:VA_CLONE_SAMPLE = $PrevCloneSample } else { Remove-Item Env:VA_CLONE_SAMPLE -ErrorAction SilentlyContinue }
     if ($null -ne $PrevRevoke) { $env:CARGO_HTTP_CHECK_REVOKE = $PrevRevoke } else { Remove-Item Env:CARGO_HTTP_CHECK_REVOKE -ErrorAction SilentlyContinue }
     if ($null -ne $PrevTargetDir) { $env:CARGO_TARGET_DIR = $PrevTargetDir } else { Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue }
 }
