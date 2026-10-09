@@ -41,6 +41,16 @@
       "plugin_type": "asr_engine"
     },
     {
+      "id": "mimo-tts",
+      "name": "MiMo TTS（小米·流式）",
+      "version": "0.1.0",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/mimo-tts-0.1.0.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/mimo-tts-0.1.0.zip",
+      "checksum": "81a611e48f76d6ce19319f0878c722d2c0fb40f097ae03654e6fa7eb6ffd0e83",
+      "description": "小米 MiMo 云端语音合成（流式版）：SSE 边合成边播、首响更快，需 API Key，预置音色 + 本地样本音色克隆（本体内置自动安装，可卸载）",
+      "plugin_type": "tts_engine"
+    },
+    {
       "id": "minimax-tts-stream",
       "name": "MiniMax TTS（国内版）",
       "version": "0.3.1",
