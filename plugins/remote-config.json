@@ -1,3 +1,7 @@
 {
-  "mimo_invite_code": "5P9J2B"
+  "mimo_invite_code": "5P9J2B",
+  "plugin_help_url": {
+    "mimo-tts": "https://platform.xiaomimimo.com?ref=5P9J2B",
+    "mimo-asr": "https://platform.xiaomimimo.com?ref=5P9J2B"
+  }
 }

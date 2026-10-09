@@ -293,8 +293,14 @@ pub fn get_plugin_config(
         })
         .collect();
     Ok(PluginConfigInfo {
-        id,
-        help_url: decl.help_url.clone(),
+        id: id.clone(),
+        // help_url 按插件 id 走远程覆盖（运营链接不发版就能换），
+        // 没覆盖时退回 manifest 静态值。前端只消费这一处（PluginConfigPanel）。
+        help_url: crate::commands::remote::effective_help_url(
+            &state.data_dir,
+            &id,
+            decl.help_url.as_deref(),
+        ),
         fields,
     })
 }

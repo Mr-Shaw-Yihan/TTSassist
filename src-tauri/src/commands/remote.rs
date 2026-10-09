@@ -3,6 +3,7 @@
 // 本地缓存 24h，断网/双通道都失败时退回缓存或内置默认值，前端永远拿得到值。
 // 文件只当纯数据用（字符串展示），不放任何可执行内容。
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tauri::State;
@@ -30,6 +31,10 @@ const DEFAULT_INVITE_CODE: &str = "5P9J2B";
 pub struct RemoteConfig {
     #[serde(default = "default_invite_code")]
     pub mimo_invite_code: String,
+    /// 按插件 id 覆盖 manifest 里的 `help_url`（邀请返利链接等运营数据）。
+    /// 换码只改云端 JSON，不发版；缺省 = 不覆盖，用插件自带的静态兜底。
+    #[serde(default)]
+    pub plugin_help_url: HashMap<String, String>,
 }
 
 fn default_invite_code() -> String {
@@ -40,22 +45,37 @@ impl Default for RemoteConfig {
     fn default() -> Self {
         Self {
             mimo_invite_code: default_invite_code(),
+            plugin_help_url: HashMap::new(),
         }
     }
 }
 
 /// 本地缓存文件结构（fetched_at 为 Unix 秒）
+// pub(crate)：随 read_cache 一起对外可见（返回类型不能比函数更私有）
 #[derive(serde::Serialize, serde::Deserialize)]
-struct CacheFile {
+pub(crate) struct CacheFile {
     fetched_at: u64,
     data: RemoteConfig,
+}
+
+/// 缓存里的 help_url 覆盖表（`data` 保持私有，只把表递出去）
+impl CacheFile {
+    pub(crate) fn help_url_override(&self, plugin_id: &str) -> Option<String> {
+        self.data
+            .plugin_help_url
+            .get(plugin_id)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
 }
 
 fn cache_path(data_dir: &Path) -> PathBuf {
     data_dir.join("remote-config-cache.json")
 }
 
-fn read_cache(data_dir: &Path) -> Option<CacheFile> {
+/// 读本地缓存（同步、不发网络）
+// pub(crate)：commands/plugins.rs 的 get_plugin_config 需要据此覆盖 help_url
+pub(crate) fn read_cache(data_dir: &Path) -> Option<CacheFile> {
     let raw = std::fs::read_to_string(cache_path(data_dir)).ok()?;
     serde_json::from_str(&raw).ok()
 }
@@ -99,6 +119,22 @@ fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0)
+}
+
+/// `help_url` 生效值：本地缓存里的远程覆盖表优先，否则退回 manifest 静态兜底。
+/// 只读缓存、不发网络请求（调用方是同步命令）；没缓存/没拉到覆盖 = 不覆盖。
+/// 设计动机（见插件化与流式默认设计文档 §3.2-4）：保住「不发版就能换运营链接」。
+pub(crate) fn effective_help_url(
+    data_dir: &Path,
+    plugin_id: &str,
+    fallback: Option<&str>,
+) -> Option<String> {
+    if let Some(cache) = read_cache(data_dir) {
+        if let Some(url) = cache.help_url_override(plugin_id) {
+            return Some(url);
+        }
+    }
+    fallback.map(|s| s.to_string())
 }
 
 /// 取远程配置：缓存未过期直接返回（force=true 强制刷新）；
@@ -309,6 +345,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cfg = RemoteConfig {
             mimo_invite_code: "CACHED".to_string(),
+            ..Default::default()
         };
         write_cache(tmp.path(), &cfg);
         // 缓存刚写入必然新鲜：即便网络拉不到也应返回缓存值
@@ -321,5 +358,56 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(cache_path(tmp.path()), "not json").unwrap();
         assert!(read_cache(tmp.path()).is_none());
+    }
+
+    #[test]
+    fn 远程配置解析plugin_help_url覆盖表() {
+        let cfg: RemoteConfig = serde_json::from_str(
+            r#"{"plugin_help_url":{"demo-tts":"https://x.example.com?ref=AAA"}}"#,
+        )
+        .unwrap();
+        assert_eq!(cfg.plugin_help_url["demo-tts"], "https://x.example.com?ref=AAA");
+    }
+
+    #[test]
+    fn 缺覆盖表时为空map不报错() {
+        let cfg: RemoteConfig = serde_json::from_str("{}").unwrap();
+        assert!(cfg.plugin_help_url.is_empty(), "老版本线上 JSON 没这个字段也要能解");
+    }
+
+    #[test]
+    fn help_url_远程覆盖优先无覆盖退兜底() {
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        // 无缓存：直接退 manifest 兜底
+        assert_eq!(
+            effective_help_url(d, "demo-tts", Some("https://fallback.example")),
+            Some("https://fallback.example".to_string())
+        );
+        // 有覆盖表：命中则覆盖，未命中/空串仍退兜底
+        let mut map = std::collections::HashMap::new();
+        map.insert("demo-tts".to_string(), "https://remote.example?ref=ZZZ".to_string());
+        map.insert("other-tts".to_string(), "   ".to_string());
+        write_cache(
+            d,
+            &RemoteConfig {
+                plugin_help_url: map,
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            effective_help_url(d, "demo-tts", Some("https://fallback.example")),
+            Some("https://remote.example?ref=ZZZ".to_string()),
+            "换码不应要求发版"
+        );
+        assert_eq!(
+            effective_help_url(d, "not-in-map", Some("https://fallback.example")),
+            Some("https://fallback.example".to_string())
+        );
+        assert_eq!(
+            effective_help_url(d, "other-tts", None),
+            None,
+            "空串覆盖不算覆盖"
+        );
     }
 }
