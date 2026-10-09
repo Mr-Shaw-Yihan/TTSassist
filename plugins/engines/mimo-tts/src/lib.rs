@@ -16,8 +16,6 @@
 mod client;
 mod stream;
 
-pub use client::stream_info_json;
-
 plugin_api::va_tts_plugin! {
     id: "mimo-tts",
     name: "MiMo TTS（小米·流式）",
@@ -40,7 +38,13 @@ fn synthesize(text: &str, voice: Option<&str>) -> Result<Vec<u8>, String> {
     let api_key = client::read_api_key()?;
     let (model, v) = client::resolve_voice(voice)?;
     let body = client::build_request_body(&model, text, v.as_deref(), None);
-    let resp: serde_json::Value = reqwest::blocking::Client::new()
+    // 超时必须设：阻塞 FFI 被宿主超时放弃后无法取消，无超时的请求会一直挂着，
+    // 用户重试一次就漏一条线程+连接（与流式路径口径一致）
+    let resp: serde_json::Value = reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("构建 HTTP 客户端失败: {e}"))?
         .post(client::ENDPOINT)
         .header("api-key", api_key)
         .header("Content-Type", "application/json")
@@ -76,11 +80,23 @@ fn stream_stop(session: u64) {
 
 #[cfg(test)]
 mod tests {
+    /// 音色表基准值：与宏内 `voices_json` 必须逐字一致（改音色表时两处一起改）
+    const VOICES_EXPECT: &str = r#"[{"id":"mimo_default","label":"默认 (mimo_default)"},{"id":"冰糖","label":"冰糖（女声）"},{"id":"茉莉","label":"茉莉（女声）"},{"id":"苏打","label":"苏打（男声）"},{"id":"白桦","label":"白桦（男声）"},{"id":"clone","label":"克隆：我的音色（暂不支持低延迟）"}]"#;
+
+    #[test]
+    fn 音色表_宏内静态串与基准逐字一致() {
+        // 没这条断言就没有守护：宏里的 clone 项被误删时，下面的解析测试依然全绿，
+        // 而真机用户会直接看不到克隆入口（“看不到入口→永远导不进样本”的死锁）
+        // 宏将字面量内联成 crate 根的 static VA__VOICES（带一个尾部 NUL）
+        let exported = std::str::from_utf8(crate::VA__VOICES)
+            .unwrap()
+            .trim_end_matches('\0');
+        assert_eq!(exported, VOICES_EXPECT, "宏内音色表与测试基准不一致，两处必须同时改");
+    }
+
     #[test]
     fn 音色表_克隆项恒在且带提示() {
-        // voices_json 由宏内联成静态串，这里重抄一份常量口径做断言
-        let raw = r#"[{"id":"mimo_default","label":"默认 (mimo_default)"},{"id":"冰糖","label":"冰糖（女声）"},{"id":"茉莉","label":"茉莉（女声）"},{"id":"苏打","label":"苏打（男声）"},{"id":"白桦","label":"白桦（男声）"},{"id":"clone","label":"克隆：我的音色（暂不支持低延迟）"}]"#;
-        let list: Vec<plugin_api::VoiceItem> = serde_json::from_str(raw).unwrap();
+        let list: Vec<plugin_api::VoiceItem> = serde_json::from_str(VOICES_EXPECT).unwrap();
         assert_eq!(list.len(), 6);
         let clone = list.iter().find(|v| v.id == "clone").expect("克隆项必须恒在");
         assert!(clone.label.contains("暂不支持低延迟"), "实际: {}", clone.label);

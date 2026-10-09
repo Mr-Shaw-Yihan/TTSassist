@@ -86,6 +86,16 @@ pub fn sse_line_to_pcm(line: &str) -> Option<Result<Vec<u8>, String>> {
         Ok(v) => v,
         Err(e) => return Some(Err(format!("流式 chunk JSON 解析失败: {e}"))),
     };
+    // OpenAI 兼容接口在 HTTP 200 的 SSE 里推 `{"error":{"message":…}}` 是标准失败形态：
+    // 当成「本行无音频」跳过会让中途失败被判成正常结束（半截音频无声无息落库）
+    if let Some(msg) = value
+        .get("error")
+        .and_then(|e| e.get("message"))
+        .and_then(|m| m.as_str())
+    {
+        // 只取 message 字段且剪短：不把原始 payload 拼进文案（服务端可能回显请求内容）
+        return Some(Err(format!("MiMo 流式返回错误：{}", trim_for_msg(msg))));
+    }
     // Value 索引对 Null / 越界安全：choices 缺失或空数组时拿到 Null，进而无 audio 字段
     let b64 = value["choices"][0]["delta"]["audio"]["data"].as_str()?;
     Some(
@@ -111,7 +121,13 @@ pub fn strip_wav_container(bytes: &[u8]) -> Option<Vec<u8>> {
         let size = u32::from_le_bytes(bytes[off + 4..off + 8].try_into().ok()?) as usize;
         let body = off + 8;
         if cc == b"data" {
-            let end = body.checked_add(size).map(|e| e.min(bytes.len())).unwrap_or(bytes.len());
+            // 写头未回填长度的常见情形（流式生成时常先写 44 字节头、size 留 0 或偏小）：
+            // 取到末尾，不能按谎小的 size 切一刀把整段音频吐空。
+            let end = if size == 0 || body + size >= bytes.len() {
+                bytes.len()
+            } else {
+                body + size
+            };
             return Some(bytes[body..end].to_vec());
         }
         // WAV 子块按偶数字节对齐（奇数长度补一字节填充）
@@ -234,6 +250,18 @@ pub fn build_clone_voice_uri_from(sample_raw: Option<String>) -> Result<String, 
     ))
 }
 
+/// 错误消息进用户弹窗前必须剪短（HTTP body / 服务端 error.message 可能是一大坨 HTML/JSON）。
+/// 只按字符数截断、不拼原始 payload（隐私红线：服务端报错可能回显用户文本）
+pub(crate) fn trim_for_msg(s: &str) -> String {
+    const CAP: usize = 200;
+    let flat: String = s.chars().filter(|c| !matches!(c, '\n' | '\r')).collect();
+    if flat.chars().count() <= CAP {
+        return flat;
+    }
+    let cut: String = flat.chars().take(CAP).collect();
+    format!("{cut}…")
+}
+
 /// 流式元信息 JSON（宿主据此装配播放器；当前契约只认 pcm_s16le）
 pub fn stream_info_json() -> String {
     format!(
@@ -340,6 +368,25 @@ mod tests {
     }
 
     #[test]
+    fn sse_流内error字段必须当失败而非无音频() {
+        // OpenAI 兼容网关的中途失败形态：HTTP 200 + data: {"error":{"message":…}}
+        // 当成无音频跳过 → 半截音频被当正常结束，用户只听到句子突然断
+        let line = format!(
+            "data: {}",
+            serde_json::json!({ "error": { "message": "quota exceeded" } })
+        );
+        let err = sse_line_to_pcm(&line).unwrap().unwrap_err();
+        assert!(err.contains("MiMo 流式返回错误") && err.contains("quota exceeded"), "实际: {err}");
+        // 超长错误不能原样进弹窗
+        let long = format!(
+            "data: {}",
+            serde_json::json!({ "error": { "message": "x".repeat(500) } })
+        );
+        let err = sse_line_to_pcm(&long).unwrap().unwrap_err();
+        assert!(err.chars().count() < 260, "实际长度 {}", err.chars().count());
+    }
+
+    #[test]
     fn wav容器_识别并剥出data子块() {
         // 兼容模式若把音频整体塞进 WAV，宿主契约（pcm_s16le）会被 44 字节头污染
         let mut wav = vec![0u8; 44];
@@ -373,6 +420,20 @@ mod tests {
         wav[40..44].copy_from_slice(&9999u32.to_le_bytes()); // 谎报长度
         wav.extend_from_slice(&[9u8; 6]);
         assert_eq!(strip_wav_container(&wav).unwrap().len(), 6);
+    }
+
+    #[test]
+    fn wav容器_size未回填时取到末尾() {
+        // 流式生成器常先写 44 字节头、data size 留 0：按 size 切会吐空，
+        // 整段音频被丢并误报成「文本可能为空」
+        let mut wav = vec![0u8; 44];
+        wav[0..4].copy_from_slice(b"RIFF");
+        wav[8..12].copy_from_slice(b"WAVE");
+        wav[12..16].copy_from_slice(b"fmt ");
+        wav[36..40].copy_from_slice(b"data");
+        wav[40..44].copy_from_slice(&0u32.to_le_bytes());
+        wav.extend_from_slice(&[7u8; 8]);
+        assert_eq!(strip_wav_container(&wav).unwrap(), vec![7u8; 8]);
     }
 
     #[test]

@@ -46,6 +46,9 @@ cargo test --lib
 
 ## 设计 §八 七步 → 本计划 Task 映射
 
+> **接手的模型/人先去看文件末尾前的「执行交接日志」一节**（搜 `## 执行交接日志`）：
+> 那里记着已完成到哪个 Task、下一个动作、以及容易错的三条环境/提交约束。
+
 | 设计步骤 | Task |
 |---|---|
 | 1 插件 crate（含 RIFF 前置实测） | Task 1 / 2 / 3 / 4 |
@@ -1118,6 +1121,38 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 实测结果：`cargo test -p mimo-tts` = **21 passed / 0 failed / 0 warning**；
 `cargo build -p mimo-tts --release` 产出 `plugins\target\release\mimo_tts.dll`（3548 KB）；
 宿主 `cargo test --lib` 保持 **170 passed / 4 ignored**（本 Task 未动宿主）。
+
+### 审查后的收口（子代理审查判 Needs changes，4 条 Important 已全部修完，现在 24 passed）
+
+| 编号 | 问题 | 修法 |
+|---|---|---|
+| I-1 | 音色表测试只解析自己重抄的那份字面量，**从不去读宏内联的静态串** → 把宏里的 `clone` 项删掉测试依然全绿（恰好是规格 8 要防的那个死锁） | 新增断言 `std::str::from_utf8(crate::VA__VOICES).trim_end_matches('\0') == VOICES_EXPECT`（宏把字面量内联成 crate 根的 `static VA__VOICES`，带尾部 NUL） |
+| I-2 | `*first = false` 在 `align_bytes` **之前**执行 → 网关先推一个空 base64 的 delta 时探测位被吃掉，真正的 WAV 首块逃过剥头 | 把关闭时机挪到“确实交出首个音频块之后”（`aligned.is_empty()` 早返回时保留 `first`） |
+| I-3 | HTTP 200 + SSE 里推 `{"error":{"message":…}}`（OpenAI 兼容网关的标准中途失败形态）被当“本行无音频”跳过 → 半截音频被当正常结束落库且不报错；零块时还会误报成“文本可能为空” | `sse_line_to_pcm` 解析后先判 `error.message` → `Some(Err(…))`，只取 message 字段且过 `trim_for_msg`（不拼原始 payload，隐私红线）；新增 1 个单测 |
+| I-4 | 空闲计时从会话创建起算，`CHUNK_GAP_TIMEOUT=30s` 同时充当**首块**预算 → 克隆（兼容模式全文推理才出块）长句会被误判失联 | 新增 `got_first: AtomicBool`；首块前用 `FIRST_CHUNK_TIMEOUT=120s`，首块后用 30s。**待 Task 4 探针实测长句首块耗时后回看此值** |
+
+顺带采纳的 Minor：`strip_wav_container` 对 `size == 0`/谎小（流式写头未回填长度的常见做法）改为**取到末尾**而不是切空（+1 单测）；删掉 `worker_run` 里永不可达的 EOF 残行补处理块（`read_until` 在 EOF 会带残行返回 `Ok(n>0)`，已在循环内喂过）；阻塞 `synthesize` 补 `connect_timeout(15s)/timeout(300s)`（无超时会在宿主放弃等待后一直挂着，重试一次漏一条线程）；`trim_for_msg` 上提到 `client.rs` 作为 `pub(crate)` 共用，worker 侧读取失败文案也跟着剪短；删掉多余的 `pub use client::stream_info_json;`。
+
+**未采纳（有意保留）**：把两条路径的 HTTP 客户端/鉴权头收成一个 `client::post_json()`——收口确实能消除 `api-key` 字面量重复，但会把“阻塞面”与“流式面”的超时差异揉进同一函数，本期先不动，已登记为下一批重构候选。`serde`/`hound` 依赖目前无源码引用（`hound` 是 Task 4 探针要用的），Task 4 落地后若仍无用再删。
+
+修正后实测：`cargo test -p mimo-tts` = **24 passed / 0 failed / 0 warning**。
+
+---
+
+## 执行交接日志（每次停顿/切模型前必须更新本节）
+
+| Task | 状态 | 提交 |
+|---|---|---|
+| 1 插件协议层 | 完成（含审查修正） | `4f6fe95` `ee89e05` |
+| 2 流式会话 + 双导出 | 完成（含审查修正 I-1..I-4） | `3c2fcec` + 本轮修正提交 |
+| 3–13 | 未开始 | — |
+
+下一个动作：**Task 3 Step 1**（写 `plugins/engines/mimo-tts/package.ps1`，模板 = `plugins/engines/minimax-tts-stream/package.ps1`）。
+
+交接提醒（容易错的三件事）：
+1. 每条 `cargo` 命令都必须先显式设 `CARGO_TARGET_DIR`（宿主用 `src-tauri\target`，插件用 `plugins\target`，两者不可互换）——曾有会话把全局 target 指到别的工作树，直接覆盖了别人的 exe。
+2. 提交一律逐文件 `git add`，禁止 `git add -A`/`.`；`src-tauri/resources/plugins/*.zip` 是跟踪文件，新 zip 必须逐个 add（连删除也要 add）。
+3. 每个 Task 的期望测试数写在各 Task 末尾，对不上就是漏删/漏测；当前基线：宿主 170 passed / 4 ignored（Task 6 后应降为 161），mimo-tts 24 passed / 0 warning。
 
 ---
 

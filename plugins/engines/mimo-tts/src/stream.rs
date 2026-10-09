@@ -15,10 +15,16 @@ use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::client::{align_bytes, sse_line_to_pcm, strip_wav_container, ENDPOINT};
+use crate::client::{
+    align_bytes, sse_line_to_pcm, strip_wav_container, trim_for_msg, ENDPOINT,
+};
 
 /// 相邻音频块最大间隔：超过视为服务端失联（正常流式块间隔为亚秒级）
 const CHUNK_GAP_TIMEOUT: Duration = Duration::from_secs(30);
+/// 首块前的等待上限：兼容模式（克隆）是“全文推理完才出块”，实测 60 字要 3.5s，
+/// 长句会成倍增长。拿块间的 30s 当首块预算会把正常推理误判成失联，
+/// 因此首块单给一个宽松窗口（仍小于 REQUEST_TIMEOUT，死连接不会永挂）。
+const FIRST_CHUNK_TIMEOUT: Duration = Duration::from_secs(120);
 /// next_chunk 轮询周期（决定 abort 生效时延上限）
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// 整请求上限：MiMo 一次合成长文本远低于此值，仅作为 worker 卡死时的兜底
@@ -40,6 +46,8 @@ pub struct StreamSession {
     stop: Arc<AtomicBool>,
     /// 最近一次拿到数据块的时间（块间空闲超时基准）
     last_progress: Mutex<Instant>,
+    /// 是否已交出过首块（决定用首块窗口还是块间窗口）
+    got_first: AtomicBool,
     /// worker 终态错误（channel 断开时兜出，避免丢真实原因）
     terminal: Mutex<Option<String>>,
 }
@@ -52,6 +60,7 @@ impl StreamSession {
             rx: Mutex::new(rx),
             stop: Arc::new(AtomicBool::new(false)),
             last_progress: Mutex::new(Instant::now()),
+            got_first: AtomicBool::new(false),
             terminal: Mutex::new(None),
         }
     }
@@ -91,6 +100,7 @@ impl StreamSession {
             rx: Mutex::new(rx),
             stop,
             last_progress: Mutex::new(Instant::now()),
+            got_first: AtomicBool::new(false),
             terminal: Mutex::new(None),
         })
     }
@@ -105,6 +115,7 @@ impl StreamSession {
                 .recv_timeout(POLL_INTERVAL);
             match recv {
                 Ok(StreamItem::Chunk(bytes)) => {
+                    self.got_first.store(true, Ordering::Relaxed);
                     *self.last_progress.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
                     return Ok(bytes);
                 }
@@ -117,11 +128,17 @@ impl StreamSession {
                     if self.stop.load(Ordering::Relaxed) {
                         return Err("MiMo 流式合成已中止".into());
                     }
+                    // 首块前用宽松窗口（兼容模式全文推理），首块后用块间窗口（亚秒级）
                     let idle = self.last_progress.lock().unwrap_or_else(|e| e.into_inner()).elapsed();
-                    if idle > CHUNK_GAP_TIMEOUT {
+                    let limit = if self.got_first.load(Ordering::Relaxed) {
+                        CHUNK_GAP_TIMEOUT
+                    } else {
+                        FIRST_CHUNK_TIMEOUT
+                    };
+                    if idle > limit {
                         let msg = format!(
                             "MiMo 流式服务 {} 秒未返回音频，连接中断",
-                            CHUNK_GAP_TIMEOUT.as_secs()
+                            limit.as_secs()
                         );
                         *self.terminal.lock().unwrap_or_else(|e| e.into_inner()) = Some(msg.clone());
                         return Err(msg);
@@ -164,26 +181,21 @@ fn worker_run(stop: Arc<AtomicBool>, tx: Sender<StreamItem>, resp: reqwest::bloc
         let n = match reader.read_until(b'\n', &mut line) {
             Ok(n) => n,
             Err(e) => {
-                let _ = tx.send(StreamItem::Fail(format!("MiMo 流式读取失败: {e}")));
+                let _ = tx.send(StreamItem::Fail(format!(
+                    "MiMo 流式读取失败: {}",
+                    trim_for_msg(&e.to_string())
+                )));
                 return;
             }
         };
         if n == 0 {
-            break; // EOF：服务端收流
+            break; // EOF：服务端收流（BufRead::read_until 在 EOF 会带着无换行的残行返回 Ok(n>0)，
+                   // 所以残行已在循环内喂过，此处不需额外补处理）
         }
         let text = String::from_utf8_lossy(&line);
         let text = text.trim_end_matches(['\n', '\r']);
         if !feed_line_or_fail(&tx, text, &mut carry, &mut first, &mut got_audio) {
             return; // 已发出 Fail
-        }
-    }
-
-    // 收尾：服务端最后一个 chunk 可能不带换行
-    if !line.is_empty() {
-        let text = String::from_utf8_lossy(&line);
-        let text = text.trim_end_matches(['\n', '\r']);
-        if !feed_line_or_fail(&tx, text, &mut carry, &mut first, &mut got_audio) {
-            return;
         }
     }
 
@@ -218,25 +230,16 @@ fn feed_line_or_fail(
         if let Some(pcm) = strip_wav_container(&bytes) {
             bytes = pcm;
         }
-        *first = false;
     }
     let aligned = align_bytes(carry, &bytes);
     if aligned.is_empty() {
+        // 还没真正交出首块（网关常先推一个空 base64 的 delta）：探测位必须保留，
+        // 否则真正的 WAV 首块会逃过剥头，开头 44 字节变成爆音
         return true;
     }
+    *first = false;
     *got_audio = true;
     tx.send(StreamItem::Chunk(aligned)).is_ok()
-}
-
-/// 错误消息进用户弹窗前必须剪短（HTTP body 可能是一大坨 HTML/JSON）
-fn trim_for_msg(s: &str) -> String {
-    const CAP: usize = 200;
-    let flat: String = s.chars().filter(|c| !matches!(c, '\n' | '\r')).collect();
-    if flat.chars().count() <= CAP {
-        return flat;
-    }
-    let cut: String = flat.chars().take(CAP).collect();
-    format!("{cut}…")
 }
 
 // ── 注册表 ────────────────────────────────────────────────
