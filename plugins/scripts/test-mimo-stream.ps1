@@ -13,6 +13,7 @@
 # 也可先用 $env:MIMO_TTS_API_KEY / $env:VA_CLONE_SAMPLE 显式指定。
 # 想测长句首块预算：先设 $env:MIMO_PROBE_TEXT = "长文本"（两个探针都会用这句）。
 # 探针输出的 [probe] 行自带 profile（debug/release），拿哪种跑都不会弄混数字。
+# dot-source 时若前置条件不满足会抛异常终止你的脚本（故意的：宁可抛，也不要留着明文 Key 往下跑）。
 # 注意：本脚本不打印 Key（隐私规则）。
 
 param(
@@ -43,7 +44,8 @@ $PrevEncoding = [Console]::OutputEncoding
 # 从取 Key 开始就进 try：`[SKIP]` 两条早退分支原先放在 try 之外用 `exit 1` 收场，
 # 而 dot-source 实测 **脚本里的 exit 并不会结束调用者进程**（调用者接着往下跑，
 # 退出码还被吞成 0），于是明文 Key 与 `$ErrorActionPreference = Stop` 照样留在调用者会话里。
-# 改成 throw 后所有出口都经过 finally，恢复逻辑只有一份。
+# 改成 throw 后，取 Key 之后的所有出口都经过 finally，恢复逻辑只有一份
+# （try 之前那几行只是算脚本自身路径与存旧值，本身不会失败）。
 try {
     # Push-Location 必须在 try 里：目录不存在时也要走到 finally 的恢复逻辑
     Push-Location $PluginDir
