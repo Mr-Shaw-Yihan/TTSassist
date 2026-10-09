@@ -1152,17 +1152,21 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 | 7 一次性迁移三段 | 完成（TDD 先红后绿；审查 **Request Changes**，0C/1I/3M——Important 的事实我实跑证实、定性修正后收口；**计划期望值 168 又是算式漏项，已修正并连带下游**） | `c71aca8` `d32b642` |
 | 8 克隆样本命令去引擎化 + 卸载兜底 | 完成（TDD 先红后绿；审查 **Request Changes**，0C/2I/5M——两条 Important 都先核实了事实前提再收口；**计划期望 174 只算了主体，收口后再 +2**） | `bf8cfb8` `f9cd4f3` |
 | 9 流式播放态事件 + 桥路径走流式 | 完成（不新增单测，按计划；审查 **Request Changes**，0C/2I/4M——两条 Important 都是本提交改道引入的“用户会撞见”缺口，已收口） | `e98eb03` `cfd36f1` |
-| 10–13 | 未开始 | — |
+| 10 远程配置覆盖 help_url | 完成（TDD 先红后绿；审查 **Approved**，0C/0I/2M——两条 Minor 都不是缺陷，已转成注释固化决策；**本节顺带用脚本实跑订正了 §九 的删/增例数分解**） | `b5cd985` `f51dc26` |
+| 11–13 | 未开始 | — |
 
-下一个动作：**Task 10 Step 1**（远程配置按插件 id 覆盖 `help_url`）。
+下一个动作：**Task 11 Step 1**（新建 `CloneSamplePanel.tsx`，前端去 MiMo 化）。
 必读的三条前置：
-① 三个改动点必须同步：`commands/remote.rs` 的 `RemoteConfig` 加 map + `effective_help_url`、
-   `commands/plugins.rs` 的 `get_plugin_config` 改走生效入口、`plugins/remote-config.json` 加覆盖表；
-   已知陷阱：`remote.rs:311` 那个用字面量构 `RemoteConfig` 的测试必须补字段（否则 `missing field`）；
-② 前端**唯一生效点**是 `get_plugin_config`（`PluginConfigPanel.tsx:63` 读 `info.help_url`），
-   `list_plugins` 返回的 `PluginInfo.config.help_url` 前端无人读 — 不要去改那条链；
-③ map 语义是“读不到就不动”：线上 JSON 缺失/解析失败不得把已有 `help_url` 抹成空。
-宿主基线仍为 **176 passed / 3 ignored**（Task 9 收口只改实现与注释、不增删测试），Task 10 应到 **179**。
+① 动手前先确认 `npx tsc --noEmit` 当前是绿的——本 Task 的护栏就是它
+   （`tsconfig.json` 开了 `noUnusedLocals`+`noUnusedParameters`，Step 2 删漏一个 import 就红）；
+② Step 2 是“10 处碎删 + 2 处整块删”，行号会随删除前移——按计划提醒的
+   **先大块后小块**动手，且每删一处就 `tsc` 一次，不要攒到最后；
+③ 克隆样本卡的渲染条件必须是 `cur.voices.find(v => v.id === "clone")`（插件自述），
+   **不得**往任何硬编码引擎集合里加名字（基座合同 §3.6-1，Task 12 会上护栏）。
+已知陷阱：`settingsStore.test.ts` 的 `EXPECTED_KEYS` 仍含 `mimo_api_key` 三行，本版本**不删**
+（后端 `storage/types.rs` 字段还在）；`src/types/index.ts:34` 与 `invoke.ts:238` 同属已挂号残留。
+宿主基线现为 **179 passed / 3 ignored**（Task 10 落 3 条单测）；Task 11 不改宿主测试，
+验收口径是 `npx tsc --noEmit` 零输出 + `npm run test:run` 全绿 + `cargo test --lib` 仍 179。
 另需回看：探针遗留项已全部回答——`hound` 实测没用到、已连同 `serde` 删除；
 但 `FIRST_CHUNK_TIMEOUT=120s` 的余量已改写：release 下出现过一次 **49.2s** 的克隆首块离群值（同文本其余都是 1.6~1.8s），
 所以余量只有 2.4 倍而不是旧说法的 13 倍——**已登记为 Task 13 真机验收前的待决策项**（若出现克隆长句超时就提到 180~240s，仍小于 `REQUEST_TIMEOUT=300s`）。
@@ -1176,10 +1180,10 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 交接提醒（容易错的三件事）：
 1. 每条 `cargo` 命令都必须先显式设 `CARGO_TARGET_DIR`（宿主用 `src-tauri\target`，插件用 `plugins\target`，两者不可互换）——曾有会话把全局 target 指到别的工作树，直接覆盖了别人的 exe。
 2. 提交一律逐文件 `git add`，禁止 `git add -A`/`.`；`src-tauri/resources/plugins/*.zip` 是跟踪文件，新 zip 必须逐个 add（连删除也要 add）。
-3. 每个 Task 的期望测试数写在各 Task 末尾，对不上就是漏删/漏测；当前基线：宿主 **176 passed / 3 ignored**
-   （Task 8 实落：主体提交时 174 = 170 + 4，与计划一致；审查收口又补 2 条（缺值判定同口径 + 跳过未就绪本地引擎）
-   并搬走 1 条（`样本env设置与移除` 从 `plugins.rs` 迁到 `clone_voice.rs`，总数不变）→ **176**。
-   下游 Task 9→176（不增删）/ 10→179 / 13 门禁→179 已同步）；
+3. 每个 Task 的期望测试数写在各 Task 末尾，对不上就是漏删/漏测；当前基线：宿主 **179 passed / 3 ignored**
+   （Task 10 实落：176 + 3 条 help_url 覆盖测试 = **179**，与计划期望一致。
+   测属性总数已用脚本实测对账：`dc55a57` 基线 174 → 当前 182，差 = 删 10（`tts/mimo.rs` 8 + `tts/mod.rs` 2）
+   + 新增 18；下游 Task 13 门禁仍为 **179**）；
    mimo-tts 24 passed / 0 warning。
 4. `verify-index.ps1 -SkipDist` 的基线不是全绿：`minimax-tts-stream` 那条 `RES-CK` 是仓库既有问题（见 Task 3 实施记录）。
    判定本 Task 成败只看自己那一行是否 `OK`，不要为了让表格全绿去改别人的条目。
@@ -3627,6 +3631,58 @@ git commit -m "feat(远程配置): 新增按插件 id 覆盖 help_url（换邀�
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 
+### Task 10 实施记录
+
+实测门禁（`b5cd985` 主体 + `f51dc26` 审查收口）：
+
+| 项 | 结果 |
+|---|---|
+| TDD | 先红：`cargo test --lib help_url` 报 `E0560 has no field named plugin_help_url` + `E0425 cannot find function effective_help_url`（与 Step 2 预期逐字对得上）再落实现 |
+| 编译 | `cargo check --lib --tests` 两次（主体 / 收口）均出现 `Checking voiceassist` 行 = 真实重编，零 warning 零 error |
+| 测试 | `cargo test --lib` = **179 passed / 0 failed / 3 ignored**，与计划期望一致（176 + 3） |
+| 守卫 | `check-bom.ps1` / `check-log-hygiene.ps1` 均 exit 0（39 json / 19 ps1；宿主 57 + 插件 31 .rs，计数未变） |
+| 基座残留 | 引擎专名命中数 **281 → 281**（本 Task 零新增）；`plugins/remote-config.json` 首字节 `7B`（无 BOM）且三个字段均可解 |
+
+跨边界（编译器抓不到）的两处已核：
+- **覆盖 key 能命中**：`mimo-tts/package.ps1` 与 `mimo-asr/package.ps1` 的 `$ConfigDecl.help_url`
+  均为 `https://platform.xiaomimimo.com?ref=5P9J2B`，而两个宏里的 `id:` 就是 `mimo-tts` / `mimo-asr`
+  （`manifest_of`/`get_plugin_config` 用的也是同一裸 id，无前缀）⇒ map key 与插件 id 精确一致；
+  且 `mimo-tts/package.ps1` 仍有一条现存注释（“运行期会被远程配置 plugin_help_url 覆盖”）与本改动对。
+- **前端消费面只有一处**：grep `src/` 得 `help_url` 仅 `types/index.ts`（类型声明）与
+  `PluginConfigPanel.tsx:63 读 / 141 用 openUrl 打开`；`list_plugins` 返的 `PluginInfo.config.help_url` 无人读
+  ⇒ 只改 `get_plugin_config` 即全量生效（约束③成立）。
+
+**对计划的有意偏离两处**（后续 Task 按此为准）：
+1. 单测里的插件 id 用中立占位 `demo-tts`（计划给的是 `mimo-tts`）。`effective_help_url` 与 id 无关，
+   不需要真名；而 `remote.rs` 在护栏扫描范围内，写真名会白给基线新增引擎专名命中。
+   同理新测试构 `RemoteConfig` 用 `..Default::default()` 而不写 `mimo_invite_code:` 字段名。
+2. `effective_help_url` 的 doc 注释不引用 `doc/MiMo插件化与流式默认设计.md` 字面路径
+   （改成“插件化与流式默认设计文档 §3.2-4”）：`doc/` 在 git 仓库外、这个工作树里根本不存在该路径，
+   写全名既不可解析又多一处 mimo 命中。
+
+另：本 Task 收尾时用脚本（枚举 `dc55a57` 与工作树的 `#[test]`/`#[tokio::test]` 属性个数）实测对账了
+测属性总数：**base=174 → now=182**，逐文件差为删 10（`tts/mimo.rs` 8 + `tts/mod.rs` 2）、
+新增 18。§九 原写的“删 9 例（mimo.rs 7 + tts/mod.rs 2）/ 新增 19 例”是推演值，已按实跑订正
+（提醒：这类数字不要靠背，`git show` 对比统计一次即可；脚本需取两个 commit 的**文件并集**，
+否则会漏算已删除文件里的那些例）。
+
+#### Task 10 审查收口
+
+审查结论 **Approved**：0 Critical / 0 Important / 2 Minor（两条均标注“非必改”）。
+重点是我自己没结论的两项待定，审查者给了明确定级，我**逐条复核了它的事实前提**再处置：
+
+| 编号 | 处置 | 说明 |
+|---|---|---|
+| A 信任边界：`help_url` 改为云端可覆盖的外部字符串，本提交只做 trim/非空，无协议校验 | **定为可接受，不采纳加 filter** | 前提我亲自验证过：`capabilities/default.json` 只授 `opener:default`；该权限 = `allow-open-url` + `allow-default-urls`，而后者（`tauri-plugin-opener-2.5.4/permissions/allow-default-urls.toml` 原文）只四条 glob：`mailto:*`/`tel:*`/`http://*`/`https://*` ⇒ `file:`/`javascript:`/垃圾串在插件 scope 层就被拒，前端 `.catch(() => {})` 吞掉。**不采纳 filter 的理由不是“已有兜底”而是“重复过滤会新增一种被默默丢掉的排查坑”**：若远端给了 `mailto:`（合法但非网页）会被代码提前剔掉而退兜底，比交给 scope 统一拒更难排查；改为在 `help_url_override` 上写注释钉住这个耦合点（改 capability 权限集时必须回看） |
+| B `effective_help_url` 不看缓存 `fetched_at` TTL（与 `get_remote_config_inner` 不一致） | **定为非缺陷，已加注释** | 推理链闭合：本函数是同步命令里的只读入口，无权触发刷新；它只有“用过期覆盖值”与“退 manifest 静态兜底”两个选项，而后者**更旧** ⇒ 拿过期覆盖严格优于拿新鲜但陈旧的兜底；TTL 职责在写入方。已按建议补注释防后续重复质疑 |
+| 其余常规项（可见性提升、`id.clone()` 必要性、空 map/空白串/缓存损坏/无 config 声明四个边界、断言强度） | **均通过，无需改动** | `CacheFile` 提 `pub(crate)` 但 `fetched_at`/`data` 仍私有，只经 `help_url_override()` 递值；无 config 声明在 `get_plugin_config` 里已 `ok_or` 早返回，不触及新逻辑 |
+
+收口内容（`f51dc26`）：只往两处函数文档上各加一段“为何这么写”的注释（+11 行，零行为变更），
+故基线仍为 179/0/3，不新增测试。选加而不改行为的原因：A 的残余风险是“官方 JSON 被篡改后换钓鱼域”，
+这与 `mimo_invite_code` 同源同信任级，属远程配置设计固有，不属本 Task 范围。
+
+---
+
 ## Task 11：前端去 MiMo 化（删引擎卡 / 下拉动态 / 克隆卡改由 voices 驱动）
 
 **Files:**
@@ -4382,7 +4438,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\plugins\scripts\test-mimo-stream
 | 项 | 结果 |
 |---|---|
 | 插件 crate `plugins/engines/mimo-tts` | 已建（client/stream 分层，双导出）；单测 24 passed / 2 ignored（已实跑核正：本行原写 23 与基线不一致） |
-| 宿主门禁 | `cargo test --lib` 179 passed / 0 failed / 3 ignored（基线 170：删内置 MiMo 的 9 例单测（mimo.rs 7 + tts/mod.rs 2）与 1 例 `#[ignore]` 实网测，新增 19 例迁移/兜底/覆盖/归一测试；逐段推导见上方门禁累计表） |
+| 宿主门禁 | `cargo test --lib` 179 passed / 0 failed / 3 ignored（基线 170：删内置 MiMo 的 10 例单测（`tts/mimo.rs` 8 + `tts/mod.rs` 2，其中 1 例是 `#[ignore]` 实网测，故 passed 只减 9），新增 18 例迁移/兜底/覆盖/归一测试；例数分解已用脚本实测对账（测属性 base 174 → now 182），逐段推导见上方门禁累计表） |
 | 克隆首块 RIFF 实测 | （填 Step 2 实测值） |
 | 预置音色块数 / 首块 TTFB | （填 Step 2 实测值） |
 | 听感保护是否需补（预缓冲/水位） | （按 Step 2 结论填：实测无断音则不补） |
