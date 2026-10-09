@@ -347,27 +347,78 @@ mod tests {
         assert_eq!(info["channels"], 1);
     }
 
+    /// 计时数字必须自带 profile：debug 下 rustls + 大 base64 慢很多，
+    /// 不标 profile 的绝对值事后根本判断不了它能不能支撑超时决策。
+    fn profile() -> &'static str {
+        if cfg!(debug_assertions) { "debug" } else { "release" }
+    }
+
+    /// 拉干一条会话：返回（块数, 首块耗时ms, 总耗时ms, 首块前 4 字节, 累计 PCM）。
+    /// 计时从 `open()` 返回后才起算，而 `FIRST_CHUNK_TIMEOUT` 也是从会话建立后开始计时
+    /// （stream.rs 里 `last_progress` 的初值就是 `Instant::now()`），两者口径一致——
+    /// 拿首块耗时判超时预算是对的；但用户实际听见的延迟还包含握手与响应头，那部分不在本表里。
+    /// 两只探针的收块循环原本逐行重复，抽出来顺带统一两个口径：
+    /// 首块不足 4 字节时取 `min`（不能让探针自己越界 panic 而误报成“剥头失效”），
+    /// 以及“空块=终态”的约定只写一遍。
+    fn drain_session(session: &StreamSession) -> (usize, u64, u64, [u8; 4], Vec<u8>) {
+        let t0 = Instant::now();
+        let mut chunks = 0usize;
+        let mut first_ms = 0u64;
+        let mut first_head = [0u8; 4];
+        let mut pcm = Vec::<u8>::new();
+        loop {
+            match session.next_chunk() {
+                Ok(b) if b.is_empty() => break,
+                Ok(b) => {
+                    if chunks == 0 {
+                        first_ms = t0.elapsed().as_millis() as u64;
+                        let n = b.len().min(4);
+                        first_head[..n].copy_from_slice(&b[..n]);
+                    }
+                    chunks += 1;
+                    pcm.extend_from_slice(&b);
+                }
+                Err(e) => panic!("拉块失败: {e}"),
+            }
+        }
+        (chunks, first_ms, t0.elapsed().as_millis() as u64, first_head, pcm)
+    }
+
+    /// 按插件自述的采样率/声道数算 PCM 时长（16bit = 2 字节）
+    fn pcm_ms(pcm: &[u8]) -> u64 {
+        let bytes_per_ms =
+            crate::client::STREAM_SAMPLE_RATE as u64 * 2 * crate::client::STREAM_CHANNELS as u64;
+        pcm.len() as u64 * 1000 / bytes_per_ms
+    }
+
     /// 把探针 PCM 封成 WAV 落到临时目录，供人耳试听（只手动跑，不进常规门禁）
     fn dump_probe_wav(pcm: &[u8], tag: &str) {
         let path = std::env::temp_dir().join(format!("mimo-probe-{tag}.wav"));
-        let mut out = Vec::with_capacity(pcm.len() + 44);
         let rate = crate::client::STREAM_SAMPLE_RATE;
-        let data_len = pcm.len() as u32;
+        let channels = crate::client::STREAM_CHANNELS as u16;
+        // WAV 的长度字段是 u32：探针永远够不到 4GB，但静默截断会产出“头对不上”的坏文件，
+        // 不如钉在 u32::MAX，听不了就是一眼能看出来的错
+        let data_len = u32::try_from(pcm.len()).unwrap_or(u32::MAX);
+        let mut out = Vec::with_capacity(pcm.len() + 44);
         out.extend_from_slice(b"RIFF");
-        out.extend_from_slice(&(36 + data_len).to_le_bytes());
+        out.extend_from_slice(&data_len.saturating_add(36).to_le_bytes());
         out.extend_from_slice(b"WAVEfmt ");
         out.extend_from_slice(&16u32.to_le_bytes());
-        out.extend_from_slice(&1u16.to_le_bytes());
-        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes()); // 音频格式：1 = PCM
+        out.extend_from_slice(&channels.to_le_bytes());
         out.extend_from_slice(&rate.to_le_bytes());
-        out.extend_from_slice(&(rate * 2).to_le_bytes());
-        out.extend_from_slice(&2u16.to_le_bytes());
+        out.extend_from_slice(&(rate * channels as u32 * 2).to_le_bytes());
+        out.extend_from_slice(&(channels * 2).to_le_bytes());
         out.extend_from_slice(&16u16.to_le_bytes());
         out.extend_from_slice(b"data");
         out.extend_from_slice(&data_len.to_le_bytes());
         out.extend_from_slice(pcm);
-        std::fs::write(&path, &out).ok();
-        println!("[probe] 试听文件: {}", path.display());
+        match std::fs::write(&path, &out) {
+            // allowlog: #[ignore] 探针试听文件的落盘路径（%TEMP%），不含 Key/文本/音频内容
+            Ok(_) => println!("[probe] 试听文件: {}", path.display()),
+            // allowlog: 只打写入错误本身；写失败不影响断言，但不能假装文件存在
+            Err(e) => println!("[probe] 试听文件写入失败（不影响断言）: {e}"),
+        }
     }
 
     /// 探针待合成文本：默认短句，可用 `MIMO_PROBE_TEXT` 临时换长句。
@@ -382,9 +433,11 @@ mod tests {
     }
 
     /// 实网探针①：预置音色应当是"多块"真流式。
-    /// 跑法：plugins/scripts/test-mimo-stream.ps1（或手动 cargo test --lib -- --ignored --nocapture）
-    /// 注意用 `--release`：debug 下 rustls + 大 base64 慢一到两个量级，
-    /// 实测同一只克隆探针 debug 要 60s+、release 只要 0.8s，拿 debug 数字做超时决策会误判。
+    /// 跑法：`plugins/scripts/test-mimo-stream.ps1`。默认跑 **release**（交付的 dll 就是 release 构建），
+    /// 加 `-Quick` 才跑 debug——实测同一只克隆探针 release 要 1.9s、debug 能在 1.9s ~ 74s 之间乱跳
+    /// （TLS/base64 在 debug 下慢一到两个量级），所以 **debug 的数字不能拿来定超时预算**；
+    /// 两种 profile 的实测值都记在计划 Task 4 实施记录里（release 下预置音色首块甚至不足 1ms，
+    /// 说明首块早在 `open()` 期间就到了，那部分延迟不在此计时窗口内）。
     #[test]
     #[ignore = "需真实 MIMO_TTS_API_KEY，手动运行"]
     fn 实网探针_预置音色应为多块流式() {
@@ -397,26 +450,14 @@ mod tests {
             None,
         );
         let session = StreamSession::open(key.trim().to_string(), body).expect("打开流式会话失败");
-        let t0 = Instant::now();
-        let mut chunks = 0usize;
-        let mut first_ms = 0u64;
-        let mut pcm = Vec::<u8>::new();
-        loop {
-            match session.next_chunk() {
-                Ok(b) if b.is_empty() => break,
-                Ok(b) => {
-                    if chunks == 0 {
-                        first_ms = t0.elapsed().as_millis() as u64;
-                    }
-                    chunks += 1;
-                    pcm.extend_from_slice(&b);
-                }
-                Err(e) => panic!("拉块失败: {e}"),
-            }
-        }
-        let ms_total = t0.elapsed().as_millis();
-        let audio_ms = pcm.len() as u64 * 1000 / (crate::client::STREAM_SAMPLE_RATE as u64 * 2);
-        println!("[probe] 首块 {first_ms}ms / 块数 {chunks} / 音频 {audio_ms}ms / 总耗时 {ms_total}ms");
+        let (chunks, first_ms, ms_total, _first_head, pcm) = drain_session(&session);
+        // allowlog: 只打 profile/字数/耗时/块数；字数不是文本内容，不含 Key 与待合成文本
+        println!(
+            "[probe] 预置：profile {} / 字数 {} / 首块 {first_ms}ms / 块数 {chunks} / 音频 {}ms / 总耗时 {ms_total}ms",
+            profile(),
+            text.chars().count(),
+            pcm_ms(&pcm)
+        );
         assert!(!pcm.starts_with(b"RIFF"), "流式块不应带 WAV 容器头");
         assert_eq!(pcm.len() % 2, 0, "PCM 必须 2 字节对齐");
         assert!(chunks > 1, "预置音色未拿到多块：服务端可能退化为整段返回（持续如此需重估流式收益）");
@@ -440,37 +481,21 @@ mod tests {
         let body = crate::client::build_stream_request_body(&model, &text, voice.as_deref(), None);
         let session = StreamSession::open(key.trim().to_string(), body).expect("打开流式会话失败");
         // 计时必须记：兼容模式（克隆）的“首块前等待”就是 FIRST_CHUNK_TIMEOUT 能不能立住的唯一实测证据
-        let t0 = Instant::now();
-        let mut chunks = 0usize;
-        let mut first_ms = 0u64;
-        let mut first_head = [0u8; 4];
-        let mut got_first = false;
-        let mut pcm = Vec::<u8>::new();
-        loop {
-            match session.next_chunk() {
-                Ok(b) if b.is_empty() => break,
-                Ok(b) => {
-                    if !got_first {
-                        first_ms = t0.elapsed().as_millis() as u64;
-                        // 取 min：首块极端情况下可能不足 4 字节，不能因为探针自己越界而误报失败
-                        let n = b.len().min(4);
-                        first_head[..n].copy_from_slice(&b[..n]);
-                        got_first = true;
-                    }
-                    chunks += 1;
-                    pcm.extend_from_slice(&b);
-                }
-                Err(e) => panic!("克隆流式拉块失败: {e}"),
-            }
-        }
-        let ms_total = t0.elapsed().as_millis();
-        let audio_ms = pcm.len() as u64 * 1000 / (crate::client::STREAM_SAMPLE_RATE as u64 * 2);
+        let (chunks, first_ms, ms_total, first_head, pcm) = drain_session(&session);
+        // allowlog: 只打 profile/字数/耗时/块数/首块前 4 字节（纯音频字节）；不含 Key 与待合成文本
         println!(
-            "[probe] 克隆：块数 {chunks} / 首块 {first_ms}ms / 音频 {audio_ms}ms / 总耗时 {ms_total}ms / 首块前 4 字节 {:?}",
+            "[probe] 克隆：profile {} / 字数 {} / 块数 {chunks} / 首块 {first_ms}ms / 音频 {}ms / 总耗时 {ms_total}ms / 首块前 4 字节 {:?}",
+            profile(),
+            text.chars().count(),
+            pcm_ms(&pcm),
             first_head
         );
         assert!(chunks >= 1, "克隆音色未返回任何音频块");
-        assert_ne!(&first_head, b"RIFF", "首块仍是 WAV 容器头：strip_wav_container 未生效");
+        // 断累计结果而不是断补零后的 4 字节数组：首块只有 2 字节时后者会静默放过 "RI"
+        assert!(
+            !pcm.starts_with(b"RIFF"),
+            "首块仍是 WAV 容器头：strip_wav_container 未生效"
+        );
         assert_eq!(pcm.len() % 2, 0, "PCM 必须 2 字节对齐");
         dump_probe_wav(&pcm, "clone");
     }
