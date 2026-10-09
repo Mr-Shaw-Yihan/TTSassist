@@ -1149,16 +1149,18 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 | 4 实网探针 + 冒烟脚本 | 完成（**已真跑**，RIFF 问题已关掉；三轮审查——第一轮 1C/1I/5M、第二轮 1I/3M、第三轮 1I 均收口） | `f9cacd2` `6140aa3` `9babe7d` `5075fc9` `54b176f` `7692d3d` `f3042da` `7747fad` |
 | 5 mimo-asr 补 config + 宿主换注入 | 完成（**6 文件同提交已核对**；审查 1 Important / 1 Minor，Important 按“不采纳”处置并转为新硬约束） | `c1ce899` |
 | 6 宿主删内置 MiMo + 默认引擎 edge-tts | 完成（TDD 先红后绿；审查 **Approved**，0C/1I/6M，其中 3 条 Minor 当场收口；**计划期望值 161 是算式错，已修正为 163 并连带修正下游**） | `06c0a3b` `d4f7eb6` `9de5ee2` |
-| 7–13 | 未开始 | — |
+| 7 一次性迁移三段 | 完成（TDD 先红后绿；审查 **Request Changes**，0C/1I/3M——Important 的事实我实跑证实、定性修正后收口；**计划期望值 168 又是算式漏项，已修正并连带下游**） | `c71aca8` `d32b642` |
+| 8–13 | 未开始 | — |
 
-下一个动作：**Task 7 Step 1**（一次性迁移三段：引擎标识 `mimo`→`mimo-tts` / `tts_model` / 遗留 Key）。
-必读的两条前置：
-① **Task 6 已先于 Task 7 落地**（硬约束已满足），内置 MiMo 已无任何代码读 `settings.mimo_api_key`，
-   所以现在“搬入 plugin_config 后清空旧键”是安全的；
-② **T6-M-5**：`plugins/mod.rs:154` 那条测试夹具拿 `{"tts_engine":"mimo"}` 当“非 edge”代表，
-   Task 7 一加映射它必然红——动手前先读 Task 6 审查收口表里那行（两种改法语义不同，
-   最坏修法是给迁移函数加“仅 edge 才处理”的收紧判断，那会把 Task 7 想要的语义锁死）。
-宿主基线现为 **163 passed / 3 ignored**（Task 7 后应到 168）。
+下一个动作：**Task 8 Step 1**（克隆命令去引擎化 + 卸载兜底）。
+必读的三条前置：
+① **T6-I-1**：`VA_CLONE_SAMPLE` 目前只在 `lib.rs` setup 里注入一次，用户导入/删除样本后
+   不会刷新 env，导致“导入即用”实际退化成“重启才可用”——计划已在 Task 8 排了“实时通告”，
+   动手时不得只做去引擎化就交差；
+② **T6-M-4**：`commands/clone_voice.rs` 的报错文案仍带引擎专名，Task 8 去引擎化时一并收；
+③ Task 7 的迁移只搬引擎标识/音色/Key，`tts_model` 作为结构体通用字段仍会被写回 `"default"`
+   （见 Task 7 实施记录），Task 8 若碰克隆音色选择，真相只能取 `plugin_voices`，不要回读 `tts_model`。
+宿主基线现为 **170 passed / 3 ignored**（Task 8 后应到 174）。
 另需回看：探针遗留项已全部回答——`hound` 实测没用到、已连同 `serde` 删除；
 但 `FIRST_CHUNK_TIMEOUT=120s` 的余量已改写：release 下出现过一次 **49.2s** 的克隆首块离群值（同文本其余都是 1.6~1.8s），
 所以余量只有 2.4 倍而不是旧说法的 13 倍——**已登记为 Task 13 真机验收前的待决策项**（若出现克隆长句超时就提到 180~240s，仍小于 `REQUEST_TIMEOUT=300s`）。
@@ -1172,8 +1174,9 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 交接提醒（容易错的三件事）：
 1. 每条 `cargo` 命令都必须先显式设 `CARGO_TARGET_DIR`（宿主用 `src-tauri\target`，插件用 `plugins\target`，两者不可互换）——曾有会话把全局 target 指到别的工作树，直接覆盖了别人的 exe。
 2. 提交一律逐文件 `git add`，禁止 `git add -A`/`.`；`src-tauri/resources/plugins/*.zip` 是跟踪文件，新 zip 必须逐个 add（连删除也要 add）。
-3. 每个 Task 的期望测试数写在各 Task 末尾，对不上就是漏删/漏测；当前基线：宿主 **163 passed / 3 ignored**
-   （Task 6 实落；原计划写的 161 是算式把 mimo.rs 的 7 个单测记成 8 个，已修正，下游 Task 7→168/8→172/10→175 同步）；
+3. 每个 Task 的期望测试数写在各 Task 末尾，对不上就是漏删/漏测；当前基线：宿主 **170 passed / 3 ignored**
+   （Task 7 实落：Step 5 提交时 167——计划写的 168 是同一类算式漏项，把“1 条测换成 3 条”当成净增 3；
+   审查收口再补 3 条 → 170。下游 Task 8→174 / 9→174 / 10→177 / 13 门禁→177 已同步）；
    mimo-tts 24 passed / 0 warning。
 4. `verify-index.ps1 -SkipDist` 的基线不是全绿：`minimax-tts-stream` 那条 `RES-CK` 是仓库既有问题（见 Task 3 实施记录）。
    判定本 Task 成败只看自己那一行是否 `OK`，不要为了让表格全绿去改别人的条目。
@@ -2293,7 +2296,8 @@ TDD 按 Step 1→2 先红后绿：新测试首跑 FAIL 于 `assertion left == ri
 1. **期望测试数 161 → 163（计划算式错）**。`tts/mimo.rs` 实测是 **7 个 `#[test]` + 1 个
    `#[tokio::test] #[ignore]`**，不是“8 个单测 + 1”；那句括号里的枚举把
    `引擎名和类别正确` 这一条测当两条数了。已用 `git show 06c0a3b^:…/mimo.rs` 逐行数属性行核实，
-   并同步修正下游所有推导值（Task 7 168 / Task 8 172 / Task 9 172 / Task 10 175 / Task 13 门禁 175）。
+   并同步修正下游所有推导值（当时改成 Task 7 168 / Task 8 172 / Task 9 172 / Task 10 175 / Task 13 门禁 175；
+   这一批推导值已被 Task 7 实施记录再次修正，以 Task 13 门禁段的累计表为准）。
    另：该文件实际 251 行（计划写 221）。
 2. **`tts/mod.rs` 头注释去掉引擎名**。计划给的替换文本里含“edge、MiMo 等均已抽出为插件”，
    而 Task 12 的护栏**连注释一起扫**（`$patterns` 含 `mimo`、大小写不敏感），照抄会白给基线加一条。
@@ -2616,7 +2620,10 @@ $env:CARGO_HTTP_CHECK_REVOKE = "false"
 $env:CARGO_TARGET_DIR = "d:\Docs\Project\TTKook\TTKook-mimo-plugin\src-tauri\target"
 cargo test --lib
 ```
-预期：**168 passed; 0 failed; 3 ignored**（163 + plugins/mod.rs 净增 3 + settings.rs 净增 2）。
+预期：**170 passed; 0 failed; 3 ignored**。
+（原文写 168 = 163 + 3 + 2，**又是一处算式漏项**：Step 1① 把 1 条测换成 3 条是净增 2，不是 3；
+正确算式 163 + 2 + 2 = 167，与 Step 5 实跑一致。审查收口又补了 3 条（组合路径 1 + 漏测 2）→ 最终 170，
+详见下方「Task 7 实施记录」）。
 
 - [ ] **Step 6：提交**
 
@@ -2632,6 +2639,48 @@ git commit -m "feat(迁移): mimo→mimo-tts 三段一次性迁移（引擎标�
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
+
+### Task 7 实施记录
+
+实测门禁（`c71aca8` 主体 + `d32b642` 审查收口）：
+
+| 项 | 结果 |
+|---|---|
+| TDD 先红 | Step 2 实跑：`迁移_` 过滤 6 ran / 4 passed / **2 FAILED**（两条 mimo），`旧mimo` 2 ran / **2 FAILED**，`迁移_无关引擎不动` PASS — 与计划 Step 2 预期逐条吻合 |
+| 编译 | `cargo check --lib --tests` 零 warning 零 error |
+| 测试 | `cargo test --lib` = **167 passed / 0 failed / 3 ignored**（主体提交）→ **170**（审查收口后） |
+| 守卫 | `check-log-hygiene.ps1` / `check-bom.ps1` 均 exit 0；宿主 `.rs` 仍 57 个 |
+
+与计划代码的差异：
+1. **计划 Step 5 的 168 是算式漏项**（与 Task 6 的 161 同一性质）：Step 1① 是把 1 条既有测试整段换成 3 条，净增 2；
+   计划写成“+3”。实跑 167 与修正后的算式 163 + 2 + 2 = 167 一致，不是漏删/漏测。
+2. **`LEGACY_PLUGIN_KEY_MAP` 的读写不对称是故意的**：旧值一律从 `snapshot` 读、空位判断与写入用 `s`。
+   同一旧键映射多个插件时，搬完即清空会让第二条读空——两条新测试就是钉它。
+
+跨边界（编译器抓不到）的两处已主动核实：
+- `lib.rs` 里 `migrate_legacy_engine`（L113）先于 `load_settings`（L115），所以“迁移了但本次会话内存里仍是老标识”的担忧不成立；
+- 迁移写进 `plugin_voices["mimo-tts"]` 的三种取值都能被插件正确解析：`mimo-tts/src/client.rs` 的
+  `resolve_voice_from` 对 `"clone"` 切 `CLONE_MODEL` 并走 `VA_CLONE_SAMPLE`，`"default"`/空串落 `DEFAULT_VOICE = "mimo_default"`，
+  具名音色（冰糖/茉莉/苏打/白桦）原样透传，与 manifest 自述 voices 逐字对上。
+
+#### Task 7 审查收口
+
+审查结论 **Request Changes**：0 Critical / 1 Important / 3 Minor。
+
+| 编号 | 处置 | 说明 |
+|---|---|---|
+| T7-I-1 `tts_model` 删不掉（搬 Key 触发 `save_settings` 整体写回，被默认值补成 `"default"`） | **事实证实、定性修正后收口** `d32b642` | 没直接照建议改落盘路径：先写「老mimo用户完整启动序列终态」测试走 migrate→load→save 的真实顺序，断言终值为 `"default"` 一把跑绿 ⇒ 推断准确。但它不是功能缺陷（插件合成只读 `plugin_voices`），真正的伤害是**注释与单函数断言给出了虚假信心**，故改注释、标注断言边界、并把真实终态与幂等钉成测试。建议的修法一（Key 迁移改走原始 JSON 路径）不采纳：会让结构体迁移与文件迁移职责混淆，风险大于收益 |
+| T7-M-1 注释“新结构体已无这些旧字段”对 `tts_model`/`mimo_api_key` 不成立 | **已修** `d32b642` | 按事实改写，并写清“清掉它是为了让音色回到唯一真相 `plugin_voices`” |
+| T7-M-2 漏测：空串音色、mimo 侧不覆盖对偶、完整启动序列、二次幂等 | **已补 3 条** `d32b642` | `迁移_mimo空音色落到插件自述id`、`迁移_mimo已有插件音色则不覆盖`、`老mimo用户完整启动序列终态`（后者同时钉终值与“二次启动不重写文件”） |
+| T7-M-3 `LEGACY_PLUGIN_KEY_MAP` 注释含引擎专名 | **已改中立** `d32b642` | 少占一条 Task 12 基线；`plugins/mod.rs` 的映射 bullet **保留**——它承载“哪个旧标识映射到哪个插件”的关键信息，且 Task 12 已按“一次性迁移映射表”登记该文件 |
+
+审查者另外提出的两点**不采纳**（已给依据）：
+- “本提交把主人群新引入整表写回路径、可能丢未建模键”：`load_settings` 里的 Key 迁移落盘自 Task 5 就对所有用户生效，
+  且 `update_setting` 本身就是 load→save 全表往返，未新增暴露面；
+- “`load_settings` 不 trim BOM”：既有隐患、非本 Task 引入，且 `migrate_legacy_engine` 输出无 BOM 不会触发；留给后续清理。
+
+转交给 Task 11 的事实：计划 Task 11 Step 2 ⑤⑥ 删掉 `currentVoice`（L81）与 `onPickVoice`/`onImportClone`/`onRemoveClone`（L239-277），
+正是 `tts_model` 仅剩的前端读写点；删掉后该字段成为无人写入的结构体通用残留（字段本身保留，与 `mimo_api_key` 同属“两步走”）。
 
 ---
 
@@ -2936,7 +2985,7 @@ cargo check --lib --tests
 cargo test --lib
 pwsh -NoProfile -ExecutionPolicy Bypass -File ..\tools\check-bom.ps1
 ```
-预期：零 warning；**172 passed; 0 failed; 3 ignored**（168 + Step 1 的 4 条）。
+预期：零 warning；**174 passed; 0 failed; 3 ignored**（170 + Step 1 的 4 条）。
 
 - [ ] **Step 7：提交**
 
@@ -3216,7 +3265,7 @@ cargo check --lib --tests
 cargo test --lib
 ```
 预期：零 warning（报 `cannot find function` 先确认 `generate_tts_stream_impl` 是 `pub`）；
-**172 passed; 0 failed; 3 ignored**（本 Task 不增删测试）。
+**174 passed; 0 failed; 3 ignored**（本 Task 不增删测试）。
 
 - [ ] **Step 6：提交**
 
@@ -3459,7 +3508,7 @@ $env:CARGO_TARGET_DIR = "d:\Docs\Project\TTKook\TTKook-mimo-plugin\src-tauri\tar
 cargo check --lib --tests
 cargo test --lib
 ```
-预期：零 warning；**175 passed; 0 failed; 3 ignored**（172 + Step 1 的 3 条）。
+预期：零 warning；**177 passed; 0 failed; 3 ignored**（174 + Step 1 的 3 条）。
 若有 `missing field plugin_help_url` 编译错 → 是 L311 那个用字面量构 `RemoteConfig`
 的测试，补上字段（Step 3② 已改结构体，该测试必须同步）：
 
@@ -4083,7 +4132,7 @@ $env:CARGO_TARGET_DIR = "d:\Docs\Project\TTKook\TTKook-mimo-plugin\src-tauri\tar
 cargo test --lib
 cargo check --lib --tests
 ```
-预期：**`175 passed; 0 failed; 3 ignored`** 且 `cargo check` **零 warning**。
+预期：**`177 passed; 0 failed; 3 ignored`** 且 `cargo check` **零 warning**。
 算式（对不上就是某处漏删/漏测，回各 Task 的期望值逐段定位）：
 
 | Task | 变化 | 累计 passed | ignored |
@@ -4091,10 +4140,10 @@ cargo check --lib --tests
 | 基线 main@dc55a57 | — | 170 | 4 |
 | Task 5 | 不增不减（只换注入） | 170 | 4 |
 | Task 6 | −7（mimo.rs 单测）−1（mimo.rs 实网测）−2（tts/mod.rs）+1（空串读盘归一）+1（写盘归一，审查收口） | **163** | 3 |
-| Task 7 | +3（plugins/mod.rs 净增）+2（settings.rs） | 168 | 3 |
-| Task 8 | +4（兜底选择纯函数 3 + 样本 env 契约 1） | 172 | 3 |
-| Task 9 | 不加测试（线程接线） | 172 | 3 |
-| Task 10 | +3（help_url 覆盖） | **175** | 3 |
+| Task 7 | +2（plugins/mod.rs：1 条换成 3 条）+2（settings.rs）+3（审查收口：启动序列组合测 1 + 漏测 2） | **170** | 3 |
+| Task 8 | +4（兜底选择纯函数 3 + 样本 env 契约 1） | 174 | 3 |
+| Task 9 | 不加测试（线程接线） | 174 | 3 |
+| Task 10 | +3（help_url 覆盖） | **177** | 3 |
 
 ```powershell
 cd d:\Docs\Project\TTKook\TTKook-mimo-plugin\plugins
@@ -4222,8 +4271,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\plugins\scripts\test-mimo-stream
 
 | 项 | 结果 |
 |---|---|
-| 插件 crate `plugins/engines/mimo-tts` | 已建（client/stream 分层，双导出）；单测 23 passed / 2 ignored |
-| 宿主门禁 | `cargo test --lib` 175 passed / 0 failed / 3 ignored（基线 170：内置 MiMo 的 8 例测（7 单测 + 1 实网）搬进插件，新增 13 例迁移/兜底/覆盖/归一测试） |
+| 插件 crate `plugins/engines/mimo-tts` | 已建（client/stream 分层，双导出）；单测 24 passed / 2 ignored（已实跑核正：本行原写 23 与基线不一致） |
+| 宿主门禁 | `cargo test --lib` 177 passed / 0 failed / 3 ignored（基线 170：删内置 MiMo 的 9 例单测（mimo.rs 7 + tts/mod.rs 2）与 1 例 `#[ignore]` 实网测，新增 16 例迁移/兜底/覆盖/归一测试；逐段推导见上方门禁累计表） |
 | 克隆首块 RIFF 实测 | （填 Step 2 实测值） |
 | 预置音色块数 / 首块 TTFB | （填 Step 2 实测值） |
 | 听感保护是否需补（预缓冲/水位） | （按 Step 2 结论填：实测无断音则不补） |
