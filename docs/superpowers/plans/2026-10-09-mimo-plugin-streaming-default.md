@@ -1153,20 +1153,35 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 | 8 克隆样本命令去引擎化 + 卸载兜底 | 完成（TDD 先红后绿；审查 **Request Changes**，0C/2I/5M——两条 Important 都先核实了事实前提再收口；**计划期望 174 只算了主体，收口后再 +2**） | `bf8cfb8` `f9cd4f3` |
 | 9 流式播放态事件 + 桥路径走流式 | 完成（不新增单测，按计划；审查 **Request Changes**，0C/2I/4M——两条 Important 都是本提交改道引入的“用户会撞见”缺口，已收口） | `e98eb03` `cfd36f1` |
 | 10 远程配置覆盖 help_url | 完成（TDD 先红后绿；审查 **Approved**，0C/0I/2M——两条 Minor 都不是缺陷，已转成注释固化决策；**本节顺带用脚本实跑订正了 §九 的删/增例数分解**） | `b5cd985` `f51dc26` |
-| 11–13 | 未开始 | — |
+| 11 前端去 MiMo 化 + 克隆样本卡 | 完成（审查 **Request Changes**，0C/2I/4M——**六条全部核实后采纳**；其中 I-2/M-3 是**计划片段自身与基座合同冲突**，M-6 抖出一条计划没安排的**能力静默失效**断链，见下方实施记录） | `4474d87` `ac14c26` |
+| 12–13 | 未开始 | — |
 
-下一个动作：**Task 11 Step 1**（新建 `CloneSamplePanel.tsx`，前端去 MiMo 化）。
+下一个动作：**Task 12 Step 1**（`tools/check-base-hygiene.ps1` + 基线 + CI + AGENTS.md 基座合同）。
+必读的三条前置：
+① 基线必须在**当前工作树状态**下生成（Task 11 已收口：前端 `src` 引擎专名命中 154、宿主 `.rs` 281、
+   前端残留 4 处）。人工核对时注意：宿主里 `storage/types.rs:203` 与 `plugins/mod.rs` 的 `edge-tts`
+   是 Task 6「默认引擎随包内置 + 一次性迁移」的决策，**不是要拆的补丁**，按登记处理而不是清除；
+   `VoiceSynthPanel.tsx` 的 `moss` 命中是内置 MOSS 引擎（本体自己提供的能力），同理。
+② 脚本含中文 → 必须补 BOM（Step 2）；计数口径是 **occurrences 不是命中行数**，且读 `git show`
+   前先 `[Console]::OutputEncoding = UTF8`（Task 8 踩过的两个坑，见本 Task 口径提醒）。
+③ 挂 CI 前先复跑一遍全部门禁确认基线干净：`npm run test:run` 45、`cargo test --lib` 179/0/3、
+   `npx tsc --noEmit` 与基线**逐字相同**（⚠ 本工作树 tsc 基线本身带 1 条既有红，见 Task 11 实施记录）。
+
+（以下为 Task 11 时的前置，已完成，保留备查）
+下一个动作：~~**Task 11 Step 1**~~（新建 `CloneSamplePanel.tsx`，前端去 MiMo 化）。
 必读的三条前置：
 ① 动手前先确认 `npx tsc --noEmit` 当前是绿的——本 Task 的护栏就是它
    （`tsconfig.json` 开了 `noUnusedLocals`+`noUnusedParameters`，Step 2 删漏一个 import 就红）；
+   ⚠ 实跑结论：**这条预期不成立**，基线不是绿的（既有 TS2307），详见 Task 11 实施记录；
 ② Step 2 是“10 处碎删 + 2 处整块删”，行号会随删除前移——按计划提醒的
    **先大块后小块**动手，且每删一处就 `tsc` 一次，不要攒到最后；
 ③ 克隆样本卡的渲染条件必须是 `cur.voices.find(v => v.id === "clone")`（插件自述），
    **不得**往任何硬编码引擎集合里加名字（基座合同 §3.6-1，Task 12 会上护栏）。
 已知陷阱：`settingsStore.test.ts` 的 `EXPECTED_KEYS` 仍含 `mimo_api_key` 三行，本版本**不删**
-（后端 `storage/types.rs` 字段还在）；`src/types/index.ts:34` 与 `invoke.ts:238` 同属已挂号残留。
+（后端 `storage/types.rs` 字段还在）；`src/types/index.ts:34` 与 ~~`invoke.ts:238`~~ 同属已挂号残留
+（`invoke.ts` 那处已随 Task 11 收口整段删除，现为 4 处）。
 宿主基线现为 **179 passed / 3 ignored**（Task 10 落 3 条单测）；Task 11 不改宿主测试，
-验收口径是 `npx tsc --noEmit` 零输出 + `npm run test:run` 全绿 + `cargo test --lib` 仍 179。
+验收口径是 `npx tsc --noEmit` **与基线逐字相同** + `npm run test:run` 全绿 + `cargo test --lib` 仍 179。
 另需回看：探针遗留项已全部回答——`hound` 实测没用到、已连同 `serde` 删除；
 但 `FIRST_CHUNK_TIMEOUT=120s` 的余量已改写：release 下出现过一次 **49.2s** 的克隆首块离群值（同文本其余都是 1.6~1.8s），
 所以余量只有 2.4 倍而不是旧说法的 13 倍——**已登记为 Task 13 真机验收前的待决策项**（若出现克隆长句超时就提到 180~240s，仍小于 `REQUEST_TIMEOUT=300s`）。
@@ -3964,8 +3979,10 @@ npx tsc --noEmit
 npm run test:run
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\check-bom.ps1
 ```
-预期：`tsc` **零输出**（报 `declared but never used` 就是 Step 2 删漏了 import/局部变量；
-报 `Cannot find name` 就是大块删到了正在被引用的函数）；
+预期：`tsc` 输出**与动手前的基线逐字相同**（写本计划时以为基线是绿的，实跑发现不是——
+既有 1 条 `src/App.tsx(30,87) TS2307 Cannot find module './utils/composerResize'`，非本分支引入，
+口径与取证见下方「Task 11 实施记录」）。新增 `declared but never used` 就是 Step 2 删漏了
+import/局部变量；新增 `Cannot find name` 就是大块删到了正在被引用的函数。
 `vitest` 全绿（`settingsStore.test.ts` 的 `EXPECTED_KEYS` 仍含 `mimo_api_key`，
 因为 `storage/types.rs` 的字段本版本保留——**不要删那三行**）；BOM 护栏通过。
 
@@ -3977,8 +3994,11 @@ Get-ChildItem -Recurse -File -Include *.ts,*.tsx -Path src | Select-String -Patt
 ```
 预期只剩四类“已挂号、本版本保留”的残留（Task 12 的基线清单就记在这里）：
 - `src/types/index.ts:34`（`mimo_api_key` 字段，跟后端同命）
-- `src/services/invoke.ts:238`（`mimo_invite_code`，只读兼容字段）
+- ~~`src/services/invoke.ts:238`（`mimo_invite_code`，只读兼容字段）~~
+  **已由 Task 11 审查收口删除**（`RemoteConfig`/`getRemoteConfig` 整段是死接口，见实施记录 M-6′）
 - `src/stores/settingsStore.test.ts` 的三处（字段存在性与 `asr_plugin: "mimo-asr"` 样本）
+
+⇒ 实际残留 **4 处**（原计划写 5 处）。
 
 再查遥控端（设计 §3.6 残留清单最后一行“遥控端引擎列表”，护栏不扫 `remote-app/`）：
 
@@ -4006,6 +4026,79 @@ git commit -m "feat(前端): 语音中心删 MiMo 引擎卡，克隆样本卡改
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
+
+### Task 11 实施记录（`4474d87` 主体 + `ac14c26` 审查收口）
+
+全部门禁均为实跑输出，不是推演值：
+
+| 门禁 | 基线 | 本次 | 判定 |
+|---|---|---|---|
+| `npx tsc --noEmit` | 1 条既有 `src/App.tsx(30,87) TS2307 composerResize` | **逐字相同**（仅那 1 条） | ✅ 零新增 |
+| `npm run test:run` | 5 files / 45 tests | 5 / 45 | ✅ |
+| `cargo test --lib`（宿主） | 179 / 0 failed / 3 ignored | 179 / 0 / 3 | ✅ 本 Task 不改宿主测试 |
+| `tools/check-bom.ps1` / `check-log-hygiene.ps1` | exit 0 | exit 0（39 json + 19 ps1；57+31 .rs） | ✅ |
+| 宿主 `src-tauri/src` 引擎专名命中 | 281 | 281（收口新增的 Rust 注释零命中） | ✅ |
+| 前端 `src` 引擎专名命中 | main 157（= 主体 commit） | 154 | ✅ 净减 3（`mimo_invite_code` 1 + 两处 `edge-tts` 2） |
+| `remote-app/` 全模式扫描 | 零输出 | 零输出 | ✅ 引擎列表本就走 `list_plugins` |
+| 提交构成 | — | 11 文件（9M+1D+1A）、+138/-259；收口再 6 文件 +69/-31 | ✅ `git status --porcelain` 为空 |
+
+两个必须先知道的工作树事实（本轮实地踩出来的，**直接影响 Task 12/13**）：
+
+1. **工作树里本没有 `node_modules`**：本目录是 `git worktree`（共 6 棵：VoiceAssist/TTKook-fish/
+   TTKook-hardening/TTKook-mimo-plugin/TTKook-subtitle(.stream)/.teamai 报告树）。`npx tsc` 会命中
+   一个占位包并报 “This is not the tsc command”。正解：在工作树里 `npm ci`（约 2s，108 包；
+   `package.json`/`package-lock.json` 的 blob 与 VoiceAssist 完全相同）。
+   **不要用 junction 指向 VoiceAssist 的 node_modules**——vite/vitest 的缓存与临时产物会串进用户主线工作树。
+2. **tsc 基线不是绿的**：`App.tsx(30,87) Cannot find module './utils/composerResize'`。取证：该文件在
+   `dc55a57` 与 HEAD 的树里都不存在，却在 `VoiceAssist/src/utils/` 里以 `??` 未跟踪状态物理存在
+   ——即 main 自身提交了依赖未提交文件的 import，属既有红灯。本轮不碰不 add，口径改为
+   “与基线逐字相同、零新增”。❗**这条会卡 Task 13 真机验收**（`vite build` 同样会炸）：
+   要么用户在主线补上该文件，要么验收前单独决策——**不要顺手从别人工作树拷未跟踪文件**。
+
+三处有意偏离计划（都已在代码注释里写明理由）：
+
+1. **Step 3 的克隆样本卡片段丢了“删样本后把音色从 clone 退回”**。老代码 `onRemoveClone` 里有
+   等价的 `patch("tts_model","mimo_default")` 兜底，计划片段没有→属计划缺陷被原样继承。
+2. **Step 2⑤ / Step 4① 让写 `?? "edge-tts"` 兜底，与 §3.6-1「本体不得出现引擎身份字面量」直接冲突**；
+   且 `App.tsx` 那处在 `if (!settings) return` 守卫后根本不可达（`Settings.tts_engine` 是非 optional `string`）。
+   改为 `settings.tts_engine`（默认值归宿主 `Settings::default`）与 `settings?.tts_engine ?? ""` +
+   「设置或插件列表未到位不下结论」，顺带修掉 `plugins` 初值为空数组导致的进页首帧误报「插件未安装」红卡。
+3. **Step 3 的替代引擎排序 `needsKey` 只问了“声明过必填”**，宿主 `missing_required_config` 是
+   “声明必填 **且未填**”。收口对齐后补了 `settings.plugin_config` 维度。
+
+一条计划没安排、被本轮审查抖出来的**真断链（优先级高于全部 Minor）**：
+
+- Task 10 把 `help_url` 覆盖做成「同步命令只读缓存」，却**没有任何人负责写缓存**。
+  唯一写入触发是 `get_remote_config` 命令，而它唯一的前端调用点正是本 Task Step 2② 要删的
+  那个邀请码 `useEffect`（`git grep getRemoteConfig 4474d87^` 实测：只有 `VoiceSynthPanel.tsx:16/49` 与定义行）。
+  照计划删完：全新安装永远没有缓存 → 覆盖表永远为空 → 「不发版换运营链接」**静默失效**；
+  而老用户靠历史缓存看起来还是好的——这是最容易漏的一类回归。
+- 收口：宿主启动时 `commands::remote::prime_cache(data_dir)`（`tauri::async_runtime::spawn` 后台拉、
+  失败静默、不阻塞启动），并删掉前端那条已无人调的 `getRemoteConfig`/`RemoteConfig` 封装；
+  `get_remote_config` 命令本身保留（`force` 强制刷新的公开入口）。已知代价（可接受）：
+  首次启动的极短时间窗口内打开配置面板会拿到 manifest 兜底值。
+- **给后续 Task 的教训**：删一个“看起来没人用”的前端调用点前，先问它有没有**副作用**
+  （写缓存/预热/注册），别只看返回值谁消费。
+
+#### Task 11 审查收口（`ac14c26`）
+
+审查结论 **Request Changes 0C/2I/4M**，逐条先核实事实前提再处置（无一条盲改）：
+
+| 编号 | 审查意见 | 前提核实 | 处置 |
+|---|---|---|---|
+| I-1 | 删样本后 `plugin_voices` 仍指 clone | 读 `commands/clone_voice.rs:94-133`（只清 `clone_voice_path/name` + `clear_clone_sample()`，**不碰 `plugin_voices`**）与 `plugins/engines/mimo-tts/src/client.rs:203-228`（`voice=="clone"` 且样本空 → 报「未导入克隆音色样本」）⇒ 因果链成立 | ✅ 采纳：`CloneSamplePanel` 加 `onRemoved`，父组件按插件 `voices` 自述退回首个非 clone 音色 |
+| I-2 | 新增 2 处 `edge-tts` 字面量撞基座合同 | 属实；根因是**计划 Step 2⑤/4① 自身与 §3.6 冲突**（审查者还指出 App.tsx 那处不可达） | ✅ 采纳并回写计划口径（见偏离 2） |
+| M-3 | `needsKey` 少“是否已填”维度 | 读 `commands/plugins.rs:32-43` `missing_required_config` 与 `48-55 setup_ready` 确认宿主口径 | ✅ 采纳（改名 `missingKey`，补 `plugin_config` 维度） |
+| M-4 | `onImported()` 未 await 就并发重拉 settings | 读 `stores/settingsStore.ts:28-31`：`patch` 是「await updateSetting → set 全量」，与 `getSettings` 属两写者抢顺序不定 | ✅ 采纳（`handlePluginVoiceChange` 回传 Promise，先 await 切换再重拉） |
+| M-5 | `plugins` 初值空导致首帧误报红卡 | 属实 | ✅ 采纳（与 I-2 同一处修） |
+| M-6 | `plugin_help_url?` 挂在已无调用者的 `getRemoteConfig` 上 | 调用者确实为 0，但**比审查说的更严重**：它是缓存唯一写入触发点 | ✅ 采纳并按上面“真断链”一节收口（前端删死接口 + 宿主 `prime_cache`） |
+
+审查者同时确认了两条本轮的自主偏离是对的：`setup_status?.ready === true` 对 null 安全、
+与 Rust `.and_then(as_bool).unwrap_or(false)` 同向；`tts_model` 断链不成立（前端已无读写，
+宿主只剩 `diag.rs:355` 只读打印与迁移段把它搬进 `plugin_voices` 后 `obj.remove`）。
+
+**收口后的口径变化（Task 12 生基线时要按这个读）**：前端 `src` 命中 157→154；`mimo` 残留从
+5 处降为 **4 处**（`src/types/index.ts:34` + `settingsStore.test.ts` 三处）；宿主 `.rs` 保持 281。
 
 ## Task 12：基座护栏 `tools/check-base-hygiene.ps1` + CI + AGENTS.md 基座合同
 
@@ -4309,8 +4402,10 @@ $env:CARGO_TARGET_DIR = "d:\Docs\Project\TTKook\TTKook-mimo-plugin\plugins\targe
 cargo test -p mimo-tts
 cargo test
 ```
-预期：`mimo-tts` **23 passed; 0 failed; 2 ignored**（Task 1 的 16 例 + Task 2 的 5 例
-+ Task 4 的 2 例；2 个 ignored 是实网探针）；全 workspace 无其他包 failed。
+预期：`mimo-tts` **24 passed; 0 failed; 2 ignored**（已实跑核正：本行原写 23 是推演值。
+测属性实测共 26 个 = `client.rs` 18 + `stream.rs` 6 + `lib.rs` 2，其中 2 个 `#[ignore]` 是实网探针；
+至于“16+5+2=23 怎么变 24”，按各 Task 实施记录里的审查收口对账，不在这里背数）；
+全 workspace 无其他包 failed。
 
 ```powershell
 cd d:\Docs\Project\TTKook\TTKook-mimo-plugin
@@ -4318,7 +4413,14 @@ npx tsc --noEmit
 npm run test:run
 npm run build
 ```
-预期：`tsc` 静默；`vitest` 全绿；`vite build` 成功。
+预期（**两条口径已由 Task 11 实跑修正，不要按原计划拿“静默/成功”当判据**）：
+- `tsc`：与基线**逐字相同**。基线不是零输出，而是既有 1 条
+  `src/App.tsx(30,87) TS2307: Cannot find module './utils/composerResize'`（main 提交了
+  依赖未提交文件的 import，取证见 Task 11 实施记录）。零新增 = 绿。
+- `vitest`：5 files / 45 tests 全绿。
+- `npm run build`：❗**会被同一条缺失模块直接炸**（vite 同样解不了 `./utils/composerResize`）。
+  这是 Task 13 的**前置阻塞项**，必须先由用户在主线补上并提交该文件（或单独决定改 import），
+  不得从其他工作树拷未跟踪文件顶过去。
 
 ```powershell
 cd d:\Docs\Project\TTKook\TTKook-mimo-plugin
