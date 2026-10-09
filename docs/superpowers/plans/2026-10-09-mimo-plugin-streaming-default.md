@@ -1150,17 +1150,16 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 | 5 mimo-asr 补 config + 宿主换注入 | 完成（**6 文件同提交已核对**；审查 1 Important / 1 Minor，Important 按“不采纳”处置并转为新硬约束） | `c1ce899` |
 | 6 宿主删内置 MiMo + 默认引擎 edge-tts | 完成（TDD 先红后绿；审查 **Approved**，0C/1I/6M，其中 3 条 Minor 当场收口；**计划期望值 161 是算式错，已修正为 163 并连带修正下游**） | `06c0a3b` `d4f7eb6` `9de5ee2` |
 | 7 一次性迁移三段 | 完成（TDD 先红后绿；审查 **Request Changes**，0C/1I/3M——Important 的事实我实跑证实、定性修正后收口；**计划期望值 168 又是算式漏项，已修正并连带下游**） | `c71aca8` `d32b642` |
-| 8–13 | 未开始 | — |
+| 8 克隆样本命令去引擎化 + 卸载兜底 | 完成（TDD 先红后绿；审查 **Request Changes**，0C/2I/5M——两条 Important 都先核实了事实前提再收口；**计划期望 174 只算了主体，收口后再 +2**） | `bf8cfb8` `f9cd4f3` |
+| 9–13 | 未开始 | — |
 
-下一个动作：**Task 8 Step 1**（克隆命令去引擎化 + 卸载兜底）。
+下一个动作：**Task 9 Step 1**（流式播放态事件 + 桥路径改走流式）。
 必读的三条前置：
-① **T6-I-1**：`VA_CLONE_SAMPLE` 目前只在 `lib.rs` setup 里注入一次，用户导入/删除样本后
-   不会刷新 env，导致“导入即用”实际退化成“重启才可用”——计划已在 Task 8 排了“实时通告”，
-   动手时不得只做去引擎化就交差；
-② **T6-M-4**：`commands/clone_voice.rs` 的报错文案仍带引擎专名，Task 8 去引擎化时一并收；
-③ Task 7 的迁移只搬引擎标识/音色/Key，`tts_model` 作为结构体通用字段仍会被写回 `"default"`
-   （见 Task 7 实施记录），Task 8 若碰克隆音色选择，真相只能取 `plugin_voices`，不要回读 `tts_model`。
-宿主基线现为 **170 passed / 3 ignored**（Task 8 后应到 174）。
+① 播放态事件**仅在 `spk_ok` 为真时发**（扬声器没开成时由前端整段播并自己发事件），
+   不是“任一路开成”——设计文档 §3.2-1 已补过这一行口径；
+② `playback:started` 的载荷必须是 `wav_rel` **字符串**（前端拿相对路径去取音频），不是绝对路径也不是对象；
+③ 桥路径改走流式时需把 `generate_tts_stream_impl` 置 `pub`（否则测试报 `cannot find function`）。
+宿主基线现为 **176 passed / 3 ignored**（Task 9 不增删测试，应仍是 176）。
 另需回看：探针遗留项已全部回答——`hound` 实测没用到、已连同 `serde` 删除；
 但 `FIRST_CHUNK_TIMEOUT=120s` 的余量已改写：release 下出现过一次 **49.2s** 的克隆首块离群值（同文本其余都是 1.6~1.8s），
 所以余量只有 2.4 倍而不是旧说法的 13 倍——**已登记为 Task 13 真机验收前的待决策项**（若出现克隆长句超时就提到 180~240s，仍小于 `REQUEST_TIMEOUT=300s`）。
@@ -1174,9 +1173,10 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 交接提醒（容易错的三件事）：
 1. 每条 `cargo` 命令都必须先显式设 `CARGO_TARGET_DIR`（宿主用 `src-tauri\target`，插件用 `plugins\target`，两者不可互换）——曾有会话把全局 target 指到别的工作树，直接覆盖了别人的 exe。
 2. 提交一律逐文件 `git add`，禁止 `git add -A`/`.`；`src-tauri/resources/plugins/*.zip` 是跟踪文件，新 zip 必须逐个 add（连删除也要 add）。
-3. 每个 Task 的期望测试数写在各 Task 末尾，对不上就是漏删/漏测；当前基线：宿主 **170 passed / 3 ignored**
-   （Task 7 实落：Step 5 提交时 167——计划写的 168 是同一类算式漏项，把“1 条测换成 3 条”当成净增 3；
-   审查收口再补 3 条 → 170。下游 Task 8→174 / 9→174 / 10→177 / 13 门禁→177 已同步）；
+3. 每个 Task 的期望测试数写在各 Task 末尾，对不上就是漏删/漏测；当前基线：宿主 **176 passed / 3 ignored**
+   （Task 8 实落：主体提交时 174 = 170 + 4，与计划一致；审查收口又补 2 条（缺值判定同口径 + 跳过未就绪本地引擎）
+   并搬走 1 条（`样本env设置与移除` 从 `plugins.rs` 迁到 `clone_voice.rs`，总数不变）→ **176**。
+   下游 Task 9→176（不增删）/ 10→179 / 13 门禁→179 已同步）；
    mimo-tts 24 passed / 0 warning。
 4. `verify-index.ps1 -SkipDist` 的基线不是全绿：`minimax-tts-stream` 那条 `RES-CK` 是仓库既有问题（见 Task 3 实施记录）。
    判定本 Task 成败只看自己那一行是否 `OK`，不要为了让表格全绿去改别人的条目。
@@ -2986,6 +2986,8 @@ cargo test --lib
 pwsh -NoProfile -ExecutionPolicy Bypass -File ..\tools\check-bom.ps1
 ```
 预期：零 warning；**174 passed; 0 failed; 3 ignored**（170 + Step 1 的 4 条）。
+> 实跑一致（`bf8cfb8`）。审查收口后变 **176**：+2 条新测（缺值判定同口径、跳过未就绪本地引擎），
+> `样本env设置与移除` 同数搬到 `clone_voice.rs`。见下方 Task 8 实施记录。
 
 - [ ] **Step 7：提交**
 
@@ -3000,6 +3002,57 @@ git commit -m "feat(基座): 克隆样本命令去引擎化 + 卸载当前引擎
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
+
+> 上方第 3 条 bullet 的判据已被审查收口扩充（`f9cd4f3`）：由“声明了必填”改成“必填项还缺不缺 + 运行环境就绪没就绪”。
+
+### Task 8 实施记录
+
+实测门禁（`bf8cfb8` 主体 + `f9cd4f3` 审查收口）：
+
+| 项 | 结果 |
+|---|---|
+| TDD 先红 | Step 2 实跑 5 个编译错（`pick_fallback_engine` in module `super` ×3、`announce_clone_sample`/`clear_clone_sample` ×2），与计划 Step 2 预期一致 |
+| 编译 | `cargo check --lib --tests` 零 warning 零 error（收口后复跑同样零 warning） |
+| 测试 | `cargo test --lib` = **174 passed / 0 failed / 3 ignored**（主体）→ **176**（收口后） |
+| 守卫 | `check-bom.ps1` / `check-log-hygiene.ps1` 均 exit 0；宿主 `.rs` 仍 57 个 |
+| 基座残留 | `clone_voice.rs` **2 → 0**（本 Task 目标）；宿主 `.rs` 合计命中 281（相对 main 净减 3） |
+
+与计划代码的差异（两处有意偏离，审查者均认可）：
+1. **测试名 `兜底引擎_忽略非TTS插件与未加载项` 改小写 `tts`**：计划给的命名含大写 `TTS` 会触
+   `non_snake_case` warning，而零 warning 是 Task 13 门禁；已核实仓库既无 `allow(non_snake_case)` 先例、
+   也没有任何大写中文测试名，故对齐既有风格。
+2. **`lib.rs` 注入块用全限定 `std::path::PathBuf`**：避免为两处调用新增 import 而触 `unused_imports`。
+
+跨边界（编译器抓不到）的两处已主动核实：
+- **“导入即用”真成立**（T6-I-1 关掉）：`plugins/engines/mimo-tts/src/client.rs` 的 `resolve_voice()` 每次合成
+  都会 `std::env::var("VA_CLONE_SAMPLE")`（源码注释就写着“读一次算一次”），且插件是进程内 dll、共享宿主环境块，
+  所以 `set_var`/`remove_var` 对下一次合成立即生效；
+- **“卸掉的插件不会被兜底选中”真成立**：`PluginManager::list()` 遍历磁盘 registry，`uninstall()` 第一步就
+  `retain` 掉该条目并 `save_registry`，dll 虽常驻进程到退出也不再出现在 list 里。
+
+#### Task 8 审查收口
+
+审查结论 **Request Changes**：0 Critical / 2 Important / 5 Minor。
+
+| 编号 | 处置 | 说明 |
+|---|---|---|
+| T8-I-1 判据只看“声明了必填”，不看“填没填 / 环境就绪没就绪”→ 可能把用户切到一个仍需填 Key 或还没下环境的引擎，而文案无条件宣称“已自动切换” | **已修** `f9cd4f3` | 新增 `missing_required_config`（与前端 `InstalledCard` 同口径：`f.required && !(plugin_config[id][key] ?? "").trim()`）与 `setup_ready`（`!has_setup \|\| setup_status.ready == true`）；`pick_fallback_engine` 加 `cfg` 入参，先按“缺不缺必填”稳定排序再按 id。选中的引擎仍缺必填时，文案追加“还需要在设置里填好必填项才能出声” |
+| T8-I-2 `update_setting` 失败用 `?` 推翻已成功的卸载 → 半成功被报成失败，前端不 reload、不广播 | **已修** `f9cd4f3` | 改 `match`：失败时返回“已卸载但自动切换失败”的 `Ok` 文案（磁盘上确实已卸掉），只在成功时才写回内存并 `notify_changed` |
+| T8-M-1 读锁失败时 `unwrap_or(false)` fail-open | **已修（方向不同）** `f9cd4f3` | 不采纳“读不到就多兜一次”：读不到设置就不知道被卸的是不是当前引擎，硬切可能把用户从可用引擎上切走；改为明确告知“未确认、未自动切换” |
+| T8-M-2 `announce_clone_sample` 在函数收尾才调 | **已挪** `f9cd4f3` | 紧跟 `std::fs::copy` 成功之后，env 与磁盘样本保持同一时序 |
+| T8-M-3 `outcome`（“本次会话内仍可使用，重启后彻底移除”）与兜底句矛盾 | **已修** `f9cd4f3` | 被卸的正是当前引擎时兜底文案**取代** `outcome`（`Ok(notice.unwrap_or(outcome))`），不再拼接 |
+| T8-M-4 夹具只能造 None/Some(required) 两种形态；缺“全需配置时选谁”“本地未就绪”用例；`样本env设置与移除` 位置应在 `clone_voice.rs` | **已补/已搬** `f9cd4f3` | 加 `info_optional_config`/`info_setup`/`cfg_of` 三个夹具与 2 条新测试（内含 5 组断言：唯一需配置引擎仍被选中、全需配置时按字典序、未就绪本地引擎不算替代、纯空白算未填、全 optional 算免配置）；env 契约测搬回 helper 所在文件 |
+| T8-M-5 ASR 侧没有同类“卸当前引擎”的兜底 | **不属本 Task** | Task 8 规格只覆盖 TTS 引擎；已登记到 §九「遗留待下一批」 |
+
+审查者独立复跑并确认了全部数字（176 passed / 3 ignored、零 warning、两守卫 exit 0、5 个编译错结构自洽）。
+
+**带入 Task 12 的一条口径**：基座残留计数必须固定为**匹配次数（occurrences）而非命中行数**，
+基线数字与脚本同口径。本 Task 统计时先踩了两个坑：`.Matches` 成员枚举计数不可靠；
+PowerShell 按 GBK 解码 `git show` 会把 ASCII `M` 吞进前一个双字节字符（`，MiMo` → `锛孲iMo`），
+导致 `clone_voice.rs` 虚报 0（与原文两处 `MiMo` 矛盾）。必须先 `[Console]::OutputEncoding = UTF8`
+再用 `[regex]::Matches(…, 'IgnoreCase').Count`，否则“比基线少”是工具假象而不是真改好。
+
+---
 
 ## Task 9：流式播放态事件 + 桥路径改走流式
 
@@ -3265,7 +3318,7 @@ cargo check --lib --tests
 cargo test --lib
 ```
 预期：零 warning（报 `cannot find function` 先确认 `generate_tts_stream_impl` 是 `pub`）；
-**174 passed; 0 failed; 3 ignored**（本 Task 不增删测试）。
+**176 passed; 0 failed; 3 ignored**（基线已由 174 抬到 176，本 Task 仍不增删测试）。
 
 - [ ] **Step 6：提交**
 
@@ -3508,7 +3561,7 @@ $env:CARGO_TARGET_DIR = "d:\Docs\Project\TTKook\TTKook-mimo-plugin\src-tauri\tar
 cargo check --lib --tests
 cargo test --lib
 ```
-预期：零 warning；**177 passed; 0 failed; 3 ignored**（174 + Step 1 的 3 条）。
+预期：零 warning；**179 passed; 0 failed; 3 ignored**（176 + Step 1 的 3 条）。
 若有 `missing field plugin_help_url` 编译错 → 是 L311 那个用字面量构 `RemoteConfig`
 的测试，补上字段（Step 3② 已改结构体，该测试必须同步）：
 
@@ -3872,6 +3925,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 > 写成“只许变少不许变多”的基线才能今天上约、且不谎报进度。
 > 已实测当前分布（供校对基线用）：`commands/plugins.rs|genie=31`、`plugins/manager.rs|genie=12`、
 > `VoiceSynthPanel.tsx|moss=34`、`storage/settings.rs|minimax=39`、`tts/mimo.rs|mimo=34`（Task 6 应变 0）。
+> Task 8 后的实测锚点（同一 occurrences 口径、全模式合并计数）：`commands/clone_voice.rs` **0**（原 2）、
+> `commands/plugins.rs` 31、`lib.rs` 7（原 8）、宿主 `.rs` 合计 281（相对 main 净减 3）。
 
 - [ ] **Step 1：写 `tools/check-base-hygiene.ps1`**
 
@@ -4029,6 +4084,11 @@ Get-Content .\tools\base-hygiene-baseline.txt
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\check-base-hygiene.ps1
 ```
 预期：第二次跑输出 `✓ 基座检查通过`。
+> **口径提醒（Task 8 实施时踩过的两个坑，手工核对基线时同样适用）**：计的是**匹配次数（occurrences）
+> 而非命中行数**，必须用 `[regex]::Matches(…, 'IgnoreCase').Count`（直接枚举 `.Matches` 成员计数会虚低）；
+> 且读 `git show` 输出前要先 `[Console]::OutputEncoding = UTF8`——按 GBK 解码会把 ASCII `M` 吞进前一个
+> 双字节字符（`，MiMo` → `锛孲iMo`）。这两条都会让“比基线少”变成工具假象而不是真改好。
+
 **基线内容必须逐条对照下表判定“应该消失 / 可以登记”**（错了就是 Task 6-11 漏删）：
 
 | 基线里**不得出现**（出现 = 前序 Task 漏删，回去补） | 出处 |
@@ -4132,7 +4192,7 @@ $env:CARGO_TARGET_DIR = "d:\Docs\Project\TTKook\TTKook-mimo-plugin\src-tauri\tar
 cargo test --lib
 cargo check --lib --tests
 ```
-预期：**`177 passed; 0 failed; 3 ignored`** 且 `cargo check` **零 warning**。
+预期：**`179 passed; 0 failed; 3 ignored`** 且 `cargo check` **零 warning**。
 算式（对不上就是某处漏删/漏测，回各 Task 的期望值逐段定位）：
 
 | Task | 变化 | 累计 passed | ignored |
@@ -4141,9 +4201,9 @@ cargo check --lib --tests
 | Task 5 | 不增不减（只换注入） | 170 | 4 |
 | Task 6 | −7（mimo.rs 单测）−1（mimo.rs 实网测）−2（tts/mod.rs）+1（空串读盘归一）+1（写盘归一，审查收口） | **163** | 3 |
 | Task 7 | +2（plugins/mod.rs：1 条换成 3 条）+2（settings.rs）+3（审查收口：启动序列组合测 1 + 漏测 2） | **170** | 3 |
-| Task 8 | +4（兜底选择纯函数 3 + 样本 env 契约 1） | 174 | 3 |
-| Task 9 | 不加测试（线程接线） | 174 | 3 |
-| Task 10 | +3（help_url 覆盖） | **177** | 3 |
+| Task 8 | +4（兜底选择纯函数 3 + 样本 env 契约 1）+2（审查收口：缺值判定同口径、跳过未就绪本地引擎）；搬入 1 条不计数（env 契约测改住 `clone_voice.rs`） | **176** | 3 |
+| Task 9 | 不加测试（线程接线） | 176 | 3 |
+| Task 10 | +3（help_url 覆盖） | **179** | 3 |
 
 ```powershell
 cd d:\Docs\Project\TTKook\TTKook-mimo-plugin\plugins
@@ -4272,12 +4332,12 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\plugins\scripts\test-mimo-stream
 | 项 | 结果 |
 |---|---|
 | 插件 crate `plugins/engines/mimo-tts` | 已建（client/stream 分层，双导出）；单测 24 passed / 2 ignored（已实跑核正：本行原写 23 与基线不一致） |
-| 宿主门禁 | `cargo test --lib` 177 passed / 0 failed / 3 ignored（基线 170：删内置 MiMo 的 9 例单测（mimo.rs 7 + tts/mod.rs 2）与 1 例 `#[ignore]` 实网测，新增 16 例迁移/兜底/覆盖/归一测试；逐段推导见上方门禁累计表） |
+| 宿主门禁 | `cargo test --lib` 179 passed / 0 failed / 3 ignored（基线 170：删内置 MiMo 的 9 例单测（mimo.rs 7 + tts/mod.rs 2）与 1 例 `#[ignore]` 实网测，新增 19 例迁移/兜底/覆盖/归一测试；逐段推导见上方门禁累计表） |
 | 克隆首块 RIFF 实测 | （填 Step 2 实测值） |
 | 预置音色块数 / 首块 TTFB | （填 Step 2 实测值） |
 | 听感保护是否需补（预缓冲/水位） | （按 Step 2 结论填：实测无断音则不补） |
 | 基座护栏基线条数 | （填 Task 12 实数，只许变少） |
-| 遗留待下一批 | MOSS 内置、`minimax_clone`/`MinimaxVoicePanel`、`CLONE_CAPABLE`、`mimo_api_key` 字段删除、`mimo_invite_code` 只读字段 |
+| 遗留待下一批 | MOSS 内置、`minimax_clone`/`MinimaxVoicePanel`、`CLONE_CAPABLE`、`mimo_api_key` 字段删除、`mimo_invite_code` 只读字段、ASR 引擎卸载后的同类兜底（T8-M-5：现在卸掉当前 ASR 插件仍会把 `asr_engine` 指向已卸 id） |
 ```
 
 - [ ] **Step 5：更新工作线状态板**
