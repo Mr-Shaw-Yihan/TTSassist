@@ -150,16 +150,18 @@ pub fn mime_for_ext(ext: &str) -> Result<&'static str, String> {
     })
 }
 
+/// 解析模型配置值（纯函数：环境变量读取留在 `configured_model` 薄壳里，
+/// 避开并发测试交叉读写进程全局 env）
+pub fn configured_model_from(raw: Option<String>) -> String {
+    raw.map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_MODEL.to_string())
+}
+
 /// 读合成模型（空值回退默认）。env 名与 mimo-asr 的 MIMO_API_KEY 区分开，
 /// 避免宿主必填 env 冲突检测拒载
 pub fn configured_model() -> String {
-    let raw = std::env::var("MIMO_TTS_MODEL").unwrap_or_default();
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        DEFAULT_MODEL.to_string()
-    } else {
-        trimmed.to_string()
-    }
+    configured_model_from(std::env::var("MIMO_TTS_MODEL").ok())
 }
 
 /// 读 API Key（由宿主通用配置机制按 manifest.config 注入）
@@ -171,35 +173,56 @@ pub fn read_api_key() -> Result<String, String> {
         .ok_or_else(|| "未配置 MiMo API Key：请在「语音中心 → MiMo TTS」的插件设置中填写".to_string())
 }
 
-/// 把音色参数拆成 (模型, 请求里的 voice)
+/// 把音色参数拆成 (模型, 请求里的 voice)。
 ///
-/// - `None` / 预置音色 id → 配置的基模型 + 原样透传
-/// - `"clone"` → `mimo-v2.5-tts-voiceclone` + 样本 data URI
+/// 环境变量读取由 `resolve_voice` 薄壳完成后递进来，本函数为纯函数（可测且不跳线程共享状态）：
+/// - `voice == Some("clone")` → `mimo-v2.5-tts-voiceclone` + 样本 data URI
 ///   （样本路径来自宿主注入的通用环境变量 `VA_CLONE_SAMPLE`）
-pub fn resolve_voice(voice: Option<&str>) -> Result<(String, Option<String>), String> {
+/// - 其余（`None` / 空串 / 预置音色 id）→ 配置的基模型 + 原样透传，空串回落默认音色
+pub fn resolve_voice_from(
+    model: &str,
+    voice: Option<&str>,
+    sample_raw: Option<String>,
+) -> Result<(String, Option<String>), String> {
     if voice == Some("clone") {
-        return Ok((CLONE_MODEL.to_string(), Some(build_clone_voice_uri()?)));
+        return Ok((
+            CLONE_MODEL.to_string(),
+            Some(build_clone_voice_uri_from(sample_raw)?),
+        ));
     }
-    Ok((configured_model(), Some(voice.unwrap_or(DEFAULT_VOICE).to_string())))
+    let effective = voice.map(str::trim).filter(|v| !v.is_empty()).unwrap_or(DEFAULT_VOICE);
+    Ok((model.to_string(), Some(effective.to_string())))
 }
 
-/// 克隆样本 → data URI（每次合成都要把样本传给服务端，故读一次算一次）
-pub fn build_clone_voice_uri() -> Result<String, String> {
+/// 环境变量薄壳：取 `MIMO_TTS_MODEL` / `VA_CLONE_SAMPLE` 后交给纯函数
+pub fn resolve_voice(voice: Option<&str>) -> Result<(String, Option<String>), String> {
+    resolve_voice_from(
+        &configured_model(),
+        voice,
+        std::env::var("VA_CLONE_SAMPLE").ok(),
+    )
+}
+
+/// 克隆样本 → data URI（纯函数：`sample_raw` 来自 `VA_CLONE_SAMPLE`，`None` = 未导入）
+///
+/// 每次合成都要把样本传给服务端，故读一次算一次。
+pub fn build_clone_voice_uri_from(sample_raw: Option<String>) -> Result<String, String> {
     let no_sample = "未导入克隆音色样本：请在「语音中心 → 音色克隆」导入一段 5–10 秒的清晰人声（mp3/wav/m4a/flac/ogg）";
-    let raw = std::env::var("VA_CLONE_SAMPLE").map_err(|_| no_sample.to_string())?;
-    if raw.trim().is_empty() {
-        return Err(no_sample.to_string());
-    }
-    let path = Path::new(raw.trim());
-    let bytes = std::fs::read(path)
-        .map_err(|_| format!("克隆样本文件读取失败（{}）：文件可能已被删除，请重新导入", path.display()))?;
-    let len = bytes.len() as u64;
+    let raw = sample_raw.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    let Some(raw) = raw else { return Err(no_sample.to_string()) };
+    let path = Path::new(&raw);
+    // 先看尺寸再读文件：避免用户把 env 指到大文件时先全量吃进内存才报错
+    let meta = std::fs::metadata(path)
+        .map_err(|e| format!("克隆样本文件读不到（{}）：{e}", path.display()))?;
+    let len = meta.len();
     if len > CLONE_MAX_BYTES {
         return Err(format!(
             "克隆样本 {:.1}MB 超出 MiMo 上限 10MB，请换更短的样本",
             len as f64 / 1024.0 / 1024.0
         ));
     }
+    let bytes = std::fs::read(path)
+        .map_err(|e| format!("克隆样本文件读取失败（{}）：{e}", path.display()))?;
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -209,6 +232,11 @@ pub fn build_clone_voice_uri() -> Result<String, String> {
         "data:{mime};base64,{}",
         base64::engine::general_purpose::STANDARD.encode(&bytes)
     ))
+}
+
+/// 环境变量薄壳：从 `VA_CLONE_SAMPLE` 取样本路径
+pub fn build_clone_voice_uri() -> Result<String, String> {
+    build_clone_voice_uri_from(std::env::var("VA_CLONE_SAMPLE").ok())
 }
 
 /// 流式元信息 JSON（宿主据此装配播放器；当前契约只认 pcm_s16le）
@@ -376,30 +404,40 @@ mod tests {
 
     #[test]
     fn 音色解析_预置与克隆() {
-        // 预置：用配置的基模型，voice 原样透传
-        std::env::set_var("MIMO_TTS_MODEL", "mimo-v2.5-tts");
-        let (model, voice) = resolve_voice(Some("冰糖")).unwrap();
-        assert_eq!(model, "mimo-v2.5-tts");
+        // 哨兵模型：必须与 DEFAULT_MODEL 不同，才能证明模型真从配置读入而非硬编码
+        const OVERRIDE: &str = "mimo-v9.9-tts-sentinel";
+        // 预置：voice 原样透传
+        let (model, voice) = resolve_voice_from(OVERRIDE, Some("冰糖"), None).unwrap();
+        assert_eq!(model, OVERRIDE);
         assert_eq!(voice.as_deref(), Some("冰糖"));
-        // 缺省音色
-        let (model, voice) = resolve_voice(None).unwrap();
-        assert_eq!(model, "mimo-v2.5-tts");
+        // 缺省与空串都回落服务端默认音色（空串透传给服务端会被判 invalid voice）
+        let (_, voice) = resolve_voice_from(OVERRIDE, None, None).unwrap();
         assert_eq!(voice.as_deref(), Some(DEFAULT_VOICE));
-        // 克隆：切 voiceclone 模型，voice = 样本 data URI（此处无 VA_CLONE_SAMPLE → 中文错）
-        std::env::remove_var("VA_CLONE_SAMPLE");
-        let err = resolve_voice(Some("clone")).unwrap_err();
+        let (_, voice) = resolve_voice_from(OVERRIDE, Some("  "), None).unwrap();
+        assert_eq!(voice.as_deref(), Some(DEFAULT_VOICE));
+        // 克隆：强制切 voiceclone 模型；无样本→ 中文错并含导入指引
+        let err = resolve_voice_from(OVERRIDE, Some("clone"), None).unwrap_err();
         assert!(err.contains("克隆"), "实际: {err}");
-        std::env::remove_var("MIMO_TTS_MODEL");
+        // 样本路径指个不存在的文件：要报“读不到”而不是误导向“未导入”
+        let err = resolve_voice_from(OVERRIDE, Some("clone"), Some("C:/va-no-such/clone.mp3".into()))
+            .unwrap_err();
+        assert!(err.contains("克隆样本"), "实际: {err}");
+        assert_eq!(CLONE_MODEL, "mimo-v2.5-tts-voiceclone");
     }
 
     #[test]
-    fn 模型缺省值_空env回落() {
-        std::env::remove_var("MIMO_TTS_MODEL");
-        assert_eq!(configured_model(), DEFAULT_MODEL);
-        std::env::set_var("MIMO_TTS_MODEL", "  ");
-        assert_eq!(configured_model(), DEFAULT_MODEL);
-        std::env::set_var("MIMO_TTS_MODEL", "mimo-v2.5-tts");
-        assert_eq!(configured_model(), "mimo-v2.5-tts");
-        std::env::remove_var("MIMO_TTS_MODEL");
+    fn 模型缺省值_空值回落不读env() {
+        // 只测纯函数：环境变量读写是进程全局的，并发测试跳着 set/remove
+        // 同一变量在 Windows CRT 下不是线程安全的，不能拿它做单测对象
+        assert_eq!(configured_model_from(None), DEFAULT_MODEL);
+        assert_eq!(configured_model_from(Some(String::new())), DEFAULT_MODEL);
+        assert_eq!(configured_model_from(Some("   ".into())), DEFAULT_MODEL);
+        assert_eq!(
+            configured_model_from(Some("mimo-v9.9-tts-sentinel".into())),
+            "mimo-v9.9-tts-sentinel",
+            "上新档位靠配置覆盖，不该回落到硬编码默认值"
+        );
+        // 前后空白要清掉（宿主注入值可能带空格）
+        assert_eq!(configured_model_from(Some(" mimo-v2.5-tts ".into())), "mimo-v2.5-tts");
     }
 }

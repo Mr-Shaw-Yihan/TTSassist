@@ -565,6 +565,24 @@ git commit -m "feat(插件): mimo-tts 协议层——请求体/SSE/WAV 容器剥
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 
+### 实施时的修正（已落地，后续 Task 按修正后的签名为准）
+
+子代理审查发现两个本计划自写的问题，已修（commit 在 4f6fe95 之后）：
+
+1. **环境变量读取从纯函数里剥出来**（Windows CRT 下并发测试跳着 `set_var/remove_var`
+   同一个变量不是线程安全的）。新签名：
+   - `configured_model_from(raw: Option<String>) -> String`（纯），`configured_model()` 只做 env 薄壳
+   - `resolve_voice_from(model: &str, voice: Option<&str>, sample_raw: Option<String>)`（纯），
+     `resolve_voice(voice)` 为薄壳
+   - `build_clone_voice_uri_from(sample_raw: Option<String>)`（纯），`build_clone_voice_uri()` 为薄壳
+   **Task 2/4 调用时用薄壳版本**（`resolve_voice(voice)`），它们不依赖测试环境。
+2. **测试不再把 `MIMO_TTS_MODEL` 设成与默认值同字面量串**（那是空断言，env 就算没读也能过）；
+   改用哨兵 `"mimo-v9.9-tts-sentinel"`  断言。`configured_model()` / `resolve_voice()` 薄壳因此
+   不进单测（它们的逻辑就一行 `env::var` ，由真机验收覆盖）。
+3. 顺带三项质量修正：克隆样本**先 `metadata()` 判尺寸再 `fs::read`**（避免指到大文件时先全量吃内存）；
+   读文件失败把底层 `std::io::Error` 一并带出（不再一律说成“文件可能已被删除”）；
+   `voice` 为空/空串时回落 `DEFAULT_VOICE`（与 `configured_model` 的 trim 口径统一）。
+
 ---
 
 ## Task 2：插件流式会话 + 双导出（阻塞兼容面）
