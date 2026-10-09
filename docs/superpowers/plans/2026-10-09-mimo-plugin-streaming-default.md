@@ -1146,15 +1146,16 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 | 1 插件协议层 | 完成（含审查修正） | `4f6fe95` `ee89e05` |
 | 2 流式会话 + 双导出 | 完成（含审查修正 I-1..I-4） | `3c2fcec` `96acedb` |
 | 3 打包与内置分发 | 完成（两轮审查均 Approved；含 zip 可复现修正） | `a3df6d2` `c4dfb5f` `82337ec` + 后续收口 |
-| 4 实网探针 + 冒烟脚本 | 完成（**已真跑**，RIFF 问题已关掉；两轮审查——第一轮 1 Critical/1 Important/5 Minor，第二轮 1 Important/3 Minor 均收口） | `f9cacd2` `6140aa3` `9babe7d` `5075fc9` `54b176f` |
+| 4 实网探针 + 冒烟脚本 | 完成（**已真跑**，RIFF 问题已关掉；三轮审查——第一轮 1C/1I/5M、第二轮 1I/3M、第三轮 1I 均收口） | `f9cacd2` `6140aa3` `9babe7d` `5075fc9` `54b176f` `7692d3d` `f3042da` |
 | 5–13 | 未开始 | — |
 
 下一个动作：**Task 5 Step 1**（给 `plugins/engines/mimo-asr/package.ps1` 补 `config` 声明并重打包，
 **与宿主换注入（`src-tauri/src/lib.rs` 删 `MIMO_API_KEY` 顶层注入、改 `VA_CLONE_SAMPLE` 启动注入）同一个 commit**）。
 这是全计划唯一“拆成两次提交就直接把 ASR 弄坏”的配对（设计 §七 硬约束）：提交前用 `git status --short`
 核对该 Task 的 6 个文件确实在同一个 `git add` 里。
-另需回看：探针遗留项已全部回答——`FIRST_CHUNK_TIMEOUT=120s` 按 release 口径余量 13 倍（不动）；
-`hound` 实测没用到、已连同 `serde` 删除。
+另需回看：探针遗留项已全部回答——`hound` 实测没用到、已连同 `serde` 删除；
+但 `FIRST_CHUNK_TIMEOUT=120s` 的余量已改写：release 下出现过一次 **49.2s** 的克隆首块离群值（同文本其余都是 1.6~1.8s），
+所以余量只有 2.4 倍而不是旧说法的 13 倍——**已登记为 Task 13 真机验收前的待决策项**（若出现克隆长句超时就提到 180~240s，仍小于 `REQUEST_TIMEOUT=300s`）。
 **跑探针请直接用脚本（默认 release）**：debug 下首块数字能在 1.9s~74s 乱跳，不能拿来定预算。
 **改完脚本必须真跑一次**：Task 4 第二轮就是靠真跑才抖出“预检拿 `running N tests` 去解析 `--list` 输出”
 这种眼睛看不出来的坑（`--list` 的结尾行实际是 `N tests, M benchmarks`）——只 `--list` 看一眼就推断解析格式等于没验收。
@@ -1697,7 +1698,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 ### Task 4 实测结论（实施记录）
 
-探针**已在本机真跑**（Key 与克隆样本均取自本机 `settings.json`）。共跑 13 次，
+探针**已在本机真跑**（Key 与克隆样本均取自本机 `settings.json`）。共跑 18 次（含第三轮收口后的 5 次复跑），
 下表只列可复现结论需要的那几组；字数取探针自己输出的值，首块计时从 `open()` 返回后起算。
 
 **表 A・release（决策口径：交付的 dll 就是 release 构建）**
@@ -1707,8 +1708,11 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 | 39 | 预置 | 138ms | 23 | 7520ms | 1841ms | — |
 | 39 | 预置 | 0ms | 24 | 7680ms | 1756ms | — |
 | 175 | 预置 | 139ms | 107 | 34240ms | 6607ms | — |
+| 39 | 预置 | 149ms / 127ms / 172ms / 16ms | 24 / 24 / 25 / 26 | 7680~8320ms | 1444~2363ms | — |
 | 25 | 克隆 | 1861ms | 1 | 4480ms | 1862ms | `[2, 0, 1, 0]` |
 | 175 | 克隆 | 9135ms | 1 | 33760ms | 9135ms | `[3, 0, 2, 0]` |
+| 25 | 克隆 | 1660ms / 1652ms / 1775ms | 1 | 4640~5600ms | 同首块 | `[2, 0, 2, 0]` |
+| 25 | 克隆 | **49187ms**（离群值，同文本另三次都是 1.6~1.8s） | 1 | 4960ms | 49187ms | `[3, 0, 2, 0]` |
 
 **表 B・debug（仅作对照，不可用于决策）**
 
@@ -1723,14 +1727,19 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 1. **预置音色是真流式**：首块 0~139ms，不随文本长度增长；块数与音频时长成正比。
    → **听感保护不需补**（预缓冲/水位都不加），Task 9 “首块即播”成立。（`0ms` 那次说明首块早在 `open()` 期间就到了）
-2. **克隆是服务端兼容模式**：块数恒为 1（整段一块返回）。release 下首块耗时随字数接近线性：
-   25 字 1.86s → 175 字 9.14s（≈ 52ms/字）。**`FIRST_CHUNK_TIMEOUT=120s` 立得住**：
-   175 字时余量还有 13 倍，算到 1000 字量级也只在 ~52s（设计里“60 字 3.5s”的旧估值可拉平到本曲线）。
-3. **RIFF 这个全设计唯一悬空的事实点已关掉**：所有观测里首块前 4 字节都是 PCM 字节（`[2,0,1,0]`/`[3,0,2,0]`/`[6,0,2,0]`），
+2. **克隆是服务端兼容模式**：块数恒为 1（整段一块返回）。release 下首块耗时**正常态**跟字数接近线性：
+   25 字 ≈ 1.7s → 175 字 9.14s（≈ 52ms/字）。但**这条曲线只描述正常态**：
+   同样是 25 字，四次 release 观测里出现过一次 **49.2s**（其余 1.65/1.65/1.78s），30 倍离群。
+   所以余量不能按 1.7s 算：按最坏观测 49.2s 计，`FIRST_CHUNK_TIMEOUT=120s` 只剩 **2.4 倍**（不是本条旧写法说的 13 倍）。
+   → 本 Task **不改常量**（属设计决策），登记为待决策项：Task 13 真机验收若出现克隆长句超时报错，
+   就把它提到 180~240s（仍小于 `REQUEST_TIMEOUT=300s`）；否则接受“极端长尾偶发失败 + 用户重试”。
+3. **RIFF 这个全设计唯一悬空的事实点已关掉**：所有观测里首块前 4 字节都是 PCM 字节（`[2,0,1,0]`/`[3,0,2,0]`/`[6,0,2,0]`/`[2,0,2,0]`），
    从未出现 `RIFF`；`!pcm.starts_with(b"RIFF")` 与 2 字节对齐断言全过；落盘 wav 头字段自洽
    （24000/1/16、`byterate == rate*2`、`data_len == 文件长 - 44`）→ `strip_wav_container` 交出来的就是可直接播的裸 PCM。
 4. **debug 数字不能拿来定预算**：表 B 那行 1919ms vs 74186ms 是同一个二进制、同一段文本两次重跑的结果。
    因此冒烟脚本改为**默认 release**，要 debug 必须显式 `-Quick`（探针输出也自带 profile，弄混不了）。
+   后来补的 49187ms 离群值说明：**长尾不是 debug 独有，服务端本身也会给几十秒**；
+   release 的意义是“接近交付物的正常态”，不是“数字不会跳”——拿单次观测下结论本来就不靠得住。
 5. **计时口径要写清楚**：`first_ms` 只含 `open()` 返回后到首块，不含握手与响应头；它跟 `FIRST_CHUNK_TIMEOUT`
    的计时窗口一致（`last_progress` 初值就是会话建立时刻），所以用它判超时是对的；
    用户真实听感延迟另算，到 Task 9 真机验收时看。
@@ -1785,6 +1794,22 @@ CI 跑的 `verify-index.ps1 -SkipDist` 不受源码改动影响 → 无不一致
 本轮实测（全部 release，默认路径）：预置 字数 39 / 首块 16~178ms / 25~26 块；克隆 字数 25 / 首块 1652~1660ms / 1 块 / 首块前 4 字节 `[2, 0, 2, 0]`（仍为裸 PCM）。两条过滤路径各自 `test result: ok`（`-Clone` 为 2 passed / 24 filtered，默认 1 passed / 25 filtered）。
 门禁复测：`cargo test -p mimo-tts` = 24 passed / 0 failed / 2 ignored / 0 warning；`check-log-hygiene.ps1` `✓` exit 0；`check-bom.ps1` `✓` exit 0。
 提交：`54b176f`（本轮代码修正）。
+
+#### Task 4 审查收口（第三轮复审：1 Important）
+
+复审者逐条核实第 2 轮那 4 项 + 自捡 2 项，判定 5 项真修好（含用三个 harness 分别验证“有旧值写回”
+“无旧值 Remove-Item”两条分支，以及把新旧两种解析式喂给同一份 `--list` 输出对比：旧锚点命中 0 行）。
+剩下一条新的：
+
+| 编号 | 问题 | 处置 |
+|---|---|---|
+| R3-I-1 | `[SKIP]` 两条早退分支在 `try` 之外用 `exit 1` 收场。复审者实测 **dot-source 下脚本内的 `exit` 不会结束调用者进程**（harness 继续跑、退出码被吞成 0），于是刚在上一行写进 `$env:MIMO_TTS_API_KEY` 的明文 Key 与 `$ErrorActionPreference=Stop` 照样残留；而脚本里新写的注释“`[SKIP]` 分支走 exit 结束进程，同样不会残留”断言刚好相反，会把下一个审查者带偏 | 本地重现确认（假 `APPDATA` + dot-source，零网络）：`SURVIVED key=[<FAKE_KEY…>] eap=[Stop] HARNESS exit=0`。把取 Key/取样本一起搬进 `try`、早退改 `throw`，恢复逻辑只留 finally 一份。复测：`CAUGHT: 缺少克隆样本…` 后 `key=[<>] eap=[Continue]` 全干净、`Pop-Location` 正常、`-File` 场景退出码回到 **1**。顺手把同样性质的 `[Console]::OutputEncoding` 旧值也上提到文件头 |
+
+收口过程中抖出的一个真观测（已回写上面结论 2/4）：结构改动后重跑主路径，release 下克隆首块出现了 **49187ms**
+（同文本另三次 1.65/1.65/1.78s）——它把“120s 余量 13 倍”这个旧结论推翻为“余量 2.4 倍”，已登记为 Task 13 前的待决策项。
+门禁复测：`check-log-hygiene.ps1` / `check-bom.ps1` 均 `✓` exit 0（脚本头部 `EF BB BF` 未丢），
+`[System.Management.Automation.Language.Parser]::ParseFile` 语法错 0 条，主路径 `-Clone` 仍 2 passed / exit 0。
+提交：`f3042da`（本轮脚本修正）。
 
 ---
 
