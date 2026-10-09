@@ -1,90 +1,13 @@
 // generate_tts 命令：前端输入文本 → TTS 生成 → 写 messages.json → 广播。
-// 支持多引擎分发：settings.tts_engine = "mimo" | "moss" | 插件 id（如 "edge-tts"）
+// 支持多引擎分发：settings.tts_engine = 内置引擎（moss）| 插件 id
 
-use std::path::Path;
 use tauri::{AppHandle, Manager};
 use crate::commands::AppState;
 use crate::plugins::PluginManager;
 use crate::storage::types::{Message, gen_id, now_iso};
-use crate::tts::mimo::MimoEngine;
 use crate::tts::moss::MossEngine;
-use crate::tts::traits::{TTSEngine, TTSParams, TtsError};
+use crate::tts::traits::{TTSEngine, TTSParams};
 use crate::sync::{notify_changed, EVENT_MESSAGE_CHANGED};
-
-/// 把克隆样本音频转成 MiMo 要的 data URI（"data:<mime>;base64,<b64>"）。
-/// MiMo 克隆音色支持 mp3/flac/m4a/wav/ogg，须按实际格式声明正确的 MIME，
-/// 否则 MiMo 会因 MIME 与真实格式不符而报 "invalid audio format"。
-fn build_clone_voice_uri(sample_path: &Path) -> Result<String, String> {
-    use base64::Engine as _;
-    let bytes = std::fs::read(sample_path)
-        .map_err(|e| format!("读取克隆样本失败: {e}"))?;
-    let ext = sample_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|s| s.to_lowercase())
-        .unwrap_or_default();
-    let mime = match ext.as_str() {
-        "mp3" => "audio/mpeg",
-        "wav" => "audio/wav",
-        "m4a" => "audio/mp4",
-        "flac" => "audio/flac",
-        "ogg" => "audio/ogg",
-        other => {
-            return Err(format!(
-                "不支持的音频格式「{}」，克隆音色仅支持 mp3 / wav / m4a / flac / ogg",
-                if other.is_empty() { "未知" } else { other }
-            ));
-        }
-    };
-    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-    Ok(format!("data:{mime};base64,{b64}"))
-}
-
-/// MiMo 引擎生成（含克隆音色）
-async fn generate_mimo(
-    text: &str,
-    data_dir: &Path,
-    api_key: &str,
-    tts_model: &str,
-    clone_voice_path: &str,
-) -> Result<String, TtsError> {
-    let is_clone = tts_model == "clone";
-
-    let (engine, voice_string) = if is_clone {
-        if clone_voice_path.is_empty() {
-            return Err(TtsError::Http {
-                status: 400,
-                body: "未导入克隆音色样本，请在设置中导入".into(),
-            });
-        }
-        let sample_abs = data_dir.join(clone_voice_path);
-        if !sample_abs.exists() {
-            return Err(TtsError::Http {
-                status: 400,
-                body: "克隆样本文件不存在，请重新导入".into(),
-            });
-        }
-        let voice_uri = build_clone_voice_uri(&sample_abs)
-            .map_err(|e| TtsError::Http { status: 400, body: e })?;
-        let engine = MimoEngine::new(api_key.to_string(), data_dir.to_path_buf())
-            .with_model("mimo-v2.5-tts-voiceclone");
-        (engine, Some(voice_uri))
-    } else {
-        let voice = match tts_model {
-            "" | "default" => None,
-            v => Some(v.to_string()),
-        };
-        let engine = MimoEngine::new(api_key.to_string(), data_dir.to_path_buf());
-        (engine, voice)
-    };
-
-    let params = TTSParams {
-        text,
-        voice: voice_string.as_deref(),
-        instruction: None,
-    };
-    engine.generate(params).await
-}
 
 #[tauri::command]
 pub async fn generate_tts(text: String, app: AppHandle) -> Result<Message, String> {
@@ -117,19 +40,15 @@ pub async fn generate_tts_impl(app: &AppHandle, text: &str) -> Result<Message, S
     let data_dir = state.data_dir.clone();
 
     // 1. 读设置
-    let (tts_engine, mimo_key, moss_key, moss_voice, tts_model, clone_path,
-         plugin_voices, mic_send_enabled, mic_device, mic_volume) = {
+    let (tts_engine, moss_key, moss_voice, plugin_voices, mic_send_enabled, mic_device, mic_volume) = {
         let s = state
             .settings
             .read()
             .map_err(|e| format!("读取设置失败: {e}"))?;
         (
             s.tts_engine.clone(),
-            s.mimo_api_key.clone(),
             s.moss_api_key.clone(),
             s.moss_voice_id.clone(),
-            s.tts_model.clone(),
-            s.clone_voice_path.clone(),
             s.plugin_voices.clone(),
             s.mic_send_enabled,
             s.mic_output_device.clone(),
@@ -137,7 +56,7 @@ pub async fn generate_tts_impl(app: &AppHandle, text: &str) -> Result<Message, S
         )
     };
 
-    // 2. 据引擎分发
+    // 2. 据引擎分发：内置只剩 moss，其余引擎名一律按插件 id 查表
     let audio_path = match tts_engine.as_str() {
         "moss" => {
             if moss_key.is_empty() {
@@ -149,17 +68,8 @@ pub async fn generate_tts_impl(app: &AppHandle, text: &str) -> Result<Message, S
             let engine = MossEngine::new(moss_key, moss_voice, data_dir.clone());
             engine.generate(&text).await.map_err(|e| format!("{e}"))?
         }
-        "" | "mimo" => {
-            // 默认走 mimo（含空字符串兜底）
-            if mimo_key.is_empty() {
-                return Err("请在设置中填写 MiMo API Key".into());
-            }
-            generate_mimo(&text, &data_dir, &mimo_key, &tts_model, &clone_path)
-                .await
-                .map_err(|e| format!("{e}"))?
-        }
         plugin_id => {
-            // 其余引擎名按插件 id 查找（如 "edge-tts"）
+            // 其余引擎名按插件 id 查找
             let engine = plugins
                 .build_engine(plugin_id, &data_dir)
                 .ok_or_else(|| {

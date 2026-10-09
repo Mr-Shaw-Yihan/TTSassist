@@ -47,7 +47,7 @@ pub struct MossVoice {
 /// 设置（settings.json 的完整结构）
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Settings {
-    /// 当前引擎名（如 "mimo"）
+    /// 当前引擎名（内置引擎名或插件 id）
     pub tts_engine: String,
     /// 引擎内的模型/音色 id
     pub tts_model: String,
@@ -200,7 +200,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             asr_result_mode: default_asr_result_mode(),
-            tts_engine: "mimo".to_string(),
+            tts_engine: "edge-tts".to_string(),
             tts_model: "default".to_string(),
             playback_volume: 0.8,
             hotkey_show_window: "Alt+V".to_string(),
@@ -374,7 +374,7 @@ mod tests {
     #[test]
     fn settings_默认值合理() {
         let s = Settings::default();
-        assert_eq!(s.tts_engine, "mimo");
+        assert_eq!(s.tts_engine, "edge-tts");
         assert!((s.playback_volume - 0.8).abs() < 1e-6);
         assert_eq!(s.hotkey_show_window, "Alt+V");
     }

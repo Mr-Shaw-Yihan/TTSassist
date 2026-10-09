@@ -647,7 +647,7 @@ mod tests {
         // 初始化到临时目录（OnceLock 全局生效一次；本测试独立于其他测试的断言）
         crate::logging::init(&tmp.path().to_path_buf(), true);
         // 模拟有人把用户文本打进了日志（这正是二次防线要拦的）
-        log_info!("合成完成 text=\"今天股票会涨吗救救我\" engine=mimo");
+        log_info!("合成完成 text=\"今天股票会涨吗救救我\" engine=demo-tts");
         log_info!("识别结果: 内容=请把空调打开一点");
         let tail = render_log_tail();
         assert!(!tail.contains("股票"), "诊断包日志尾部不得含用户文本原词");

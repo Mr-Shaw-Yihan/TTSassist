@@ -117,7 +117,7 @@ pub async fn generate_tts_stream(text: String, app: AppHandle) -> Result<StreamT
     let plugins = app.state::<PluginManager>();
     let plugin = match plugins.get(&engine_id) {
         Some(p) if p.has_stream() => p,
-        // 非流式引擎（mimo/moss/edge-tts 等）：整体回落到既有阻塞管线（宿主不播，前端照旧整段播放）
+        // 未导出流式符号的引擎（内置引擎与老插件）：整体回落到既有阻塞管线（宿主不播，前端照旧整段播放）
         _ => {
             let message = crate::commands::tts::generate_tts_impl(&app, &text).await?;
             return Ok(StreamTtsResult { message, host_played: false });

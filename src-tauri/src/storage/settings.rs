@@ -30,7 +30,7 @@ pub fn load_settings(data_dir: &Path) -> Settings {
     let default = Settings::default();
     let mut settings = match serde_json::from_str::<serde_json::Value>(&raw) {
         Ok(v) => Settings {
-            tts_engine: v.get("tts_engine").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.tts_engine),
+            tts_engine: v.get("tts_engine").and_then(|x| x.as_str()).filter(|s| !s.is_empty()).map(String::from).unwrap_or(default.tts_engine),
             tts_model: v.get("tts_model").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.tts_model),
             playback_volume: v.get("playback_volume").and_then(|x| x.as_f64()).map(|x| x as f32).unwrap_or(default.playback_volume),
             hotkey_show_window: v.get("hotkey_show_window").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.hotkey_show_window),
@@ -252,8 +252,20 @@ mod tests {
         std::fs::write(d.join("settings.json"), r#"{"playback_volume":0.1}"#).unwrap();
         let s = load_settings(&d);
         assert!((s.playback_volume - 0.1).abs() < 1e-6, "保留写下的");
-        assert_eq!(s.tts_engine, "mimo", "缺失字段用默认");
+        assert_eq!(s.tts_engine, "edge-tts", "缺失字段用默认");
         assert_eq!(s.hotkey_show_window, "Alt+V");
+    }
+
+    #[test]
+    fn 空串引擎归一到默认值() {
+        let dir = tempdir().unwrap();
+        let d = dir.path().to_path_buf();
+        // 老版本可能把 tts_engine 写成空串（而非缺字段）：不得落成空引擎，
+        // 否则它会命中插件查表分支并报「引擎「」不可用」
+        std::fs::write(d.join("settings.json"), r#"{"tts_engine":""}"#).unwrap();
+        let s = load_settings(&d);
+        assert_eq!(s.tts_engine, Settings::default().tts_engine, "空串应归一到默认引擎");
+        assert!(!s.tts_engine.is_empty());
     }
 
     #[test]

@@ -43,7 +43,7 @@ pub enum EngineCategory {
 #[derive(Debug, Error)]
 pub enum TtsError {
     /// settings 中未配置 API Key
-    #[error("未配置 MiMo API Key，请在设置中填写")]
+    #[error("未配置 API Key，请在设置或对应插件的配置中填写")]
     NoApiKey,
 
     /// HTTP 网络层错误（连不上、超时等）
@@ -80,7 +80,7 @@ pub trait TTSEngine: Send + Sync {
     /// 上层可直接用此路径拼接绝对路径播放。
     async fn generate(&self, params: TTSParams<'_>) -> std::result::Result<String, TtsError>;
 
-    /// 引擎名称（如 "mimo"、"local-test"）
+    /// 引擎名称（内置引擎名或插件 id）
     fn name(&self) -> &str;
 
     /// 引擎类别
