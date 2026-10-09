@@ -1144,7 +1144,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 | Task | 状态 | 提交 |
 |---|---|---|
 | 1 插件协议层 | 完成（含审查修正） | `4f6fe95` `ee89e05` |
-| 2 流式会话 + 双导出 | 完成（含审查修正 I-1..I-4） | `3c2fcec` + 本轮修正提交 |
+| 2 流式会话 + 双导出 | 完成（含审查修正 I-1..I-4） | `3c2fcec` `96acedb` |
 | 3–13 | 未开始 | — |
 
 下一个动作：**Task 3 Step 1**（写 `plugins/engines/mimo-tts/package.ps1`，模板 = `plugins/engines/minimax-tts-stream/package.ps1`）。
