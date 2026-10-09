@@ -1151,15 +1151,18 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 | 6 宿主删内置 MiMo + 默认引擎 edge-tts | 完成（TDD 先红后绿；审查 **Approved**，0C/1I/6M，其中 3 条 Minor 当场收口；**计划期望值 161 是算式错，已修正为 163 并连带修正下游**） | `06c0a3b` `d4f7eb6` `9de5ee2` |
 | 7 一次性迁移三段 | 完成（TDD 先红后绿；审查 **Request Changes**，0C/1I/3M——Important 的事实我实跑证实、定性修正后收口；**计划期望值 168 又是算式漏项，已修正并连带下游**） | `c71aca8` `d32b642` |
 | 8 克隆样本命令去引擎化 + 卸载兜底 | 完成（TDD 先红后绿；审查 **Request Changes**，0C/2I/5M——两条 Important 都先核实了事实前提再收口；**计划期望 174 只算了主体，收口后再 +2**） | `bf8cfb8` `f9cd4f3` |
-| 9–13 | 未开始 | — |
+| 9 流式播放态事件 + 桥路径走流式 | 完成（不新增单测，按计划；审查 **Request Changes**，0C/2I/4M——两条 Important 都是本提交改道引入的“用户会撞见”缺口，已收口） | `e98eb03` `cfd36f1` |
+| 10–13 | 未开始 | — |
 
-下一个动作：**Task 9 Step 1**（流式播放态事件 + 桥路径改走流式）。
+下一个动作：**Task 10 Step 1**（远程配置按插件 id 覆盖 `help_url`）。
 必读的三条前置：
-① 播放态事件**仅在 `spk_ok` 为真时发**（扬声器没开成时由前端整段播并自己发事件），
-   不是“任一路开成”——设计文档 §3.2-1 已补过这一行口径；
-② `playback:started` 的载荷必须是 `wav_rel` **字符串**（前端拿相对路径去取音频），不是绝对路径也不是对象；
-③ 桥路径改走流式时需把 `generate_tts_stream_impl` 置 `pub`（否则测试报 `cannot find function`）。
-宿主基线现为 **176 passed / 3 ignored**（Task 9 不增删测试，应仍是 176）。
+① 三个改动点必须同步：`commands/remote.rs` 的 `RemoteConfig` 加 map + `effective_help_url`、
+   `commands/plugins.rs` 的 `get_plugin_config` 改走生效入口、`plugins/remote-config.json` 加覆盖表；
+   已知陷阱：`remote.rs:311` 那个用字面量构 `RemoteConfig` 的测试必须补字段（否则 `missing field`）；
+② 前端**唯一生效点**是 `get_plugin_config`（`PluginConfigPanel.tsx:63` 读 `info.help_url`），
+   `list_plugins` 返回的 `PluginInfo.config.help_url` 前端无人读 — 不要去改那条链；
+③ map 语义是“读不到就不动”：线上 JSON 缺失/解析失败不得把已有 `help_url` 抹成空。
+宿主基线仍为 **176 passed / 3 ignored**（Task 9 收口只改实现与注释、不增删测试），Task 10 应到 **179**。
 另需回看：探针遗留项已全部回答——`hound` 实测没用到、已连同 `serde` 删除；
 但 `FIRST_CHUNK_TIMEOUT=120s` 的余量已改写：release 下出现过一次 **49.2s** 的克隆首块离群值（同文本其余都是 1.6~1.8s），
 所以余量只有 2.4 倍而不是旧说法的 13 倍——**已登记为 Task 13 真机验收前的待决策项**（若出现克隆长句超时就提到 180~240s，仍小于 `REQUEST_TIMEOUT=300s`）。
@@ -3335,6 +3338,44 @@ git commit -m "feat(流式): 播放线程内补齐播放态事件 + 能力桥合
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 
+### Task 9 实施记录
+
+实测门禁（`e98eb03` 主体 + `cfd36f1` 审查收口）：
+
+| 项 | 结果 |
+|---|---|
+| 编译 | `cargo check --lib --tests` 零 warning 零 error（收口那次是**真实重编**——审查者指出不 touch 文件时 cargo 走缓存不重放诊断，这类取证本来不可复现，必须看是否出现 `Checking` 行） |
+| 测试 | `cargo test --lib` = **176 passed / 0 failed / 3 ignored**，与本 Task 期望一致（不增删测试） |
+| 守卫 | `check-bom.ps1` / `check-log-hygiene.ps1` 均 exit 0；基座残留命中数不变（281） |
+| 事件口径 | 前端三处（`App.tsx:358`、`QuickInput.tsx:179`、`useVoiceInputHotkey.ts:43`）都是 `va:play:start` + `playback:started{字符串路径}`，宿主新发的与之逐字一致；`bridge.rs:95` 按 `String` 反序列化 ⇒ 载荷类型正确 |
+| 双发风险 | `host_played=true` 时三个前端消费点（`App.tsx:478`、`QuickInput.tsx:168`、`useVoiceInputHotkey.ts:33`）均跳过整段播放 ⇒ 不会两套事件 |
+
+跨边界（编译器抓不到）的两处已核实：
+- `announced ⇒ active 已登记` 的不变式成立（`spk_ok=true` 只出现在 `sinks.push` 之后，反之
+  “扬声器开成但 sinks 为空”逻辑上不可能）；`spk_ok=false && !sinks.is_empty()`（只开成虚拟麦）时
+  `announced=false`，排空/Abort 直接 return ⇒ 事件与 active 不脱节；
+- **归档路径前移不但无副作用、还修掉一个悬挂**：旧顺序下 `create_dir_all` 失败会发生在
+  “设备已占用 + active 已登记”之后，从此没有 Chunk/Finish 来释放；前移后失败在 `begin()` 之前。
+
+#### Task 9 审查收口
+
+审查结论 **Request Changes**：0 Critical / 2 Important / 4 Minor。审查者逐字比对了 Step 1-5
+（无漏做、无越界改动），并独立复跑了 176/零 warning；但判定我的两项自查“不完整”——
+只推了 `announced` 与 `active` 的静态关系，没推 ack 超时提前返回这条路径；只看了
+`native_synthesize` 内部状态，没看停止控制链。两条 Important 都因此采纳。
+
+| 编号 | 处置 | 说明 |
+|---|---|---|
+| T9-I-1 `ack` 超时路径会留下永不到来的 stop（前端已报错，悬浮球却持续波纹，桥里 `playing_path` 指向一条永不落盘的 wav，音频设备被僵尸会话占住） | **已修** `cfd36f1` | 超时分支改调 `cleanup_failed_stream(app, &plugin, &session, &tmp_pcm)`：Abort 与 Begin 同一条通道，FIFO 保证它排在后面→ `announce_play_stop` 必补发 stop；真卡到 Begin 没走完时 start 也还没发，状态天然一致。顺带修掉同一路径上**插件会话未 `stream_stop` 的泄漏**（旧代码直接 `?` return，`StreamHandle` 无 Drop ⇒ 只有 `stream_stop` 能释放；属既存缺陷，因刚好落在同一行一并收） |
+| T9-I-2 桥路径改走流式后“停止”控链断裂：宿主的 rodio 播放既不是前端 HTMLAudio 也不是 `MicPlayback`，遥控/主窗的停止对它成空操作（本提交引入的行为回退），且 `App.tsx:324-325` 的 `stopPlayback` 会无条件替宿主发一套 stopped ⇒ “空闲但扬声器仍在响” | **已修** `cfd36f1` | 抽 `pub fn stop_active_stream(app: &AppHandle)`（命令与桥共用），`native_stop_playback` 末尾调它。该函数内用 `try_state` 取 `StreamPlayer`：它会从插件 C ABI 回调线程被调进，不能 panic。双调 `stream_stop` 的安全性已核实：插件侧 `SessionRegistry::abort` 是“remove 命中才置位”的幂等实现。**属计划盲区**：Step 4 只预告了“遥控发字也变成先出声后结束”，没预告 stop 失效；代价 ~3 行所以本 Task 内收。同时给 Task 13 验收清单补了两条必查项 |
+| T9-M-1 `Disconnected` 分支不可达（`StreamPlayer` 被 manage，tx 与进程同寿），当安全网是假象 | **已订正注释** `cfd36f1` | 改成“兜底路径（正常生命周期不可达）”；四处收尾实为三处可达。不能把它当成 T9-I-1 的兜底 |
+| T9-M-2 全局事件不带会话标识，宿主排空时的 stop 可能踩掉前端正在播的另一条（收藏重播） | **不属本 Task，已登记** | 根因是 `Chunk/Finish/Abort` 与单槽 `active_stream_slot` 都没 session id（既有设计）；已进 §九「遗留待下一批」 |
+| T9-M-3 `playback:started` 发出时 WAV 还不存在（步骤 5 才落盘） | **已加注释钉语义** `cfd36f1` | 现消费方（`bridge` 聚合 + `state_json` 反查收藏 id）不取文件 ⇒ 今天无影响；注释写清“后续要做边播边取/进度显示需改成播完再发” |
+| T9-M-4 播放线程里同步触发 C ABI 订阅回调（慢回调会拖住 Chunk 处理） | **不属本 Task，已登记** | grep 证实今天无插件调 `subscribe_events`，本体遥控走 unbounded channel；作为未来风险留档 |
+
+验收口径修正（审查者提出，已同步改上方 Task 13 清单 D 段）：原“遥控端显示正在播放”
+按现有遥控页**不可观察**（`playing_id` 只在命中收藏时非空，而流式产物是消息音频）。
+
 ---
 
 ## Task 10：远程配置按插件 id 覆盖 `help_url`（换邀请码免发版）
@@ -4297,8 +4338,17 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\plugins\scripts\test-mimo-stream
 **D. 本次新增的观感修复与代价（必须当场看）**
 
 - 悬浮球：流式播放时**随播报波纹**（Task 9 补的 `va:play:start`）。
-- 手机遥控：发字后遥控端显示“正在播放”（`playback:started{路径}` 已带字符串载荷），
-  且遥控发字也是“先出声后结束”。
+- 手机遥控：发字后遥控端收到 `playback_changed` 推送、`state_json` 里的 `playing_path`
+  变成 `audio/{fid}.wav`（Task 9 已把 `playback:started` 载荷改成字符串）。
+  ⚠ **验收项口径修正（Task 9 审查留下的）**：遥控页 `remote-app/remote_page.html:466` 的播放态
+  呈现只有「收藏列表高亮」（`playing_id` 仅在 `playing_path` 命中收藏时才非空），而流式产物是
+  消息音频、永不命中收藏 ⇒ 本行原写的“遥控端显示正在播放”**按现有页面不可观察**。
+  真机验收改看两条：① `state_json`/`playback_changed` 里 `playing_path` 有值；② 悬浮球起波纹。
+  （若要恢复原验收项，需给遥控页加通用播放态指示，已挂号到 §九 遗留）
+- 停止链（Task 9 收口 T9-I-2 新增必查项）：宿主流式播放出声后，**遥控点「停止」/主窗点
+  正在播的消息必须真的静音**（`native_stop_playback` 现已调 `stop_active_stream`），且停后波纹消失。
+- 开局回执超时（T9-I-1，难造就不强造）：断开蓝牙/USB 默认输出设备再合成，报「流式播放线程
+  无响应」后悬浮球**不得持续波纹**（该路径现已发 Abort 补发 stop）。
 - 已知代价（属预期，写进发布说明）：
   1. 克隆音色首响仍是全文合成完成（实测 3.5s 级），官方能力缺口；
   2. **克隆的倍速（`playback_rate`）失效**：今天克隆走内置阻塞（倍速生效），
@@ -4337,7 +4387,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\plugins\scripts\test-mimo-stream
 | 预置音色块数 / 首块 TTFB | （填 Step 2 实测值） |
 | 听感保护是否需补（预缓冲/水位） | （按 Step 2 结论填：实测无断音则不补） |
 | 基座护栏基线条数 | （填 Task 12 实数，只许变少） |
-| 遗留待下一批 | MOSS 内置、`minimax_clone`/`MinimaxVoicePanel`、`CLONE_CAPABLE`、`mimo_api_key` 字段删除、`mimo_invite_code` 只读字段、ASR 引擎卸载后的同类兜底（T8-M-5：现在卸掉当前 ASR 插件仍会把 `asr_engine` 指向已卸 id） |
+| 遗留待下一批 | MOSS 内置、`minimax_clone`/`MinimaxVoicePanel`、`CLONE_CAPABLE`、`mimo_api_key` 字段删除、`mimo_invite_code` 只读字段、ASR 引擎卸载后的同类兜底（T8-M-5：现在卸掉当前 ASR 插件仍会把 `asr_engine` 指向已卸 id）、流式并发会话标识（T9-M-2：`Chunk/Finish/Abort` 与单槽 `active_stream_slot` 都不带 session id，两条流并发时 stop 会踩掉另一条）、遥控页通用播放态指示（T9 验收口径：`playing_id` 只在命中收藏时非空）、插件订阅回调跑在播放线程（T9-M-4） |
 ```
 
 - [ ] **Step 5：更新工作线状态板**
