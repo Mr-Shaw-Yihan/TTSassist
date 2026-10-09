@@ -1146,12 +1146,15 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 | 1 插件协议层 | 完成（含审查修正） | `4f6fe95` `ee89e05` |
 | 2 流式会话 + 双导出 | 完成（含审查修正 I-1..I-4） | `3c2fcec` `96acedb` |
 | 3 打包与内置分发 | 完成（两轮审查均 Approved；含 zip 可复现修正） | `a3df6d2` `c4dfb5f` `82337ec` + 后续收口 |
-| 4–13 | 未开始 | — |
+| 4 实网探针 + 冒烟脚本 | 完成（**已真跑**，RIFF 问题已关掉；见 Task 4 实施记录） | `f9cacd2` `6140aa3` |
+| 5–13 | 未开始 | — |
 
-下一个动作：**Task 4 Step 1**（在 `plugins/engines/mimo-tts/src/stream.rs` 的 `mod tests` 末尾追加两个
-`#[ignore]` 实网探针，再写 `plugins/scripts/test-mimo-stream.ps1`）。**这步要真实的 `MIMO_TTS_API_KEY`**，
-拿不到 Key 就只能提交探针代码、不能宣称观测完成（探针要真跑，拿到几块 / 首块是不是 WAV 这两件事必须实装回答）。
-另需回看：`FIRST_CHUNK_TIMEOUT=120s` 是否够长句首块（探针实测后定）；`hound` 依赖到本 Task 才真正被用到。
+下一个动作：**Task 5 Step 1**（给 `plugins/engines/mimo-asr/package.ps1` 补 `config` 声明并重打包，
+**与宿主换注入（`src-tauri/src/lib.rs` 删 `MIMO_API_KEY` 顶层注入、改 `VA_CLONE_SAMPLE` 启动注入）同一个 commit**）。
+这是全计划唯一“拆成两次提交就直接把 ASR 弄坏”的配对（设计 §七 硬约束）：提交前用 `git status --short`
+核对该 Task 的 6 个文件确实在同一个 `git add` 里。
+另需回看：探针遗留项已全部回答（`FIRST_CHUNK_TIMEOUT=120s` 余量充足；`hound` 实测没用到、已连同 `serde` 删除）。
+若后续动了插件源码并重新打包，**打包与刷新索引 checksum 必须同提交**（见交接提醒第 5 条）。
 
 交接提醒（容易错的三件事）：
 1. 每条 `cargo` 命令都必须先显式设 `CARGO_TARGET_DIR`（宿主用 `src-tauri\target`，插件用 `plugins\target`，两者不可互换）——曾有会话把全局 target 指到别的工作树，直接覆盖了别人的 exe。
@@ -1685,6 +1688,56 @@ git commit -m "test(插件): mimo-tts 实网探针（预置多块 + 克隆首块
 
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
+
+---
+
+### Task 4 实测结论（实施记录）
+
+探针**已在本机真跑**（Key 与克隆样本均取自本机 `settings.json`，debug profile）：
+
+| 文本 | 音色 | 首块 | 块数 | 音频时长 | 总耗时 | 首块前 4 字节 |
+|---|---|---|---|---|---|---|
+| 短句（31 字） | 预置 | 125ms | 24 | 7680ms | 1776ms | — |
+| 短句 | 克隆 | 1919ms | 1 | 4640ms | 1919ms | `[6, 0, 2, 0]` |
+| 长句（169 字） | 预置 | 139ms | 131 | 42080ms | 8428ms | — |
+| 长句（同上重跑） | 预置 | 116ms | 120 | 38560ms | 7685ms | — |
+| 长句（150 字） | 克隆 | 6057ms | 1 | 28640ms | 6057ms | `[2, 0, 2, 0]` |
+| 长句（150 字） | 预置 | 166ms | 106 | 34080ms | 6876ms | — |
+
+四条结论：
+
+1. **预置音色是真流式**：首块 116~166ms，且不随文本长度增长（长句并不更慢），块数与音频时长成正比。
+2. **克隆是服务端兼容模式**：整段一块返回（块数恒 1），首块耗时随文本长度涨（短句 1.9s → 长句 6.1s）。
+   `FIRST_CHUNK_TIMEOUT=120s` 余量 ≥ 20 倍，**不调小也不调大**（文本再长 10 倍也在预算内）。
+3. **RIFF 这个全设计唯一悬空的事实点已关掉**：两个探针都过了 `!starts_with(RIFF)` 与 2 字节对齐断言；
+   落盘试听 wav 的头字段自洽（24000/1/16、`byterate == rate*2`、`data_len == 文件长 - 44`），
+   说明 `strip_wav_container` 交出来的就是**可直接播的裸 PCM**。无论服务端给哪种形式，宿主侧都是可用音频。
+4. **听感保护不需补**（预缓冲/水位均不加）：预置首块 <200ms、后续块到达快于播放速度，Task 9 首块即播成立。
+
+与计划代码的差异（3 处，全为实测所需）：
+
+1. 探针文本走 `probe_text()`：默认沿用计划里的句子，但可用 `MIMO_PROBE_TEXT` 临时换长句——
+   要回答“长句首块预算”总不能改一次代码测一次。
+2. 克隆探针补了计时（首块/音频/总耗时）：计划原代码只取首块前 4 字节，拿不到超时决策需要的耗时。
+3. 取首块前 4 字节改为 `min(b.len(), 4)`：首块极端情况下可能不足 4 字节，计划原写法 `&b[0..4]`
+   会让探针自己 panic，把“服务端异常”误报成“剥头失效”。
+
+脚本三条实测坑（已写进脚本注释）：
+
+- 不加名称过滤就会连克隆探针一起跑，而没样本时克隆探针直接 panic → “只测预置”这种最常用的跑法必然红。
+- **不要用 `@Filter` 滑传（splatting）**：`$x = if (...) { @("a") }` 会被降级成字符串而非数组，
+  滑传后参数静默丢失（表现为“过滤写了却没生效”），故改成两个分支的显式命令。
+- cargo 打的是 UTF-8，控制台默认按 GBK 解码会把 `[probe]` 行打成乱码；实测数字要抄进文档，
+  乱码等于没观测，故跑前切 `[Console]::OutputEncoding`（跑完在 `finally` 里恢复）。
+
+依赖收口（Task 2 审查留下的尾巴）：`hound` 实测没被用到（探针按 `client.rs` 既有风格手写 WAV 头），
+`serde` 也只被 `serde_json` 间接需要，两个都已删。**有意未重打包** `src-tauri/resources/plugins/mimo-tts-0.1.0.zip`：
+删的都是未被引用的 crate，dll 语义不变；将来若重打包，必须与索引 checksum 同提交刷新（Task 3 约定）。
+
+门禁：`cargo test -p mimo-tts` = **24 passed / 0 failed / 2 ignored / 0 warning**。
+（计划 Task 13 写的“单测 23 passed”口径少 1 条；Task 2 收口时实测就是 24，后续以 24 为准。）
+
+提交：`f9cacd2`（探针 + 冒烟脚本）、`6140aa3`（删无用依赖）。
 
 ---
 
