@@ -29,6 +29,12 @@ import { ConfirmDialogHost } from "./components/common/ConfirmDialog";
 import { playMicOnChime, playMicOffChime } from "./utils/chime";
 import { computeComposerHeight, COMPOSER_DEF, COMPOSER_MIN, COMPOSER_MAX_RATIO } from "./utils/composerResize";
 import {
+  withStreamingPlaceholder,
+  settleStreaming,
+  dropStreaming,
+  type StreamingNotice,
+} from "./utils/streamPlaceholder";
+import {
   generateTTS,
   listMessages,
   listFavorites,
@@ -39,6 +45,7 @@ import {
   listPlugins,
   promptEngineWarmup,
   perfStartupDone,
+  ttsStreamMute,
 } from "./services/invoke";
 import type { Message, Favorite, PluginSetupProgress } from "./types";
 
@@ -73,6 +80,11 @@ function App() {
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [tab, setTab] = useState<Tab>("messages");
   const [playingPath, setPlayingPath] = useState<string | null>(null);
+  // 正在流式合成中的消息 id：界面上是占位气泡（可静播，暂不可重播/收藏，
+  // 因为 wav 还没写完）
+  const [streamingIds, setStreamingIds] = useState<string[]>([]);
+  // 本次发送对应的占位 id（失败时按它摘掉占位；宿主同一时刻只跑一条流，不会串）
+  const streamingNoticeRef = useRef<string | null>(null);
   const settings = useSettingsStore((s) => s.settings);
   const setSettings = useSettingsStore((s) => s.setSettings);
   const patch = useSettingsStore((s) => s.patch);
@@ -182,11 +194,26 @@ function App() {
     await reloadLatestMessages();
   }, []);
 
+  // 流式「已开始合成」通知：后端在会话建立、即将出声那一刻就发，而正式消息要等
+  // 整条流跑完才落库（几秒到几十秒）。先入列占位消息，用户才能「看到并在需要时点上静播」。
+  useTauriListen<StreamingNotice>("tts:streaming", (n) => {
+    if (!n?.id) return;
+    streamingNoticeRef.current = n.id;
+    setMessages((prev) => withStreamingPlaceholder(prev, n));
+    setStreamingIds((prev) => (prev.includes(n.id) ? prev : [...prev, n.id]));
+  }, []);
+
   /** 重取最新一页并合并：保留已加载且不在新窗口里的更早消息 */
   const reloadLatestMessages = useCallback(async () => {
     try {
       const page = await listMessages(MESSAGE_PAGE_SIZE);
       setHasMoreMessages(page.has_more);
+      // 跨窗口生成的流式消息（浮窗/语音直接发送/遥控）不经过本窗的 handleSend，
+      // 它靠这条事件完成“占位→正式”的收尾：已落库的 id 从 streaming 集合里摘掉，
+      // 否则气泡会永远停在「合成中 / 静播」态。
+      setStreamingIds((prev) =>
+        prev.filter((id) => !page.messages.some((m) => m.id === id)),
+      );
       setMessages((prev) => {
         const inWindow = new Set(page.messages.map((m) => m.id));
         const older = prev.filter((m) => !inWindow.has(m.id));
@@ -340,6 +367,9 @@ function App() {
     }
     const wasPlaying = !!cur && !cur.paused;
     playingRef.current?.pause();
+    // 宿主可能正在用 rodio 流式播同一段音频（不经前端 <audio>）：起本地播放前先静播它，
+    // 否则会出现“一个消息两路声音重叠”。无流在跑时是空操作。
+    void ttsStreamMute().catch(() => {});
     const url = await getAudioUrl(relPath);
     const a = new Audio(url);
     a.volume = volume;
@@ -473,14 +503,28 @@ function App() {
   }, [reloadLatestMessages, reloadFavorites]);
 
   async function handleSend(text: string) {
-    const { message: msg, hostPlayed } = await generateTTS(text);
-    setMessages((prev) => [...prev, msg]);
-    // 新消息滚到底（用户正在向上翻阅时不打断，可用定位按钮回底部）
-    if (atBottom) scrollToBottom();
-    // 宿主已流式播放（扬声器）则不再整段自动播放，避免双播
-    if (hostPlayed) return;
-    // 自动播放延迟 0.4 秒（避免刚生成时卡音）
-    setTimeout(() => playAudio(msg.audio_path), 400);
+    try {
+      const { message: msg, hostPlayed } = await generateTTS(text);
+      // 占位气泡已在则按 id 原地替换（不重复、不跳位）；事件丢失时直接追加
+      setMessages((prev) => settleStreaming(prev, msg));
+      setStreamingIds((prev) => prev.filter((id) => id !== msg.id));
+      if (streamingNoticeRef.current === msg.id) streamingNoticeRef.current = null;
+      // 新消息滚到底（用户正在向上翻阅时不打断，可用定位按钮回底部）
+      if (atBottom) scrollToBottom();
+      // 宿主已流式播放（扬声器）则不再整段自动播放，避免双播
+      if (hostPlayed) return;
+      // 自动播放延迟 0.4 秒（避免刚生成时卡音）
+      setTimeout(() => playAudio(msg.audio_path), 400);
+    } catch (e) {
+      // 合成中途失败：摘掉本条占位（宁缺毋残）；抛给 InputBox 走已有的 showInfo
+      const stale = streamingNoticeRef.current;
+      if (stale) {
+        setMessages((prev) => dropStreaming(prev, stale));
+        setStreamingIds((prev) => prev.filter((id) => id !== stale));
+        streamingNoticeRef.current = null;
+      }
+      throw e;
+    }
   }
 
   return (
@@ -588,6 +632,8 @@ function App() {
                     key={m.id}
                     message={m}
                     playingPath={playingPath}
+                    streaming={streamingIds.includes(m.id)}
+                    onMute={() => void ttsStreamMute().catch(() => {})}
                     onDeleted={(id) => setMessages((prev) => prev.filter((x) => x.id !== id))}
                     onFavorited={() => { /* 已通过 favorite:changed 事件刷新 */ }}
                     onPlay={() => playAudioWithMic(m.audio_path)}

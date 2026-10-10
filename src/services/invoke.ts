@@ -30,6 +30,14 @@ export async function generateTTS(text: string): Promise<GenerateTtsResult> {
   }
 }
 
+/**
+ * 静播当前流式合成（只静音）：合成继续跑完、消息与音频文件照常产出，
+ * 只是不再响。与 tts_stream_stop（中止并丢产物）不同；无流在跑时无副作用。
+ */
+export async function ttsStreamMute(): Promise<void> {
+  return invoke<void>("tts_stream_mute");
+}
+
 // ── 插件 ─────────────────────────────────────────
 
 /** 列出已安装插件（含加载状态、失败原因、音色表） */

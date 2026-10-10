@@ -13,19 +13,24 @@ interface Props {
   message: Message;
   /** 当前正在播放的 audio_path（跨视图统一高亮） */
   playingPath: string | null;
+  /** 占位阶段：流式合成尚未跑完，wav 还没写完（不可重播/收藏，可静播） */
+  streaming?: boolean;
+  /** 静播（只静音，合成与落库继续） */
+  onMute?: () => void;
   onDeleted: (id: string) => void;
   onFavorited: () => void;
   onPlay: (audioPath: string) => void;
 }
 
-export function MessageBubble({ message, playingPath, onDeleted, onFavorited, onPlay }: Props) {
+export function MessageBubble({ message, playingPath, streaming = false, onMute, onDeleted, onFavorited, onPlay }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const isPlaying = playingPath === message.audio_path;
 
-  // 播放：onPlay 由 App 提供（playAudioWithMic 已含"开关开启时发麦克风"），
+  // 播放：onPlay 由 App 提供（playAudioWithMic 已含“开关开启时发麦克风”），
   // 此处不再自行发麦，避免双份。
   function handlePlay() {
+    if (streaming) return; // 占位阶段 wav 未写完，没有可整段重播的音频
     onPlay(message.audio_path);
   }
 
@@ -99,12 +104,30 @@ export function MessageBubble({ message, playingPath, onDeleted, onFavorited, on
       <div
         className="group relative max-w-[78%] border border-[var(--ink-200)] bg-[var(--paper-card)] rounded-t-2xl rounded-bl-2xl rounded-br-md px-3.5 py-2.5 text-sm text-[var(--ink-900)] shadow-[0_1px_2px_rgba(26,24,22,0.04)] transition-colors animate-fade"
         onContextMenu={(e) => {
+          if (streaming) return; // 占位阶段音频与记录都还不存在，不给收藏/删除/打开位置
           e.preventDefault();
           setMenu({ x: e.clientX, y: e.clientY });
         }}
       >
         <div className="whitespace-pre-wrap break-words leading-[1.65]">{message.content}</div>
         <div className="mt-1.5 flex items-center gap-2 text-[11px] text-[var(--ink-300)]">
+          {streaming ? (
+            /* 占位态：后端已拿到会话并开始推流，所以用户已经听到声音了。
+               这一位必须现在就给出来，否则整条流跑完前无处可点。 */
+            <>
+              <span className="flex items-center gap-1 text-[var(--ink-500)]">
+                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--amber-500)]" />
+                合成中
+              </span>
+              <button
+                onClick={onMute}
+                title="只静音：合成仍会继续完成，消息与音频照常保存"
+                className="rounded-md px-1.5 py-0.5 text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)] transition-colors"
+              >
+                ⏸ 静播
+              </button>
+            </>
+          ) : (
           <button
             onClick={handlePlay}
             className={[
@@ -124,6 +147,7 @@ export function MessageBubble({ message, playingPath, onDeleted, onFavorited, on
               </>
             )}
           </button>
+          )}
           <span className="tabular-nums">{formatTime(message.created_at)}</span>
         </div>
 

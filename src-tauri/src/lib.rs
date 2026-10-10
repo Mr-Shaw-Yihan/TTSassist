@@ -344,6 +344,7 @@ pub fn run() {
             crate::commands::tts::generate_tts,
             crate::commands::tts_stream::generate_tts_stream,
             crate::commands::tts_stream::tts_stream_stop,
+            crate::commands::tts_stream::tts_stream_mute,
             crate::commands::perf::perf_startup_done,
             crate::commands::diag::export_diagnostics,
             crate::commands::plugins::list_plugins,

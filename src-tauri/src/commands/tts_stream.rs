@@ -42,6 +42,22 @@ pub struct StreamTtsResult {
     pub host_played: bool,
 }
 
+/// 「已开始流式」通知事件名：会话建立、即将出声那一刻就发，让各窗口先把消息
+/// 入列（带最终 id 与归档路径），不等整条流跑完——否则用户听得到声音、界面上
+/// 却既没有这条消息也没有可点的停止入口。
+pub const EVENT_TTS_STREAMING: &str = "tts:streaming";
+
+/// `tts:streaming` 载荷。字段与落库后的 Message 一致（前端拿到正式消息按 id 原地替换），
+/// 额外带 engine 供界面区分展示。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct StreamingNotice {
+    pub id: String,
+    pub content: String,
+    pub audio_path: String,
+    pub engine: String,
+    pub created_at: String,
+}
+
 // ── 活跃会话登记（tts_stream_stop 的中止目标）──────────────
 
 struct ActiveStream {
@@ -98,6 +114,16 @@ pub fn stop_active_stream(app: &AppHandle) {
 #[tauri::command]
 pub fn tts_stream_stop(app: AppHandle) {
     stop_active_stream(&app);
+}
+
+/// 静播当前流式播放（若在播）：**只静音**，合成继续跑完、消息与音频文件照常产出。
+/// 与 `tts_stream_stop` 的区别就在“不丢产物”；主窗占位气泡上的「⏹ 静播」走这里。
+#[tauri::command]
+pub fn tts_stream_mute(app: AppHandle) {
+    // try_state：本命令可能在会话已收尾后被点（竞态），拿不到就没什么可静的
+    if let Some(player) = app.try_state::<StreamPlayer>() {
+        player.mute();
+    }
 }
 
 // ── 主命令 ───────────────────────────────────────────────
@@ -199,12 +225,14 @@ pub async fn generate_tts_stream_impl(
     // 3. 登记活跃会话 + 播放线程开局（回执设备打开结果）
     let _active_guard = ActiveGuard::new(Arc::clone(&plugin), session);
 
-    // 归档路径先算：播放线程开局时要把「正在播哪个文件」告诉订阅方
-    let fid = gen_id("m");
+    // 消息 id 与归档路径先定下来：占位气泡要在出声那一刻就带上最终的 id 与
+    // audio_path，命令返回后的正式消息沿用同一对值，前端才能按 id 原地替换
+    // （旧实现文件名用 fid、消息另取一个 id，同一段音频会有两个名字）。
+    let msg_id = gen_id("m");
+    let (wav_rel, tmp_name) = stream_paths_for(&msg_id);
     std::fs::create_dir_all(data_dir.join("audio"))
         .map_err(|e| format!("创建音频目录失败: {e}"))?;
-    let tmp_pcm = data_dir.join(format!("audio/{fid}.pcm.tmp"));
-    let wav_rel = format!("audio/{fid}.wav");
+    let tmp_pcm = data_dir.join(&tmp_name);
 
     let (ack_tx, ack_rx) = channel();
     let has_mic_target = mic_send_enabled && !mic_device.is_empty();
@@ -239,6 +267,19 @@ pub async fn generate_tts_stream_impl(
     } else if !mic_ok && has_mic_target {
         log_warn!("流式播放：虚拟麦克风打开失败，仅扬声器播放");
     }
+
+    // 会话已建立、马上要出声：先把这条“已在合成”的消息告知各窗口（不等整条流跑完）。
+    // 扬声器没开成也照发：界面提前可见与谁来播无关。
+    let _ = app.emit(
+        EVENT_TTS_STREAMING,
+        StreamingNotice {
+            id: msg_id.clone(),
+            content: text.clone(),
+            audio_path: wav_rel.clone(),
+            engine: engine_id.clone(),
+            created_at: now_iso(),
+        },
+    );
 
     // 4. 拉块循环（blocking 线程）：块 → 播放 + 追加临时 PCM 文件
     let engine_for_log = engine_id.clone();
@@ -317,8 +358,9 @@ pub async fn generate_tts_stream_impl(
     let _ = std::fs::remove_file(&tmp_pcm);
 
     // 6. 消息记录 + 广播（与阻塞路径一致；扬声器由宿主已流式播过，前端跳过自动播放）
+    //    id 与 audio_path 必须与 tts:streaming 事件里那一份一致，前端才能原地替换占位气泡。
     let message = Message {
-        id: gen_id("m"),
+        id: msg_id,
         content: text.clone(),
         audio_path: wav_rel,
         created_at: now_iso(),
@@ -430,6 +472,9 @@ enum PlayerCmd {
     Finish,
     /// 立即静音并丢弃当前流
     Abort,
+    /// 静播：只停“响”（丢缓冲 + 释放设备），**不中止会话**——拉块与写文件继续，
+    /// 消息与音频照常完成。与 Abort 的区分就是用户要的“东西还是得产出来”。
+    Mute,
 }
 
 /// 流式播放全局句柄（只含 Sender，天生 Send+Sync，可 manage）
@@ -458,6 +503,10 @@ impl StreamPlayer {
     fn abort(&self) {
         let _ = self.tx.send(PlayerCmd::Abort);
     }
+
+    fn mute(&self) {
+        let _ = self.tx.send(PlayerCmd::Mute);
+    }
 }
 
 /// 一个设备的播放通路：OutputStream 必须与 Sink 同存保活
@@ -471,6 +520,8 @@ struct PlaySession {
     channels: u16,
     sinks: Vec<DeviceSink>,
     finishing: bool,
+    /// 已被用户静播：后续块不再喂设备（但拉块与写文件照常进行）
+    muted: bool,
     app: AppHandle,
     /// 开局时宿主是否发过 `va:play:start`（决定收尾要不要发对应的那一套 stop）
     announced: bool,
@@ -546,6 +597,7 @@ fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
                         channels: spec.channels,
                         sinks,
                         finishing: false,
+                        muted: false,
                         app,
                         announced,
                     });
@@ -553,12 +605,15 @@ fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
             }
             Ok(PlayerCmd::Chunk(samples)) => {
                 if let Some(s) = &mut active {
-                    for ds in &mut s.sinks {
-                        ds.sink.append(rodio::buffer::SamplesBuffer::new(
-                            s.channels,
-                            s.sample_rate,
-                            samples.clone(),
-                        ));
+                    // 静播或已无设备时直接丢块（拉块循环在另一线程，文件仍会写完整）
+                    if should_feed(s.muted, !s.sinks.is_empty()) {
+                        for ds in &mut s.sinks {
+                            ds.sink.append(rodio::buffer::SamplesBuffer::new(
+                                s.channels,
+                                s.sample_rate,
+                                samples.clone(),
+                            ));
+                        }
                     }
                 }
             }
@@ -570,6 +625,20 @@ fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
             Ok(PlayerCmd::Abort) => {
                 if let Some(prev) = active.take() {
                     announce_play_stop(&prev);
+                }
+            }
+            Ok(PlayerCmd::Mute) => {
+                if let Some(s) = active.as_mut() {
+                    // 静播只停“响”：丢缓冲并释放设备（不 Abort 会话、不停拉块）。
+                    let (muted, need_stop_notice) = mute_transitions(s.announced);
+                    s.muted = muted;
+                    s.sinks.clear();
+                    if need_stop_notice {
+                        // 补发一次停止，并抹掉 announced：收尾时不会再发第二套
+                        announce_play_stop(s);
+                        s.announced = false;
+                    }
+                    log_info!("流式播放：已静播（合成继续，消息与音频照常完成）");
                 }
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
@@ -594,6 +663,28 @@ fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
             }
         }
     }
+}
+
+// ── 可单测的小决策（纯函数）───────────────────────
+
+/// 由消息 id 推导本次流式的归档与临时文件路径。
+/// 单一来源：“出声前就发给界面的占位消息”与“播完落库的正式消息”必须指向同一个
+/// audio_path，否则前端无法原地替换（会变成两条一模一样的消息）。
+fn stream_paths_for(msg_id: &str) -> (String, String) {
+    (format!("audio/{msg_id}.wav"), format!("audio/{msg_id}.pcm.tmp"))
+}
+
+/// 这一块要不要喂给播放设备：静播后、或设备根本没开成时丢弃。
+/// 注意丢的只是喂设备——写临时文件在拉块线程里，不受本函数影响。
+fn should_feed(muted: bool, has_sinks: bool) -> bool {
+    !muted && has_sinks
+}
+
+/// 静播时的状态转移：返回（新的 muted 值, 是否需要补发一次停止事件）。
+/// 只有原本真的报过“正在播”（扬声器开成且 announced）才补发；
+/// 否则会出现悬浮球/遥控收到两套 va:play:stop。
+fn mute_transitions(announced: bool) -> (bool, bool) {
+    (true, announced)
 }
 
 // ── 测试 ──────────────────────────────────────────────────
@@ -651,5 +742,34 @@ mod tests {
         let bytes = [0x01u8, 0x80, 0xFF, 0x7F]; // LE: 0x8001, 0x7FFF
         let samples: Vec<i16> = bytes.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
         assert_eq!(samples, vec![-32767, 32767]);
+    }
+
+    // ── Task 15：即发即入框 + 可静播 ──────────────────────
+
+    #[test]
+    fn 路径预分配_消息id与归档名一致() {
+        // 占位气泡要能在命令返回前就带出最终的 audio_path，而正式消息必须沿用
+        // 同一个 id 与路径——故两者都从消息 id 推导，不能再各自 gen_id
+        // （旧实现里文件名用 fid、消息用另一个 id，同一条音频两个名字）。
+        let (wav_rel, tmp_name) = stream_paths_for("m_42");
+        assert_eq!(wav_rel, "audio/m_42.wav");
+        assert_eq!(tmp_name, "audio/m_42.pcm.tmp");
+    }
+
+    #[test]
+    fn 静播时丢块但仍继续拉流与写文件() {
+        // 静播的语义是「不响但东西要产出来」：所以丢的是喂给设备的动作，
+        // 拉块循环与临时文件写入完全不受影响。
+        assert!(!should_feed(true, true), "静播后不再喂设备");
+        assert!(!should_feed(false, false), "设备没开成时无东西可喂");
+        assert!(should_feed(false, true), "正常流式应喂设备");
+    }
+
+    #[test]
+    fn 静播只在原本报过正在播时补发停止() {
+        // announced=false 的两种情形（扬声器没开成 / 已经静过一次）都不能再发第二套
+        // va:play:stop，否则悬浮球与遥控会跳两下。
+        assert_eq!(mute_transitions(true), (true, true));
+        assert_eq!(mute_transitions(false), (true, false));
     }
 }
