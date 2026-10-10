@@ -180,6 +180,19 @@ pub async fn generate_tts_stream_impl(
             info.format
         ));
     }
+    // 建会话耗时单独打点：上面的 t0 在 stream_start 之前，而 tts_stream_first_audio 是从
+    // t0 一路算到首块到达（含建会话），所以“开了会话但未开始推流”那一段此前是看不见的。
+    // 真机实测：同一个克隆请求，插件直连探针 7~10s，经宿主却 49.5s（两边计时口径不同：
+    // 探针从 open() 返回后才起算）。不比这一段就指认不出多出的四十秒在建立会话还是在等服务端。
+    // 只记引擎 id，不记文本相关任何内容（日志守卫）；长度已由 tts_stream_first_audio 带。
+    log_info!(
+        "{}",
+        crate::perf::perf_line(
+            "stream_open",
+            t0.elapsed().as_millis() as u64,
+            &[("engine", engine_id.as_str())],
+        )
+    );
     let channels = info.channels.clamp(1, 2) as u16;
     let sample_rate = if info.sample_rate == 0 { 32000 } else { info.sample_rate };
 
