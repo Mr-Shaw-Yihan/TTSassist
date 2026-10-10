@@ -1,11 +1,12 @@
 name: consistency
 
 # Lightweight guard: catches release-consistency drift BEFORE merge, without a
-# heavy Rust/Tauri/Flutter build. Runs two read-only PowerShell checks that need
+# heavy Rust/Tauri/Flutter build. Runs three read-only PowerShell checks that need
 # only committed files:
 #   - plugins/scripts/verify-index.ps1 -SkipDist : plugins-index.json <-> resources/plugins zips
 #   - verify-version.ps1                 : version equal across package.json /
 #                                          tauri.conf.json / Cargo.toml / Cargo.lock
+#   - tools/check-base-hygiene.ps1       : no engine identity in host code (AGENTS.md base contract)
 # The dist-side index check (v1.8.2 "index behind a new build" class) is covered
 # locally by publish.ps1, which auto-invokes verify-index.ps1 at release time.
 
@@ -26,6 +27,10 @@ jobs:
       - name: Plugin index <-> resources consistency
         shell: pwsh
         run: ./plugins/scripts/verify-index.ps1 -SkipDist
+
+      - name: Base hygiene (engine identity must live in plugins only)
+        shell: pwsh
+        run: ./tools/check-base-hygiene.ps1
 
       - name: Desktop version four-place consistency
         shell: pwsh

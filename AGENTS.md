@@ -34,3 +34,20 @@
 - 插件开发规范：QoderWork 用户请加载 `voiceassist-dev` skill；
   其他工具读 `../doc/插件系统开发参考.md`（版本三处同步、索引与发布规则
   见其中「索引与发布规则」一节，发布用 `plugins/scripts/publish.ps1`）
+
+## 基座合同（引擎身份不得写进本体）
+
+本体只做底座（类比 harness），能力一律插件级、取舍由用户定。硬约束：
+
+1. 宿主（`src-tauri/src`）与前端（`src`）**禁止**出现具体引擎的身份分支：
+   `if engine == "xxx"`、硬编码的下拉项/音色表、`CLONE_CAPABLE` 这类引擎名白名单集合。
+2. 引擎差异只能以**能力位/自述数据**存在：`has_stream()`、manifest `config` 字段、
+   `voices.label` 文案（给用户看的提醒写在插件里）、远程 `plugin_help_url` 覆盖表。
+3. 宿主只保留底座：引擎抽象、播放管线、存储、快捷键/窗口、设备、遥控桥。
+4. 新引擎接入 = 新插件 crate；本体代码应**零修改**。做不到就是基座缺口，记进设计文档而不是贴补丁。
+
+执行手段：`pwsh tools/check-base-hygiene.ps1`（已挂 `.github/workflows/consistency.yml`）。
+存量残留登记在 `tools/base-hygiene-baseline.txt`，**只许变少不许变多**；
+拆干净一段就用 `-UpdateBaseline` 收紧基线（并在 commit message 里说明）。`plugins/` 不扫。
+行内豁免注释：`// baseok: <理由>`（与日志护栏的 `// allowlog:` 同口径）。
+接入新引擎时**先往脚本的 `$patterns` 加一条**，本体里所有写死它的地方当场变红。
