@@ -29,8 +29,9 @@ $env:CARGO_TARGET_DIR = "d:\Docs\Project\TTKook\TTKook-mimo-plugin\plugins\targe
 
 同一条 shell 里会累积设置，切 workspace 时**重新赋值**再跑，别混用。
 
-**git 纪律**：逐文件 `git add <路径>`，禁止 `git add -A` / `git add .`；commit message 用简体中文并在结尾带
-`Co-Authored-By: Claude <noreply@anthropic.com>`。计划里每个 commit 步骤已给出 add 清单，照抄即可。
+**git 纪律**：逐文件 `git add <路径>`，禁止 `git add -A` / `git add .`；commit message 用简体中文，
+**不追加 `Co-Authored-By` trailer**（2026-10-10 由用户取消旧约定，本文档下方各 commit 模板已同步去尾行）。
+计划里每个 commit 步骤已给出 add 清单，照抄即可。
 
 **基线**（Task 1 开工前应为绿）：
 
@@ -563,9 +564,7 @@ cargo test -p mimo-tts
 ```powershell
 cd d:\Docs\Project\TTKook\TTKook-mimo-plugin
 git add plugins/engines/mimo-tts/Cargo.toml plugins/engines/mimo-tts/src/lib.rs plugins/engines/mimo-tts/src/client.rs plugins/engines/mimo-tts/src/stream.rs plugins/Cargo.lock
-git commit -m "feat(插件): mimo-tts 协议层——请求体/SSE/WAV 容器剥离/克隆 URI 与单测
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
+git commit -m "feat(插件): mimo-tts 协议层——请求体/SSE/WAV 容器剥离/克隆 URI 与单测"
 ```
 
 ### 实施时的修正（已落地，后续 Task 按修正后的签名为准）
@@ -1101,9 +1100,7 @@ cargo test --lib
 ```powershell
 cd d:\Docs\Project\TTKook\TTKook-mimo-plugin
 git add plugins/engines/mimo-tts/src/stream.rs plugins/engines/mimo-tts/src/lib.rs
-git commit -m "feat(插件): mimo-tts 流式会话与双导出（SSE worker + 音色自述含低延迟提示）
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
+git commit -m "feat(插件): mimo-tts 流式会话与双导出（SSE worker + 音色自述含低延迟提示）"
 ```
 
 ### 实施时的修正（计划代码有四处编译不过，已就地修正）
@@ -1155,9 +1152,18 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 | 10 远程配置覆盖 help_url | 完成（TDD 先红后绿；审查 **Approved**，0C/0I/2M——两条 Minor 都不是缺陷，已转成注释固化决策；**本节顺带用脚本实跑订正了 §九 的删/增例数分解**） | `b5cd985` `f51dc26` |
 | 11 前端去 MiMo 化 + 克隆样本卡 | 完成（审查 **Request Changes**，0C/2I/4M——**六条全部核实后采纳**；其中 I-2/M-3 是**计划片段自身与基座合同冲突**，M-6 抖出一条计划没安排的**能力静默失效**断链，见下方实施记录） | `4474d87` `ac14c26` |
 | 12 基座护栏 + CI + AGENTS.md 基座合同 | 完成（审查 **Request Changes**，**2C/4I/5N**——采纳 6、不采纳 1（occurrences 口径）、挂号 1（pattern 表数据驱动）；**两条 Critical 都是“护栏看着有但拦不住”**，含我自己写坏的一条新模式） | `cdb9daa` `1daa409` |
-| 13 全量门禁 + 真机验收 + 文档回写 | **进行中**：Step 1 六道门禁全绿 + Step 2 实网探针已过（含“克隆首块非 RIFF”钉死）+ Step 4/5 文档已回写；**Step 3 真机验收阻塞**——main 自带缺失模块导致 `npm run build`/`tauri dev` 都跑不起来（与本分支无关，已在 main 工作树同样复现）。用户已定：他在主线补交，真机验收由 AI 跑（已授权 settings.json 改名→改回，不删任何文件） | — |
+| 13 全量门禁 + 真机验收 + 文档回写 | **进行中**：Step 1 **七道门禁全绿**（main `5030203` 补交 composerResize 后 `git merge main` 引入，`npm run build` 已 exit 0）、Step 2 实网探针已过、Step 4/5 文档已回写；**Step 3 真机验收发现场景假设不符**（用户当前 `tts_engine=fish-audio-tts`而非计划假设的 `mimo`，待定造法）。已备份 settings.json，AI 跑验收已获授权 | `5030203`(main) + merge |
 
-下一个动作：**等用户在主线提交 `src/utils/composerResize.ts` + `composerResize.test.ts` 后**，把该修复引入本工作树
+下一个动作：**Step 3 真机验收**，但开工前必须先跟用户定一个场景问题（已取证）：
+用户当前 `%APPDATA%\com.voiceassist.app\settings.json` 里 **`tts_engine = "fish-audio-tts"`**（另一条 TTKook-fish
+工作线的引擎），而不是计划 A 段假设的 `"mimo"`；同时 `mimo_api_key` 非空（长度 51）、`tts_model = "冰糖"`、
+`clone_voice_path` 已有样本。⇒ 直接拿现配置启动，验的是“未知引擎 + 兜底暂露卡”（这本身也有价值，
+正好实测 Task 11 改的那张卡），但**验不到 mimo→mimo-tts 迁移全链路**；要造该场景得改用户
+settings.json 的 `tts_engine` 字段（已备份，可还原），需用户点头。
+其余顺序不变：A→B→C→D → Step 6 收口提交 → Step 7 收尾方式交用户定（不自行 push/merge）。
+
+（以下为本 Task 开工时的前置，已全部完成，保留备查）
+下一个动作：~~**等用户在主线提交 `src/utils/composerResize.ts` + `composerResize.test.ts` 后**，把该修复引入本工作树~~
 （引入方式需用户当面确认：`git merge main` 还是只 `git checkout main -- <两个文件>`），然后：
 `npm run build` → 绿了才进 **Step 3 A→B→C→D**（顺序不能反，先测老用户升级）→ Step 6 收口提交
 → Step 7 收尾方式交用户定（不自行 push/merge）。取证细则与已踩过的坑见下方「Task 13 实施记录」。
@@ -1477,9 +1483,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\plugins\scripts\verify-index.ps1
 cd d:\Docs\Project\TTKook\TTKook-mimo-plugin
 git add plugins/engines/mimo-tts/package.ps1 plugins/plugins-index.json src-tauri/resources/plugins/mimo-tts-0.1.0.zip
 git status --short   # 必须只有这三行（外加前两个 Task 已提交内容的干净状态）
-git commit -m "feat(内置分发): mimo-tts 插件打包脚本 + 内置 zip + 索引条目
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
+git commit -m "feat(内置分发): mimo-tts 插件打包脚本 + 内置 zip + 索引条目"
 ```
 
 ### Task 3 实施时的修正（审查后收口）
@@ -1749,9 +1753,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\plugins\scripts\test-mimo-stream
 ```powershell
 cd d:\Docs\Project\TTKook\TTKook-mimo-plugin
 git add plugins/engines/mimo-tts/src/stream.rs plugins/scripts/test-mimo-stream.ps1
-git commit -m "test(插件): mimo-tts 实网探针（预置多块 + 克隆首块容器断言）与冒烟脚本
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
+git commit -m "test(插件): mimo-tts 实网探针（预置多块 + 克隆首块容器断言）与冒烟脚本"
 ```
 
 ---
@@ -2030,9 +2032,7 @@ git add plugins/engines/mimo-asr/package.ps1 plugins/plugins-index.json src-taur
 git status --short
 git commit -m "feat(插件): mimo-asr 声明 config 并重打包 + 宿主删 MIMO_API_KEY 硬编码注入、改注入 VA_CLONE_SAMPLE
 
-两者必须同提交：删注入后未带 config 声明的旧 zip 会让 ASR 直接拿不到 Key。
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
+两者必须同提交：删注入后未带 config 声明的旧 zip 会让 ASR 直接拿不到 Key。"
 ```
 
 ---
@@ -2321,9 +2321,7 @@ git commit -m "feat(基座): 删除内置 MiMo 引擎，引擎分发只剩 moss 
 - tts/mimo.rs 整体删除（单测已在插件 crate mimo-tts 内同构接替）
 - tts/mod.rs 的 build_engine 是内置引擎专用工厂，随 MiMo 一起删除
 - load_settings 对 tts_engine 空串归一到默认（原先只处理字段缺失）
-- 老设置里的 tts_engine=\"mimo\" 暂时会报「引擎不可用」，下一个提交修复
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
+- 老设置里的 tts_engine=\"mimo\" 暂时会报「引擎不可用」，下一个提交修复"
 ```
 
 > `git add` 一个被删除的路径是合法的（把删除记入索引）。
@@ -2682,9 +2680,7 @@ git commit -m "feat(迁移): mimo→mimo-tts 三段一次性迁移（引擎标�
 - migrate_legacy_engine 由单步早退改为多步独立判断 + changed 收口写盘
 - 一个 MiMo Key 同时搬入 mimo-tts 与 mimo-asr：旧值走快照读，修掉搬完即清空导致
   第二条映射读空的老陷阱
-- 原「非 edge 引擎不动」测试样本改用已迁移完的 edge-tts（mimo 已是需要迁移的标识）
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
+- 原「非 edge 引擎不动」测试样本改用已迁移完的 edge-tts（mimo 已是需要迁移的标识）"
 ```
 
 ### Task 7 实施记录
@@ -3045,9 +3041,7 @@ git commit -m "feat(基座): 克隆样本命令去引擎化 + 卸载当前引擎
 
 - 样本上限改通用防呆 20MB、扩展名放宽到 5 种，精确校验交插件自述
 - 导入/删除样本实时 set/remove VA_CLONE_SAMPLE，lib.rs 启动注入改调同一 helper
-- 卸载兜底只按能力位选（已加载 + 无必填配置项优先 + id 字典序），不写引擎身份
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
+- 卸载兜底只按能力位选（已加载 + 无必填配置项优先 + id 字典序），不写引擎身份"
 ```
 
 > 上方第 3 条 bullet 的判据已被审查收口扩充（`f9cd4f3`）：由“声明了必填”改成“必填项还缺不缺 + 运行环境就绪没就绪”。
@@ -3377,9 +3371,7 @@ git commit -m "feat(流式): 播放线程内补齐播放态事件 + 能力桥合
 - BeginSpec 携带 AppHandle/wav_rel，开局成功时发 va:play:start + playback:started{路径}；
   抢占旧流 / Abort / 排空完成 / 发送端断开四处收尾均补发对应的 stop（仅当开局发过 start）
 - 修现存缺陷：流式播放时悬浮球不动、遥控端显示空闲
-- native_synthesize 改调 generate_tts_stream_impl：host_played=true 时不再 emit playback:play
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
+- native_synthesize 改调 generate_tts_stream_impl：host_played=true 时不再 emit playback:play"
 ```
 
 ### Task 9 实施记录
@@ -3666,9 +3658,7 @@ git commit -m "feat(远程配置): 新增按插件 id 覆盖 help_url（换邀�
 
 - RemoteConfig 加 plugin_help_url map（缺字段解为空 map，老 JSON 兼容）
 - effective_help_url 只读本地缓存不发网络；命中非空覆盖值则优先 manifest 兜底
-- get_plugin_config（前端唯一 help_url 消费点）接生效入口
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
+- get_plugin_config（前端唯一 help_url 消费点）接生效入口"
 ```
 
 ### Task 10 实施记录
@@ -4047,9 +4037,7 @@ git commit -m "feat(前端): 语音中心删 MiMo 引擎卡，克隆样本卡改
   PluginConfigPanel + plugin.voices 通用机制
 - 引擎下拉不再生成 mimo 项；「引擎不可用」的切回按钮改按能力选替代引擎（不写引擎名）
 - 新增 CloneSamplePanel：渲染条件为 voices 含 id=clone，格式/上限判定权交插件
-- 删除无引用的 ApiKeyModal.tsx；四处 ASR 举例文案去引擎名
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
+- 删除无引用的 ApiKeyModal.tsx；四处 ASR 举例文案去引擎名"
 ```
 
 ### Task 11 实施记录（`4474d87` 主体 + `ac14c26` 审查收口）
@@ -4387,9 +4375,7 @@ git commit -m "chore(基座): 新增引擎身份护栏脚本 + 挂 consistency C
 - check-base-hygiene.ps1 扫 src-tauri/src 与 src，命中引擎字面量即红；
   存量残留登记进基线（只许变少不许变多），-UpdateBaseline 收紧
 - // baseok: 行内貁免，与 // allowlog: 同口径；plugins/ 不扫（插件写自家协议是本分）
-- AGENTS.md 新增基座合同 4 条硬约束
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
+- AGENTS.md 新增基座合同 4 条硬约束"
 ```
 
 ### Task 12 实施记录（`cdb9daa` 主体 + `1daa409` 审查收口）
@@ -4636,9 +4622,7 @@ cd d:\Docs\Project\TTKook\TTKook-mimo-plugin
 git status --short
 # 逐个 add（禁止 git add -A / git add .）：
 git add docs/superpowers/plans/2026-10-09-mimo-plugin-streaming-default.md
-git commit -m "docs(计划): MiMo 插件化与流式默认实施计划归档（含门禁与验收记录）
-
-Co-Authored-By: Claude <noreply@anthropic.com>"
+git commit -m "docs(计划): MiMo 插件化与流式默认实施计划归档（含门禁与验收记录）"
 ```
 
 > `git status --short` 里若出现**不属于本任务**的未跟踪/已改文件（别的并行工作线），
@@ -4704,6 +4688,44 @@ test result: ok. 2 passed; 0 failed
 - `doc/归档/工作线状态.md`：新增本工作线一行（状态 🟡 真机验收阻塞）+ 开一节
   “⛔ main 自带缺陷”。⚠ 计划原文写的是 `doc/工作线状态.md`，**实际路径是 `doc/归档/工作线状态.md`**
   （AGENTS.md L9 引的也是归档路径）。
+
+### Task 13 第 2 轮（10/10）：阻塞解除、七道全绿、署名约定取消
+
+**阻塞解除的完整链**（用户选定“他在主线补交”，因授权改为“AI 代跑”）：
+1. 先审后提：`composerResize.ts` 34 行纯函数（无 React/DOM 依赖），导出四个符号与 `App.tsx:30` 的
+   import 逐一对上；自带 `composerResize.test.ts` 在 main 工作树实跑 **5 passed**。
+2. main 提交 `5030203`：暂存区事前核对**只含那两个文件**，主线那 10 个未提交改动与
+   qwen-tts 那 5 项未跟踪产物**一个没碰**；按新约定**不带任何 trailer**；未 push。
+3. `feat/mimo-plugin` 上 `git merge main`（ort 策略，+76 行，零冲突）。
+
+**七道门禁现在全绿**（全部实跑）：
+
+| 门禁 | 新结果 | 与上一轮对比 |
+|---|---|---|
+| `npx tsc --noEmit` | **exit 0，零输出** | 本分支首次全绿（原基线是 1 条既有 TS2307） |
+| `npm run test:run` | **6 files / 50 tests** | 原 5/45（+1 文件 +5 例，来自补交的单测） |
+| `npm run build` | **exit 0**，`✓ built in 3.03s`（dist JS 585.79 kB / gzip 184.08 kB） | 原 blocked在 tsc 那一步 |
+| `check-base-hygiene.ps1` | ✓ **135 文件 / 57 条持平** | 扫描面 +2（新入库的两个 .ts），零新命中 |
+| 其余（cargo 179/0/3、mimo-tts 24/0/2、插件 workspace、bom/log、verify-index） | 与上一轮一致 | 本轮未改 Rust |
+
+⇒ **口径订正**：Task 11/12/13 记录里“`tsc` 与基线**逐字相同**（基线带 1 条既有红）”自本 commit 起作废，
+门禁口径回到计划原文的“**tsc 零输出**”；vitest 基线抬到 **6 files / 50 tests**。`vite build` 不再是阻塞项。
+
+**备份已就位**：`%APPDATA%\com.voiceassist.app\backup-20261010-pre-mimo-plugin\settings.json`（2865 B，
+纯复制，未改名未删）。迁移前现场：`tts_engine=fish-audio-tts`、`tts_model=冰糖`、`mimo_api_key` 长度 51
+（值未打印）、`clone_voice_path=voice_samples/clone.wav`、`asr_engine=""`、
+`plugin_voices` 含 minimax-tts-global/hojo-tts/minimax-tts-stream/fish-audio-tts 四项。
+
+**commit 署名约定已整抹取消**（用户 10/10 拍板：不加 trailer / 7+2 处全改 / 不动历史）。旧约定躺在
+**不止 AGENTS.md**，只改一份必复发，已全改并全库复查零残留：
+- 用户级 skill `C:\Users\XOS\.qoder-cn\skills\voiceassist-dev\SKILL.md`（**每次会话自动加载的那份**）
+- 项目级 skill `TTKook\.claude\skills\voiceassist-dev\SKILL.md`
+- 5 份 `AGENTS.md`：`TTKook-mimo-plugin`、`VoiceAssist`、`TTKook-hardening`、`TTKook-fish`、`TTKook-stream`
+- `doc\任务进度-语音效果器.md` 的铁律行；本计划的 git 纪律句 + 13 处 commit 模板尾行
+
+历史 45 条不动（用户定）。⚠ 副作用：除本分支外的 4 棵工作树（VoiceAssist/hardening/fish/stream）
+的 `AGENTS.md` 现在各留下一处**未提交改动**，属各自分支的改动，需各线自己提交或本分支合流后覆盖——
+已如实告知用户，我没替别的分支 commit。
 
 ## 附：已知风险与回退（执行中随时对照）
 

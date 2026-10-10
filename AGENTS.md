@@ -17,8 +17,8 @@
 
 ## 项目硬性约定
 
-- 回复、代码注释、commit message 用简体中文；commit 结尾带
-  `Co-Authored-By: Claude <noreply@anthropic.com>`
+- 回复、代码注释、commit message 用简体中文；commit **不追加 `Co-Authored-By` 后缀**
+  （作者就是 git 记录的提交者本人；公开仓库历史不留第三方/AI 厂商邮箱。2026-10-10 由用户取消）
 - 设计先行：每个开发阶段先写设计进 `../doc/开发记录.md`（阶段编号递增），
   用户确认后再编码，完成后回写完成情况
 - cargo 构建/测试需 `CARGO_HTTP_CHECK_REVOKE=false`（本机证书吊销检查会失败）
