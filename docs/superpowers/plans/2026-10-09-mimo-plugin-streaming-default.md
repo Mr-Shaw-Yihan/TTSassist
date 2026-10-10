@@ -1155,9 +1155,15 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 | 10 远程配置覆盖 help_url | 完成（TDD 先红后绿；审查 **Approved**，0C/0I/2M——两条 Minor 都不是缺陷，已转成注释固化决策；**本节顺带用脚本实跑订正了 §九 的删/增例数分解**） | `b5cd985` `f51dc26` |
 | 11 前端去 MiMo 化 + 克隆样本卡 | 完成（审查 **Request Changes**，0C/2I/4M——**六条全部核实后采纳**；其中 I-2/M-3 是**计划片段自身与基座合同冲突**，M-6 抖出一条计划没安排的**能力静默失效**断链，见下方实施记录） | `4474d87` `ac14c26` |
 | 12 基座护栏 + CI + AGENTS.md 基座合同 | 完成（审查 **Request Changes**，**2C/4I/5N**——采纳 6、不采纳 1（occurrences 口径）、挂号 1（pattern 表数据驱动）；**两条 Critical 都是“护栏看着有但拦不住”**，含我自己写坏的一条新模式） | `cdb9daa` `1daa409` |
-| 13 | 未开始 | — |
+| 13 全量门禁 + 真机验收 + 文档回写 | **进行中**：Step 1 六道门禁全绿 + Step 2 实网探针已过（含“克隆首块非 RIFF”钉死）+ Step 4/5 文档已回写；**Step 3 真机验收阻塞**——main 自带缺失模块导致 `npm run build`/`tauri dev` 都跑不起来（与本分支无关，已在 main 工作树同样复现）。用户已定：他在主线补交，真机验收由 AI 跑（已授权 settings.json 改名→改回，不删任何文件） | — |
 
-下一个动作：**Task 13 Step 1**（全量门禁七条 → 实网探针 → 真机验收 → 文档回写）。
+下一个动作：**等用户在主线提交 `src/utils/composerResize.ts` + `composerResize.test.ts` 后**，把该修复引入本工作树
+（引入方式需用户当面确认：`git merge main` 还是只 `git checkout main -- <两个文件>`），然后：
+`npm run build` → 绿了才进 **Step 3 A→B→C→D**（顺序不能反，先测老用户升级）→ Step 6 收口提交
+→ Step 7 收尾方式交用户定（不自行 push/merge）。取证细则与已踩过的坑见下方「Task 13 实施记录」。
+
+（以下为 Task 13 开工前的前置，已部分失效，保留备查）
+下一个动作：~~**Task 13 Step 1**~~（全量门禁七条 → 实网探针 → 真机验收 → 文档回写）。
 必读的四条前置：
 ① ⛔ **前置阻塞项**：`npm run build` 会被既有缺失模块 `src/utils/composerResize.ts` 直接炸掉
    （main 提交了依赖未提交文件的 import，取证见 Task 11 实施记录）。必须先问用户怎么处置
@@ -4493,8 +4499,12 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\check-log-hygiene.ps1
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\check-base-hygiene.ps1
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\plugins\scripts\verify-index.ps1 -SkipDist
 ```
-预期：三道护栏全 `✓`，`verify-index` 输出 `ALL CONSISTENT`
-（它**双向**校索引↔resources zip 且比对 zip 的 sha256，Task 3/5 的两个新 zip 必须都已 `git add`）。
+预期：三道护栏全 `✓`。`verify-index` 的判据**不是** “ALL CONSISTENT”——写本计划时没实测过基线：
+在 **main@dc55a57 自己的工作树**里跑同一条命令同样输出 `RESULT: DRIFT DETECTED`，
+失败项就是既有的 `minimax-tts-stream RES-CK`（交接提醒第 4 条已挂号）。
+正确判据：**除这条既有 RES-CK 外全 `OK`**，且新增的 `mimo-tts` / `mimo-asr` 两行为 `OK`，
+失败总数与 main 持平（main 6 条 1 失败 → 本分支 7 条 1 失败）。
+（它**双向**校索引↔resources zip 且比对 zip 的 sha256，Task 3/5 的两个新 zip 必须都已 `git add`。）
 
 - [ ] **Step 2：实网探针复跑（把 §四 的事实点钉死）**
 
@@ -4642,6 +4652,58 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 **不要自行 push、也不自行 merge**（涉及红线 git 操作需用户明确同意）。
 
 ---
+
+### Task 13 实施记录（进行中：Step 1/2 已过，Step 4/5 已回写，Step 3 阻塞）
+
+**Step 1 全量门禁（六道绿 + 一道阻塞，逐条实跑，输出存 `..\output\t13-*.txt`）**：
+
+| 门禁 | 输出 | 判定 |
+|---|---|---|
+| 宿主 `cargo test --lib` | `179 passed; 0 failed; 3 ignored`，exit 0 | ✅ |
+| 宿主 `cargo check --lib --tests` | `Finished` 无 warning 行，exit 0 | ✅ |
+| `cargo test -p mimo-tts` | `24 passed; 0 failed; 2 ignored`，exit 0 | ✅ |
+| `cargo test`（插件 workspace） | 11 个 result 行全 `ok`，无 failed | ✅ |
+| `npx tsc --noEmit` | 仅 `src/App.tsx(30,87) TS2307 …/composerResize`，exit 2 | ✅ 与基线逐字相同（零新增） |
+| `npm run test:run` | `Test Files 5 passed (5)` / `Tests 45 passed (45)`，exit 0 | ✅ |
+| `npm run build`（= `tsc && vite build`） | **在 tsc 那一步就exit 2**，同一条 TS2307，vite 根本没跑 | ⛔ 阻塞（main 自带） |
+| 三道守卫 bom/log/base | 全 ✓（base：133 文件 / 57 条持平） | ✅ |
+| `verify-index -SkipDist` | 7 条 1 失败（`minimax-tts-stream RES-CK`）；mimo-tts/mimo-asr 均 OK | ✅ 与 main 持平（已去 main 工作树跑同一命令复现 `DRIFT DETECTED`，所以不是本分支引入） |
+
+**Step 2 实网探针**（`test-mimo-stream.ps1 -Clone`，release，exit 0）：
+
+```
+[probe] 预置：profile release / 字数 39 / 首块 157ms / 块数 24 / 音频 7840ms / 总耗时 1894ms
+[probe] 克隆：profile release / 字数 25 / 块数 1 / 首块 483ms / 音频 4640ms / 总耗时 483ms / 首块前 4 字节 [1, 0, 1, 0]
+test result: ok. 2 passed; 0 failed
+```
+
+额外结构取证（本计划没要求，但“无双头”本句得用机器可判据验）：两只落盘 wav 均为
+**单 `RIFF` / 单 `WAVE` / 单 `data`**；字节/秒 ≈ 48006（376364B÷7.84s、222764B÷4.64s），
+与 24kHz 16bit 单声道完全对得上 ⇒ PCM 格式假设成立。“开头无爆音”属人耳，归 Step 3。
+两个实测值都比计划存档值快很多（预置首块 157ms vs 存档 0.7~1.2s；克隆 483ms vs 曾记 3.5s），
+**不得拿单次数字定预算**；但 Task 4 观测过的 **49.2s** 克隆离群值仍在那儿，
+`FIRST_CHUNK_TIMEOUT=120s` 只有 2.4 倍余量 ⇒ 真机出现克隆长句超时则提到 180~240s。
+
+**Step 3 阻塞的完整取证**（三条命令交叉，缺一不可）：
+1. `Get-ChildItem TTKook-mimo-plugin\src\utils` → 6 个文件，**无 composerResize.ts**；
+2. `Get-ChildItem VoiceAssist\src\utils` → 8 个，**含 `composerResize.ts` 与 `composerResize.test.ts`**；
+3. `git ls-files src/utils`（在 main 工作树）→ 只列 6 个；`git status --porcelain src/utils`
+   → 那两份全是 `??` 未跟踪。
+⇒ `main@dc55a57` 提交了 `App.tsx:30` 对未提交文件的 import：用户本机正常是因为本地有那份未跟踪文件，
+而任何 clean checkout（本工作树、CI、其他人的新 clone）都构不了也跑不了 dev。
+**推论**：只要这个未修，Step 3 的 A/B/C/D 都不可执行（不是“验收项部分缺失”，是整套验收不可用）。
+
+**用户已拍板（10/10）**：① 他在主线补交这两个文件（本分支不夹带未审阅代码）；
+② 引入本工作树的方式需当面确认（`git merge main` 还是只取那两个文件）；
+③ 真机验收由 AI 跑，**已授权**动 `%APPDATA%\com.voiceassist.app`（只改名→改回，不删任何文件）。
+
+**Step 4/5 文档回写（均在 git 仓库外，不 add）**：
+- `doc/MiMo插件化与流式默认设计.md`：L3 状态行改“已实施”；§3.2-1 补“仅 `spk_ok` 为真时发”口径收紧；
+  §四 补克隆首块实测与非-RIFF 结论 + “无条件实现剥头”的做法差异；§五 末补“预缓冲/水位不补”及理由；
+  文末新增 **§九 实施情况**（含门禁表、探针值、护栏 57 条、三处收紧、遗留清单、本阻塞项）。
+- `doc/归档/工作线状态.md`：新增本工作线一行（状态 🟡 真机验收阻塞）+ 开一节
+  “⛔ main 自带缺陷”。⚠ 计划原文写的是 `doc/工作线状态.md`，**实际路径是 `doc/归档/工作线状态.md`**
+  （AGENTS.md L9 引的也是归档路径）。
 
 ## 附：已知风险与回退（执行中随时对照）
 
