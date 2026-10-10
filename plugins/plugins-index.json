@@ -46,7 +46,7 @@
       "version": "0.3.1",
       "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-stream-0.3.1.zip",
       "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-stream-0.3.1.zip",
-      "checksum": "0ad7d9686619785f6c8b7013c8945d6a691d59469a7144b7e317d85540486056",
+      "checksum": "1d9e1ce76557c0251030b42f4ef7998c41f96b48ae941ca0bdcf27efb95b56e4",
       "description": "MiniMax 云端语音合成流式版（国内版）：WebSocket 边合成边出块、首响更快，直接使用流式，需 API Key，50+ 系统音色 + 账号克隆音色（本体内置自动安装，可卸载）",
       "plugin_type": "tts_engine"
     },
