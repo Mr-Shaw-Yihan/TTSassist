@@ -1154,9 +1154,28 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 | 9 流式播放态事件 + 桥路径走流式 | 完成（不新增单测，按计划；审查 **Request Changes**，0C/2I/4M——两条 Important 都是本提交改道引入的“用户会撞见”缺口，已收口） | `e98eb03` `cfd36f1` |
 | 10 远程配置覆盖 help_url | 完成（TDD 先红后绿；审查 **Approved**，0C/0I/2M——两条 Minor 都不是缺陷，已转成注释固化决策；**本节顺带用脚本实跑订正了 §九 的删/增例数分解**） | `b5cd985` `f51dc26` |
 | 11 前端去 MiMo 化 + 克隆样本卡 | 完成（审查 **Request Changes**，0C/2I/4M——**六条全部核实后采纳**；其中 I-2/M-3 是**计划片段自身与基座合同冲突**，M-6 抖出一条计划没安排的**能力静默失效**断链，见下方实施记录） | `4474d87` `ac14c26` |
-| 12–13 | 未开始 | — |
+| 12 基座护栏 + CI + AGENTS.md 基座合同 | 完成（审查 **Request Changes**，**2C/4I/5N**——采纳 6、不采纳 1（occurrences 口径）、挂号 1（pattern 表数据驱动）；**两条 Critical 都是“护栏看着有但拦不住”**，含我自己写坏的一条新模式） | `cdb9daa` `1daa409` |
+| 13 | 未开始 | — |
 
-下一个动作：**Task 12 Step 1**（`tools/check-base-hygiene.ps1` + 基线 + CI + AGENTS.md 基座合同）。
+下一个动作：**Task 13 Step 1**（全量门禁七条 → 实网探针 → 真机验收 → 文档回写）。
+必读的四条前置：
+① ⛔ **前置阻塞项**：`npm run build` 会被既有缺失模块 `src/utils/composerResize.ts` 直接炸掉
+   （main 提交了依赖未提交文件的 import，取证见 Task 11 实施记录）。必须先问用户怎么处置
+   （补文件 / 改 import），**不得从其他工作树拷未跟踪文件顶过去**。
+② 护栏已上 CI 且**“计数变小/条目消失”也会红**（Task 12 收口 C-2）：因此本 Task 里任何
+   再拆一段残留的动作，必须同 commit 跑 `-UpdateBaseline` 收紧基线，否则守卫红。
+   当前基线 **57 条 / 133 文件**（宿主 `.rs` 引擎专名合计仍是 281 那个锚点）。
+③ 发布约束：Task 13 发布与 dist 镜像必须用 `e08480fd…` 那份 mimo-asr zip（版本号仍 0.1.1），
+   旧资产 `51110de7…` 会报 checksum 失败；真机验收前要手动重装 mimo-asr。
+④ 探针预算待决策：`FIRST_CHUNK_TIMEOUT=120s` 对克隆首块只有 2.4 倍余量（实测过 49.2s 离群值），
+   真机出现克隆长句超时则提到 180~240s（仍小于 `REQUEST_TIMEOUT=300s`）。
+门禁全量口径（七条，逐条贴输出）：`cargo test --lib` **179/0/3**、`cargo check --lib --tests` 零 warning、
+`cargo test -p mimo-tts` **24/0/2**、`npx tsc --noEmit` **与基线逐字相同**（既有 1 条 TS2307）、
+`npm run test:run` **5 files/45 tests**、三道守卫（bom/log/base）全 ✓、`verify-index -SkipDist`
+只剩既有的 `minimax-tts-stream RES-CK`。
+
+（以下为 Task 12 时的前置，已完成，保留备查）
+下一个动作：~~**Task 12 Step 1**~~（`tools/check-base-hygiene.ps1` + 基线 + CI + AGENTS.md 基座合同）。
 必读的三条前置：
 ① 基线必须在**当前工作树状态**下生成（Task 11 已收口：前端 `src` 引擎专名命中 154、宿主 `.rs` 281、
    前端残留 4 处）。人工核对时注意：宿主里 `storage/types.rs:203` 与 `plugins/mod.rs` 的 `edge-tts`
@@ -4367,6 +4386,51 @@ git commit -m "chore(基座): 新增引擎身份护栏脚本 + 挂 consistency C
 Co-Authored-By: Claude <noreply@anthropic.com>"
 ```
 
+### Task 12 实施记录（`cdb9daa` 主体 + `1daa409` 审查收口）
+
+| 项 | 实跑结果 |
+|---|---|
+| 基线 | 初版 **51 条 / 125 文件**；收口后 **57 条 / 133 文件**（+8 是 `.js`，零命中；+6 全是新模式抓出的既有存量） |
+| 护栏自检（故意破） | ① 往 `tts.rs` 追加含 `moss`/`hojo` 行 → `moss 17 > 基线 16` + `hojo 基线未登记`，exit 1；② 再加一行 `// baseok: moss` → moss 仍计 17（豁免生效）；③ 探针 `"edge"`/`edge_voice`/`voice_clone` 三条全红；④ 白额度、幽灵条目、两列畸形行、重复登记 → 全部 exit 1；⑤ 干净树 exit 0，基线复原逐字节相同 |
+| 三道守卫 | BOM ✓（20 个 .ps1）、日志 ✓（57+31 .rs）、基座 ✓ |
+| `verify-index -SkipDist` | 只剩既有的 `minimax-tts-stream RES-CK`（交接提醒第 4 条，不动） |
+| 代码改动 | **零**（本 Task 只新增 tools/ 两文件 + CI + AGENTS.md，cargo/vitest/tsc 与 Task 11 收口后完全一致） |
+
+Step 3 人工核对（本 Task 的真正检查点）：计划「不得出现」表**逐条成立**——`tts/mimo.rs`、
+`commands/clone_voice.rs`、`commands/tts.rs` 的 mimo/voiceclone、`ApiKeyModal.tsx`、`App.tsx`、
+四个 ASR 文案文件、`commands/settings.rs` 均不在基线里。唯一不一致：计划写「`tts/mod.rs|*`
+不得出现」，实际有 `tts/mod.rs|moss|2`——那是内置 MOSS 的 `pub mod moss;` 与一句注释，
+属「允许登记 `*|moss`」，**计划该行按 `|*` 通配写宽了**，不是漏删。
+
+两处偏离计划（均必要修正，已写进脚本注释）：
+1. `$scanRoots` 改正斜杠：计划原文 `'src-tauri\src'` 在 CI 的 ubuntu-latest 上是**不存在的路径**
+   （会直接 `Write-Error` 红），Windows 同样接受正斜杠；改后重跑基线条数不变，
+   证明只改了路径解析、没改扫描面。
+2. 成功路径补显式 `exit 0`：本地 `& script.ps1` 调用时 `$LASTEXITCODE` 会残留上一条命令的值，
+   看上去像护栏红了（CI 侧 pwsh 进程本身是 0，仅影响取证）。
+
+#### Task 12 审查收口（`1daa409`）
+
+审查结论 **Request Changes 2C/4I/5N**（审查者在沙箱里实际复现了绕过，不是纸上推理）。
+逐条先核前提再处置：
+
+| 编号 | 问题 | 前提核实 | 处置 |
+|---|---|---|---|
+| C-1 | 模式表拦不住无连字符变体（`"edge"`、`edge_voice`、`voice_clone`） | 属实且**今天在基座里就存在**：`plugins/mod.rs:55 Some("edge")`、`minimax_clone.rs` 多处 `voice_clone`。另：我补完模式后自查发现**自己第一版写坏了**——单引号字符串里字符类只含单引号，Rust/TS 用的双引号根本抓不到（表现为“加了模式却零命中”） | ✅ 采纳，补三条 + 引号类改 `["']`；实测 `plugins/mod.rs` 对带引号 edge 命中 4 处 |
+| C-2 | 棘轮可反向花掉：计数变小只提示、exit 0 | 逻辑核实成立（`loosened` 不阻断）。计划原写“不阻断避免死循环”——该理由不成立：`-UpdateBaseline` 只会把数字改小，第二次必绿 | ✅ 采纳（变小/条目消失也红），AGENTS.md 同步改口径 |
+| I-1 | `// baseok:` 只认本行，AGENTS.md 却声称与 `// allowlog:` 同口径 | 读 `check-log-hygiene.ps1:65/128-139` 确认后者是块内/前一行/本行三处 | ✅ 采纳（改本行或紧邻上一行，实测前一行生效），文档写实 |
+| I-2 | AGENTS.md 把仍在世的 `CLONE_CAPABLE` 当禁止项举例，已登记例外一条没说 | grep 证实 `usePluginInventory.ts:27-28` 就是引擎名 Set；并纠正审查的一处细节：`storage/settings.rs\|edge-tts\|1` 是测试断言而非 default（default 在 `types.rs:203`） | ✅ 采纳，新增「在册豁免」四类表 + 测试夹具说明 |
+| I-3 | 建议计数口径改“命中行数” | 部分不成立：换口径会让 Task 6-11 的全部锚点数字（宿主 281、`plugins.rs\|genie` 31 …）作废；occurrences 的失败方向是误红不是漏红 | ❌ **不采纳**；C-2 生效后“删注释假装已收紧”会被当场拦下，风险已被吃掉 |
+| I-4 | 基线畸形行静默丢弃、重复登记靠累加把额度翻倍 | 读码确认 `<3 列 continue` 与 `+=` 累加两条路径 | ✅ 采纳（带行号报错 + 重复键红） |
+| N-1 | `.js/.jsx` 不在扫描面 | Glob 证实 `src/components/FloatingBall/engine/` 有 8 个 .js；实测这 8 个零命中 | ✅ 采纳（125→133 文件，基线无新增命中） |
+| N-2 | pattern 表靠人工维护，护栏不能保护自己不被删 | 确属合同精神正解，但超出“把护栏装上”的本 Task 范围 | 📝 挂号 §九 遗留待下一批（已写入） |
+| N-3 | `Sort-Object` 文化排序可能重排基线 | 审查者本机未复现（zh-CN 与 Invariant 逐字节相同），但换机器/换 ICU 会淹没 review diff | ✅ 采纳（`[Array]::Sort(…, [StringComparer]::Ordinal)`） |
+| N-4 | 守卫扫磁盘而非 git 索引 | 属实 | ✅ 轻量采纳（输出含文件数，未另加机制） |
+| N-5 | 该 workflow 首次出现非 ASCII 输出 | 属实，不是功能问题 | ❌ 不动（脚本头注已写“乱码先怀疑 locale 而不是护栏”） |
+
+给后续的一条硬教训：**护栏的价值 = 它真能拦**。“加了模式但零命中”这种哑失败比不加还糟——
+它给了安全感。新模式的验收方式必须是**先拿一个真实绕过样本跑红**，再看存量命中数。
+
 ## Task 13：全量门禁 + 实网探针 + 真机验收 + 文档回写
 
 **Files:**
@@ -4544,8 +4608,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\plugins\scripts\test-mimo-stream
 | 克隆首块 RIFF 实测 | （填 Step 2 实测值） |
 | 预置音色块数 / 首块 TTFB | （填 Step 2 实测值） |
 | 听感保护是否需补（预缓冲/水位） | （按 Step 2 结论填：实测无断音则不补） |
-| 基座护栏基线条数 | （填 Task 12 实数，只许变少） |
-| 遗留待下一批 | MOSS 内置、`minimax_clone`/`MinimaxVoicePanel`、`CLONE_CAPABLE`、`mimo_api_key` 字段删除、`mimo_invite_code` 只读字段、ASR 引擎卸载后的同类兜底（T8-M-5：现在卸掉当前 ASR 插件仍会把 `asr_engine` 指向已卸 id）、流式并发会话标识（T9-M-2：`Chunk/Finish/Abort` 与单槽 `active_stream_slot` 都不带 session id，两条流并发时 stop 会踩掉另一条）、遥控页通用播放态指示（T9 验收口径：`playing_id` 只在命中收藏时非空）、插件订阅回调跑在播放线程（T9-M-4） |
+| 基座护栏基线条数 | **57 条 / 133 文件**（Task 12 实跑；`cdb9daa` 初版 51 条，收口 `1daa409` 补三类别名变体与 `.js/.jsx` 扫描面后 +6 条——全是被旧模式漏报的既有存量，无一条是新写代码；只许变少） |
+| 遗留待下一批 | MOSS 内置、`minimax_clone`/`MinimaxVoicePanel`、`CLONE_CAPABLE`、`mimo_api_key` 字段删除、`mimo_invite_code` 只读字段、**护栏 `$patterns` 改由 `plugins-index.json` 的 id 派生**（T12-N-2：现靠人工加条，同一 PR 删掉一条 pattern 护栏无感知；应改成索引驱动并对“索引有而模式表没覆盖”直接红）、ASR 引擎卸载后的同类兜底（T8-M-5：现在卸掉当前 ASR 插件仍会把 `asr_engine` 指向已卸 id）、流式并发会话标识（T9-M-2：`Chunk/Finish/Abort` 与单槽 `active_stream_slot` 都不带 session id，两条流并发时 stop 会踩掉另一条）、遥控页通用播放态指示（T9 验收口径：`playing_id` 只在命中收藏时非空）、插件订阅回调跑在播放线程（T9-M-4） |
 ```
 
 - [ ] **Step 5：更新工作线状态板**
