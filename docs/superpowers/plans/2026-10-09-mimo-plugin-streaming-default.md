@@ -1152,9 +1152,21 @@ git commit -m "feat(插件): mimo-tts 流式会话与双导出（SSE worker + �
 | 10 远程配置覆盖 help_url | 完成（TDD 先红后绿；审查 **Approved**，0C/0I/2M——两条 Minor 都不是缺陷，已转成注释固化决策；**本节顺带用脚本实跑订正了 §九 的删/增例数分解**） | `b5cd985` `f51dc26` |
 | 11 前端去 MiMo 化 + 克隆样本卡 | 完成（审查 **Request Changes**，0C/2I/4M——**六条全部核实后采纳**；其中 I-2/M-3 是**计划片段自身与基座合同冲突**，M-6 抖出一条计划没安排的**能力静默失效**断链，见下方实施记录） | `4474d87` `ac14c26` |
 | 12 基座护栏 + CI + AGENTS.md 基座合同 | 完成（审查 **Request Changes**，**2C/4I/5N**——采纳 6、不采纳 1（occurrences 口径）、挂号 1（pattern 表数据驱动）；**两条 Critical 都是“护栏看着有但拦不住”**，含我自己写坏的一条新模式） | `cdb9daa` `1daa409` |
-| 13 全量门禁 + 真机验收 + 文档回写 | **进行中**：Step 1 **七道门禁全绿**（main `5030203` 补交 composerResize 后 `git merge main` 引入，`npm run build` 已 exit 0）、Step 2 实网探针已过、Step 4/5 文档已回写；**Step 3 真机验收发现场景假设不符**（用户当前 `tts_engine=fish-audio-tts`而非计划假设的 `mimo`，待定造法）。已备份 settings.json，AI 跑验收已获授权 | `5030203`(main) + merge |
+| 13 全量门禁 + 真机验收 + 文档回写 | **进行中（用户要求先收尾）**：Step 1 七道全绿 + Step 2 探针已过 + Step 4/5 已回写；Step 3 **A 段首轮已跑完**（bootstrap/Key 迁移/警示卡与一键切换/其他引擎回归全部实测），顺带修了三个真机报出的缺陷；B/C/D 与 Step 6/7 挂账。**分支已合到最新 main `3c23dc7`（`ecc89ac`），`verify-index` 现在 failures=0** | `5030203`(main) `9835075` `374bf40` `ecc89ac` |
 
-下一个动作：**Step 3 真机验收**，但开工前必须先跟用户定一个场景问题（已取证）：
+下一个动作：**zcode 交接报告已收到并逐份核对**（`doc/20261010zcode交接/` 三份），因此转为：
+① 先跟用户定**他的 settings.json 现况**（现在是 `tts_engine=mimo-tts`，而主工作树 debug/release 的
+   `plugins/` 里都没有 `mimo-tts`，他一开主线的版就会看到“引擎未安装”且 MiMo 需重填 Key）；
+② 定 **fish 线（`feat/fish-audio-tts` = `7d29400`，未合并未推送）与本分支的合并顺序与冲突处理**
+   ——真正的冲突源是 fish（它改了 `VoiceSynthPanel` 的音色下拉区 + 新增宿主通用「我的音色」），
+   **不是**已经在我基线里的 zcode 前端大改（对账见「Task 13 第 3 轮」）；
+③ 补完 Step 3 的 B/C/D 与 Step 6/7。
+
+本分支当前状态：49+2 个提交（相对原基线 `dc55a57`），工作树除 `src-tauri/Cargo.toml`（CRLF 幻影，
+`git diff` 内容为空，我没用红线操作去擦）外干净。
+
+（以下为旧前置记录，已完成或已失效，保留备查）
+下一个动作：~~**Step 3 真机验收**，但开工前必须先跟用户定一个场景问题（已取证）：
 用户当前 `%APPDATA%\com.voiceassist.app\settings.json` 里 **`tts_engine = "fish-audio-tts"`**（另一条 TTKook-fish
 工作线的引擎），而不是计划 A 段假设的 `"mimo"`；同时 `mimo_api_key` 非空（长度 51）、`tts_model = "冰糖"`、
 `clone_voice_path` 已有样本。⇒ 直接拿现配置启动，验的是“未知引擎 + 兜底暂露卡”（这本身也有价值，
@@ -1231,8 +1243,10 @@ settings.json 的 `tts_engine` 字段（已备份，可还原），需用户点�
    测属性总数已用脚本实测对账：`dc55a57` 基线 174 → 当前 182，差 = 删 10（`tts/mimo.rs` 8 + `tts/mod.rs` 2）
    + 新增 18；下游 Task 13 门禁仍为 **179**）；
    mimo-tts 24 passed / 0 warning。
-4. `verify-index.ps1 -SkipDist` 的基线不是全绿：`minimax-tts-stream` 那条 `RES-CK` 是仓库既有问题（见 Task 3 实施记录）。
-   判定本 Task 成败只看自己那一行是否 `OK`，不要为了让表格全绿去改别人的条目。
+4. ⚠ **已过期（10-10 订正）**：原先写的「`verify-index.ps1 -SkipDist` 基线不是全绿、`minimax-tts-stream` 那条
+   `RES-CK` 是仓库既有问题」**在 main `3c23dc7` 已被修正**（索引里的 zip 校验和笔误 `0ad7d968…` → 真实
+   `1d9e1ce7…`）。本分支合入后实跑：**`index entries = 7  failures = 0` → `RESULT: ALL CONSISTENT`**，
+   门禁判据抬回“全绿”。保留这条记录是为了说明它的来历：判定成败时区分“自己引入的”与“既有的”这个原则仍成立。
 5. 任何重新构建插件 dll 的动作都会改变 zip sha（PE `TimeDateStamp`）；**打包与刷新索引 checksum 是同一个动作**，
    不能拆开提交（Task 3 的最终产物已在 `c4dfb5f` 一次锁死）。
 
@@ -4726,6 +4740,73 @@ test result: ok. 2 passed; 0 failed
 历史 45 条不动（用户定）。⚠ 副作用：除本分支外的 4 棵工作树（VoiceAssist/hardening/fish/stream）
 的 `AGENTS.md` 现在各留下一处**未提交改动**，属各自分支的改动，需各线自己提交或本分支合流后覆盖——
 已如实告知用户，我没替别的分支 commit。
+
+### Task 13 第 3 轮（10-10 下午）：真机首轮 A 段、三个缺陷修复、zcode 交接对账
+
+**先记两条取证口径（后续会话别再踩）**：
+1. **dev 模式不写 `logs/app.log`**：本次 14:37 / 15:41 / 15:44 三次启动在 app.log 里零记录（日志只进 stdout）
+   ⇒ 真机验收要看 `npm run tauri dev` 的输出，不能按 AGENTS.md 那条去 grep app.log 的 `[perf] startup=`。
+2. `npx` / `npm` **不能用 `*>>` 重定向**（PS 报 `StandardOutputEncoding is only supported when standard output
+   is redirected`，命令根本没执行就返回）；用 `> file 2>&1`。读 `git log`/`git show` 前先
+   `[Console]::OutputEncoding=UTF8`，否则中文提交信息看着像坏的（本轮我差点误判成提交内容坏了）。
+
+**Step 3 A 段（老用户升级）实测结果**：
+
+| 检查点 | 结果 |
+|---|---|
+| 内置 zip bootstrap | 7 个插件自动安装并加载（edge/genie/hojo/**mimo-asr 0.1.1**/mimo-tts 0.1.0/minimax×2），零 WARN/ERROR/panic |
+| 遗留 Key 迁移 | `mimo_api_key`（长 51）→ 同时写入 `plugin_config["mimo-tts"].api_key` 与 `["mimo-asr"].api_key`，旧字段清空 ✓ |
+| 不该动的没动 | 当时 `tts_engine=fish-audio-tts`、`tts_model=冰糖` 未被改动 ✓（迁移只认 `mimo`） |
+| 警示卡 + 一键切换 | ✓ 用户真机按下切换按钮，`tts_engine` 变为 `minimax-tts-stream`，Task 11 那张卡在真实环境走通 |
+| 其他引擎回归（上轮疑问） | ✓ `15:00:02 first_audio=1133ms engine=minimax-tts-stream len=110 chunks=855` |
+| `prime_cache` 预热 | ✓ `remote-config-cache.json` 的 `fetched_at` 1791463185 → 1791614275；老 JSON 缺 `plugin_help_url` 解成空 map 不报错 |
+| ⚠ `plugin_help_url` 覆盖值 | 线上仍是空 map：云端 JSON 还是旧版（本分支那两条覆盖未合流未 push）⇒ **“不发版换链接”要等合流上线才真正生效** |
+
+**首轮抖出的三个缺陷与处置**：
+
+| 现象（用户报） | 根因（已证实） | 处置 |
+|---|---|---|
+| MOSS 报“请填写 voice_id”；且**只有一个音色时选中失效**，加到两个才正常 | 受控 `<select>` 的 `value=""` 在选项里无匹配项 → React 把 `selectedIndex` 置 -1 → 点唯一项不触发 change | `9835075`：新增 `utils/selectValue.ts` 纯函数（存储值合法则用、否则回落第一项）+ 生效值与存储不一致时补写；6 例单测。真机证据：修复后 `moss_voice_id` 已能写入（`c6c0a40a-…`） |
+| 切页面后输入框草稿消失 | `App.tsx` 用 `{tab === "messages" && …}` 条件渲染，`InputBox` 卸载即丢局部 state | `9835075`：搬到新建 `stores/draftStore.ts`（仅本次会话，刻意不落磁盘）；setter 兼容函数式更新，三处调用零改动；6 例单测 |
+| 克隆首响 49.5s 无法归位 | 宿主 `first_audio` 含建会话、探针从 `open()` 返回后才起算，两边口径不同 | `374bf40` 加 `stream_open` 打点。**已排除**：debug 构建（宿主加载的 dll 与 release 字节数一致 3,633,664）、~50s 超时（插件只有 15/30/120/300s）、音色链路差异（`plugin_voices['mimo-tts']='clone'`）。待下一次克隆合成定性 |
+
+护栏本轮现场抓到 3 次（`VoiceSynthPanel.tsx\|moss` 34→46 红 → 改中性实现降到 33 → 棘轮又红要求当场收紧；
+日志守卫抓到打点里的 `text`），**全程未放宽任何额度**。修复后门禁：tsc 零输出、vitest **8 files / 62 tests**
+（原 6/50）、宿主 179/0/3、三道守卫 ✓、`npm run build` ✓ 1.98s。
+
+#### zcode 交接对账（`doc/20261010zcode交接/` 三份，逐条 git 实跑核实）
+
+先记账号：**main 已经不是 `dc55a57`，而是 `3c23dc7`**（origin = gitee = `3c23dc7`，已全推）：
+`dc55a57` → `5030203`（本会话代跑的 composerResize 补交）→ `3c23dc7`（zcode 修正索引校验和）。
+本分支已 `ecc89ac` 合入。各分支指针：`feat/fish-audio-tts=7d29400`（未合未推）、
+`feat/minimax-stream=92b7019`（落后，其工作实际已在 main）、`feat/mimo-plugin=ecc89ac`。
+
+**四处纠正（两边都有，包括我自己）**：
+1. ✅ zcode 对：交接提示里的“发布前置阻塞项”已解除（`5030203` 就是本会话代跑的补交）。
+2. ❌ **zcode 报告与事实相反的一条**：《插件库与主界面改版》把 `composerResize.ts/.test.ts` 描述为
+   “未接线的孤儿文件（App.tsx 未 import），接上或删掉二选一”。事实：main 的 `App.tsx:30` **一直 import 它**
+   （证据：补交前 `npx tsc` 就报 `src/App.tsx(30,87) TS2307`；`npm run build` 因它 exit 2），
+   所以不是“孤儿文件”而是“**提交了依赖却漏交文件**”。`5030203` 已接线，该遗留项可直接勾掉，**不要删**。
+3. ❌ **我自己记录过时的一条**：本计划交接提醒第 4 条与 Task 13 实施记录把
+   `minimax-tts-stream RES-CK` 当作“仓库既有基线红、与 main 持平”——`3c23dc7` 已修正，
+   合入后实跑 `failures = 0` / `ALL CONSISTENT`。已就地订正为“判据抬回全绿”并保留来历。
+4. ⚠ 本会话改过另外 4 棵工作树的 `AGENTS.md`（取消署名约定那一行），现在都是各线**未提交改动**；
+   fish 报告 §四.2 恰好提了“M AGENTS.md 非本会话产物”——那就是本会话改的，**不要当脏数据删掉**。
+
+**合并冲突热点（按真实来源修正）**：
+
+| 对方改动 | 与本分支是否冲突 | 说明 |
+|---|---|---|
+| zcode 前端大改（插件库双页签/主界面改版/效果器移除） | **不冲突** | 它们的终点是 `24959fc`，**是本分支基线 `dc55a57` 的祖先** ⇒ 本分支已经开在它上面（我改的 VoiceSynthPanel/InputBox 就是改后版本） |
+| fish 线 `48f15e7`+`7d29400`（宿主通用「我的音色」+ 下拉 optgroup + `plugin_custom_voices`） | **高冲突** | 与本分支对 `VoiceSynthPanel` 的音色下拉区/克隆卡/警示卡改动位置重叠；`settingsStore.test.ts` 的 `EXPECTED_KEYS` 两边都改过 ⇒ vitest 必红 |
+| fish 线 `2422a96`/`cc7f8ab`（插件、zip、索引条目） | 中 | `plugins-index.json` 双方各加条目（mimo-tts / fish-audio-tts）+ minimax 校验和已被 `3c23dc7` 改过 ⇒ 自动合并可能错行，必页检 |
+| minimax 报告的“升级自动卸载旧 `minimax-tts`”（未做） | 中 | 要动 `lib.rs` setup + `plugins/mod.rs` 迁移——与本分支 Task 7 的 `migrate_legacy_engine` 是**同一个扩展点**，建议合并成一个引擎无关的映射表（而不是再写一个 `if`） |
+| minimax 报告的 `PluginConfigPanel.tsx` 防抖自动保存“被并行会话再次改成 M” | 低 | 本分支只读了它的 `help_url` 消费点，未改此文件；但本分支改了 `get_plugin_config` 的 help_url 语义 ⇒ 合并后要重验配置卡链接 |
+| **护栏** | ❗**必红** | fish 新增的宿主/前端代码只要写了引擎名（如 fish 报告 §二 提到的“支持克隆 = 前端映射 `hojo-tts + minimax-tts-global`”，在 `usePluginInventory.ts`）就会触发 `check-base-hygiene`。这是设计意图；两种正当处置：改能力位（首选），或 `-UpdateBaseline` 放宽并在 commit message 说明 |
+
+**本会话留下的待办（真正收尾时逐个消）**：Step 3 B/C/D 与克隆 40s 定性；用户 settings.json 三选项（完整还原 /
+选择性还原 / 不还原）；fish × 本分支的合并计划与顺序；`output/` 里本会话临时产物（10-10 那批）尚未删除；
+Step 6 收口提交与 Step 7 收尾方式（三选一交用户）。
 
 ## 附：已知风险与回退（执行中随时对照）
 
