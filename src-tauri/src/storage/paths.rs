@@ -1,0 +1,279 @@
+// 存储路径的唯一权威（设计文档 doc/存储布局与迁移设计.md §三契约 1）。
+//
+// 为什么要单独一个模块：全项目原本只有一处向系统要数据目录（lib.rs 的 app_data_dir），
+// 但“数据放在哪”的知识散在 19 个模块的 join("audio") / join("voice_samples") 里。
+// 配置与内容分根之后，任何一处自己拼路径都会静默地把数据写错地方 —— 所以禁止，所以在此集中。
+//
+// 规则（AGENTS.md「存储契约」同步记载，并由 tools/check-storage-hygiene.ps1 机器检查）：
+//   1. 业务代码不得调 app_data_dir() / current_exe() 来拼数据路径；
+//   2. 记录型文件里不得写绝对路径（audio_path 等一律相对内容根）；
+//   3. 新增数据目录先加到本模块，再使用。
+
+// ⚠ 临时豁免（Task 2 接线后必须移除）：本模块现在只被测试使用，
+// 不加这一条会刷一片 dead_code warning，破坏「cargo check 零 warning」的门禁纪律。
+#![allow(dead_code)]
+
+use std::path::{Path, PathBuf};
+
+/// 三根的持有者。由 `lib.rs` 的 `resolve_storage_paths` 在启动时构造一次，之后只读。
+#[derive(Debug, Clone, PartialEq)]
+pub struct StoragePaths {
+    /// %APPDATA%\com.voiceassist.app —— 只放小而敏感的配置文件
+    pub config_root: PathBuf,
+    /// 内容与重数据的根，默认跟随安装位置（<exe>\data）
+    pub content_root: PathBuf,
+    /// 插件代码根（manifest + dll + registry），跟随安装位置
+    pub plugins_root: PathBuf,
+    /// 内容根因不可写等原因回退时为 true → 界面必须向用户说明原因
+    pub content_fallback: bool,
+}
+
+impl StoragePaths {
+    /// 测试与非注入场景用的直构器
+    pub fn from_dirs(
+        config_root: PathBuf,
+        content_root: PathBuf,
+        plugins_root: PathBuf,
+        content_fallback: bool,
+    ) -> Self {
+        Self { config_root, content_root, plugins_root, content_fallback }
+    }
+
+    // ── 配置根下的条目 ────────────────────────
+    pub fn settings_file(&self) -> PathBuf { self.config_root.join("settings.json") }
+    pub fn pairing_file(&self) -> PathBuf { self.config_root.join("remote-pairing.json") }
+    /// 内容根指针（用户改过位置或迁移过才存在）
+    pub fn pointer_file(&self) -> PathBuf { self.config_root.join("storage.json") }
+    /// 迁移中间产物（原件移入、不删除，可回退）
+    pub fn backup_dir(&self, stamp: &str) -> PathBuf {
+        self.config_root.join(format!(".migrated-backup-{stamp}"))
+    }
+
+    // ── 内容根下的条目 ────────────────────────
+    pub fn messages_file(&self) -> PathBuf { self.content_root.join("messages.json") }
+    pub fn favorites_file(&self) -> PathBuf { self.content_root.join("favorites.json") }
+    pub fn subtitle_history_file(&self) -> PathBuf {
+        self.content_root.join("subtitle_history.json")
+    }
+    pub fn audio_dir(&self) -> PathBuf { self.content_root.join("audio") }
+    pub fn samples_dir(&self) -> PathBuf { self.content_root.join("voice_samples") }
+    pub fn logs_dir(&self) -> PathBuf { self.content_root.join("logs") }
+    pub fn cache_dir(&self) -> PathBuf { self.content_root.join("cache") }
+    pub fn downloads_dir(&self) -> PathBuf { self.content_root.join("downloads") }
+    pub fn plugin_data_root(&self) -> PathBuf { self.content_root.join("plugin-data") }
+    pub fn plugin_data_dir(&self, id: &str) -> PathBuf { plugin_data_dir(&self.content_root, id) }
+
+    /// 建齐布局所需目录（幂等，启动时调用一次）
+    pub fn ensure_layout(&self) -> std::io::Result<()> {
+        for dir in [
+            self.config_root.as_path(),
+            self.content_root.as_path(),
+            self.audio_dir().as_path(),
+            self.samples_dir().as_path(),
+            self.logs_dir().as_path(),
+            self.cache_dir().as_path(),
+            self.plugin_data_root().as_path(),
+            self.plugins_root.as_path(),
+        ] {
+            std::fs::create_dir_all(dir)?;
+        }
+        Ok(())
+    }
+}
+
+/// 决定内容根：环境变量 > 指针文件 > <exe>\data；被选位置不可写则回退 fallback。
+/// `writable` 注入以便单测（真实实现是 `probe_writable`）。
+pub fn decide_content_root(
+    env_dir: Option<PathBuf>,
+    pointer: Option<PathBuf>,
+    exe_default: PathBuf,
+    fallback: PathBuf,
+    writable: &dyn Fn(&Path) -> bool,
+) -> (PathBuf, bool) {
+    // 显式指定的位置（env / 指针）不可写时不静默改掉用户的意思，而是回退并标记，
+    // 让界面能说出“为什么数据没在你要的位置”
+    if let Some(p) = env_dir.filter(|p| !p.as_os_str().is_empty()) {
+        return if writable(&p) { (p, false) } else { (fallback, true) };
+    }
+    if let Some(p) = pointer.filter(|p| !p.as_os_str().is_empty()) {
+        return if writable(&p) { (p, false) } else { (fallback, true) };
+    }
+    if writable(&exe_default) {
+        return (exe_default, false);
+    }
+    (fallback, true)
+}
+
+/// 读指针文件；不存在 / JSON 坏 / 值为空都返回 None（= 走默认位置，不报错不崩）。
+pub fn read_pointer(path: &Path) -> Option<PathBuf> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    // BOM 容忍：PowerShell 写过带 BOM 的 JSON 会让 serde_json 直接解析失败（已踩过）
+    let v: serde_json::Value =
+        serde_json::from_str(raw.trim_start_matches('\u{FEFF}')).ok()?;
+    v.get("content_root")?
+        .as_str()
+        .map(|s| PathBuf::from(s.trim()))
+        .filter(|p| !p.as_os_str().is_empty())
+}
+
+/// 指针文件内容（无 BOM 写入由调用方的 atomic 层负责）
+pub fn pointer_json(content_root: &Path, migrated_from: Option<&str>) -> String {
+    let v = serde_json::json!({
+        "content_root": content_root.display().to_string(),
+        "migrated_from": migrated_from,
+    });
+    serde_json::to_string_pretty(&v).unwrap_or_default()
+}
+
+/// 插件重数据目录的唯一算法（结构体方法也转发到这里）。
+/// 为何单独提供自由函数：loader / 命令层拿到的常常是 `&Path` 而不是 `StoragePaths`，
+/// 没有这个入口它们就会回去 join("data") —— 那正是本模块要禁止的事。
+pub fn plugin_data_dir(content_root: &Path, id: &str) -> PathBuf {
+    content_root.join("plugin-data").join(plugin_dir_name(id))
+}
+
+/// 插件目录名安全化：与 manifest.id 的 `a-zA-Z0-9-_` 规则同口径，其余字符换 `_`。
+/// 防的是把 `../evil` 这类拼进路径。
+pub fn plugin_dir_name(id: &str) -> String {
+    id.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect()
+}
+
+/// 真实可写探测：建目录后写一个临时文件再删掉（只清自己造的文件）。
+pub fn probe_writable(dir: &Path) -> bool {
+    if std::fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let probe = dir.join(".va-write-probe");
+    match std::fs::write(&probe, b"ok") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Task 1 Step 1：先只有测试（实现尚未存在，编译错即红证）
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn 内容根优先级_环境变量高于指针高于默认() {
+        let (root, fb) = decide_content_root(
+            Some(PathBuf::from("E:\\env")),
+            Some(PathBuf::from("D:\\pointer")),
+            PathBuf::from("C:\\exe\\data"),
+            PathBuf::from("C:\\fallback"),
+            &|_| true,
+        );
+        assert_eq!(root, PathBuf::from("E:\\env"));
+        assert!(!fb, "显式指定不算回退");
+
+        let (root, fb) = decide_content_root(
+            None,
+            Some(PathBuf::from("D:\\pointer")),
+            PathBuf::from("C:\\exe\\data"),
+            PathBuf::from("C:\\fallback"),
+            &|_| true,
+        );
+        assert_eq!(root, PathBuf::from("D:\\pointer"));
+        assert!(!fb);
+
+        let (root, _) = decide_content_root(
+            None,
+            None,
+            PathBuf::from("C:\\exe\\data"),
+            PathBuf::from("C:\\fallback"),
+            &|_| true,
+        );
+        assert_eq!(root, PathBuf::from("C:\\exe\\data"));
+    }
+
+    #[test]
+    fn 不可写时回退并标记() {
+        let (root, fb) = decide_content_root(
+            None,
+            Some(PathBuf::from("E:\\gone")),
+            PathBuf::from("C:\\exe\\data"),
+            PathBuf::from("C:\\Users\\x\\AppData\\Local\\com.voiceassist.app\\data"),
+            &|p: &Path| p != Path::new("E:\\gone"),
+        );
+        assert_eq!(
+            root,
+            PathBuf::from("C:\\Users\\x\\AppData\\Local\\com.voiceassist.app\\data")
+        );
+        assert!(fb, "非默认位置失效必须标记，界面才能说明原因");
+    }
+
+    #[test]
+    fn 插件目录名安全化_与manifest_id规则同口径() {
+        // 用中立名 demo-tts：路径消毒测试不需要真实引擎名（基座护栏也不允许给基座新增命中）
+        assert_eq!(plugin_dir_name("demo-tts"), "demo-tts");
+        // 空格、斜杠、两个汉字 = 尾部 3 个下划线（中间那个是空格换来的）
+        assert_eq!(plugin_dir_name("Demo TTS/中文"), "Demo_TTS___");
+        assert!(!plugin_dir_name("..\\evil").contains('\\'));
+        assert!(!plugin_dir_name("../evil").contains('/'));
+    }
+
+    #[test]
+    fn 各归属路径不共用根() {
+        let p = StoragePaths::from_dirs(
+            PathBuf::from("C:\\cfg"),
+            PathBuf::from("D:\\app\\data"),
+            PathBuf::from("D:\\app\\plugins"),
+            false,
+        );
+        assert_eq!(p.settings_file(), PathBuf::from("C:\\cfg\\settings.json"));
+        assert_eq!(p.messages_file(), PathBuf::from("D:\\app\\data\\messages.json"));
+        assert_eq!(p.audio_dir(), PathBuf::from("D:\\app\\data\\audio"));
+        assert_eq!(
+            p.plugin_data_dir("demo-tts"),
+            PathBuf::from("D:\\app\\data\\plugin-data\\demo-tts")
+        );
+        assert_eq!(
+            p.backup_dir("20261011"),
+            PathBuf::from("C:\\cfg\\.migrated-backup-20261011")
+        );
+    }
+
+    #[test]
+    fn 布局建齐后各目录都存在() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = StoragePaths::from_dirs(
+            dir.path().join("cfg"),
+            dir.path().join("data"),
+            dir.path().join("plugins"),
+            false,
+        );
+        p.ensure_layout().unwrap();
+        for d in [
+            p.config_root.clone(),
+            p.content_root.clone(),
+            p.audio_dir(),
+            p.samples_dir(),
+            p.logs_dir(),
+            p.cache_dir(),
+            p.plugin_data_root(),
+            p.plugins_root.clone(),
+        ] {
+            assert!(d.is_dir(), "缺少目录 {}", d.display());
+        }
+    }
+
+    #[test]
+    fn 指针文件坏内容当没有() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("storage.json");
+        assert!(read_pointer(&p).is_none(), "不存在 → None");
+        std::fs::write(&p, "not json").unwrap();
+        assert!(read_pointer(&p).is_none(), "格式坏 → None，不能崩");
+        std::fs::write(&p, "{\"content_root\":\"  \"}").unwrap();
+        assert!(read_pointer(&p).is_none(), "空值 → None，走默认位置");
+        std::fs::write(&p, "{\"content_root\":\"D:\\\\VA\\\\data\"}").unwrap();
+        assert_eq!(read_pointer(&p), Some(PathBuf::from("D:\\VA\\data")));
+    }
+}
