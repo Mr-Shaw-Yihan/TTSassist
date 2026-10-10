@@ -331,7 +331,13 @@ git commit -m "feat(存储): 新增路径权威模块 storage::paths（配置/�
 
 ---
 
-### Task 2: 启动链接入两根（行为不变，只改解析来源）
+### Task 2: 启动链接入两根（**行为不变**，只改解析来源）
+
+> ⚠ **排序约束（计划初稿的缺陷，已修正）**：本 Task **不得**把 `content_root` 默认值直接改成
+> `<exe>\data`。否则在迁移能力（Task 4）落地前，用户启动会看到“消息/音频/收藏全空”
+> （数据其实还在 AppData）——等于我们自造一场“数据丢失”事故。
+> 因此本 Task 里 `exe_default` 位置先传 `config_root`（行为与今天一致），只把**解析链**换成 paths；
+> 把默认翻到 `<exe>\data` 的动作单独放在 **Task 4 之后、作为 Task 4 的 Step 6**，并与迁移提示同批发布。
 
 **Files:**
 - Modify: `src-tauri/src/lib.rs:28-60`（`resolve_plugins_root` 并入 paths）、`src-tauri/src/lib.rs:108-160`（setup）
@@ -412,6 +418,14 @@ fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths
             app.manage(paths.clone());
 ```
 
+其中 `resolve_storage_paths` 本 Task 先传 `exe_default = config_root`（**行为不变**），
+到 Task 4 Step 6 才改回 `exe_dir.join("data")`；代码里要带上这句提醒注释：
+
+```rust
+    // ⚠ 迁移能力（Task 4）就位前不能翻默认值，否则旧数据会“看不见”= 看起来像丢数据
+    let exe_default = config_root.clone(); // Task 4 Step 6 改为 exe_dir.join("data")
+```
+
 并把 `AppState::new(data_dir.clone(), settings.clone())` 改为 `AppState::new(config_dir.clone(), data_dir.clone(), settings.clone())`；`storage::settings::load_settings(&data_dir)` 与 `plugins::migrate_legacy_engine(&data_dir)` 改传 `&config_dir`；`logging::init(&data_dir.join("logs"), …)` 改 `paths.logs_dir()`。
 
 `commands/mod.rs`：
@@ -442,7 +456,10 @@ cd ..; pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\check-base-hygiene.
 
 - [ ] **Step 5: 手工回归（本 Task 唯一的真机步骤）**
 
-`npm run tauri dev` 后确认：设置读写正常、发消息能出音频、日志出现在 `<exe>\target\debug\data\logs\app.log`（不再是 `%APPDATA%\...\logs`）、`data\` 目录结构齐全、`settings.json` 仍在 `%APPDATA%`。
+`npm run tauri dev` 后确认：**行为与今天完全一致**（因为本 Task 不翻默认）——
+设置能读写、发消息能出音频、日志仍在 `%APPDATA%\...\logs\app.log`；
+同时确认新文件已建立：`config_root` 下出现 `storage.json`？——**不该出现**（只有改过位置或迁移过才写）。
+另外把 `paths.rs` 顶部的 `#![allow(dead_code)]` 移除并确认 `cargo check` 仍零 warning（本 Task 接线后已全部在用）。
 
 - [ ] **Step 6: 提交**
 
@@ -790,6 +807,25 @@ Expected: `test result: ok. 194 passed; 0 failed; 3 ignored`（+4 例）。
 ```powershell
 git add src-tauri/src/storage/migrate.rs src-tauri/src/storage/mod.rs src-tauri/src/lib.rs
 git commit -m "feat(存储): 首启数据检测与可回退迁移执行器（先复制校验、后移入备份目录）"
+```
+
+- [ ] **Step 6: 翻默认——把内容根指向安装位置（与上面的迁移能力同批发布）**
+
+这是全计划**唯一会让数据换地方**的一步，所以必须排在迁移能力之后：
+
+```rust
+    // 内容根默认跟随安装位置；不可写时回退 LOCALAPPDATA 并在界面说明
+    let exe_default = exe_dir.join("data");   // Task 2 曾临时传 config_root（行为不变），现在才真算翻默认
+```
+
+跑一次真机全流程（设计文档 §九 的第 2、5 两条）：拿一份有旧数据的环境启动 →
+看到 Migratable 提示与体积数字 → 执行迁移 → 消息/音频/收藏/克隆样本齐全、
+**删一条消息仍能按引用计数删掉音频文件**；再跑一：迁移中途强杀进程 → 重启仍判 Migratable 可重跑。
+两条都过才提交（不过则回到本 Task 修，不得先翻默认再补迁移）：
+
+```powershell
+git add src-tauri/src/lib.rs
+git commit -m "feat(存储): 内容根默认改跟随安装位置（迁移能力已就位）"
 ```
 
 ---
