@@ -47,7 +47,27 @@
 4. 新引擎接入 = 新插件 crate；本体代码应**零修改**。做不到就是基座缺口，记进设计文档而不是贴补丁。
 
 执行手段：`pwsh tools/check-base-hygiene.ps1`（已挂 `.github/workflows/consistency.yml`）。
-存量残留登记在 `tools/base-hygiene-baseline.txt`，**只许变少不许变多**；
-拆干净一段就用 `-UpdateBaseline` 收紧基线（并在 commit message 里说明）。`plugins/` 不扫。
-行内豁免注释：`// baseok: <理由>`（与日志护栏的 `// allowlog:` 同口径）。
-接入新引擎时**先往脚本的 `$patterns` 加一条**，本体里所有写死它的地方当场变红。
+存量残留登记在 `tools/base-hygiene-baseline.txt`（每行 `相对路径|模式|允许次数`），
+**只许变少不许变多**：新增 (路径,模式)、计数变大、以及**变小/条目消失**都会红。最后一种
+是在逼你当场收紧棘轮：若只拦“变大”，拆完一段后基线里留着白额度，下一个人可以在
+同一文件重新写死同一个引擎而不被发现。收紧只需多跑一次 `-UpdateBaseline`（它只会把数字改小，
+第二次必绿），不存在死循环。`plugins/` 不扫。
+行内豁免注释：`// baseok: <理由>`，写在命中行的**本行或紧邻上一行**
+（与日志护栏的 `// allowlog:` 同口径：块内/前一行/本行）。
+接入新引擎时**先往脚本的 `$patterns` 加一条**，本体里所有写死它的地方当场变红；
+端点名、遗留字段名这类变体也要单独列（已收：`voice_clone`、`edge_voice`、带引号的裸 `edge`），
+否则拼写差一点就整段绕过。
+
+### 在册豁免（读基线前先看这里，别照着上面的红线去拆）
+
+基线里的 57 条都属存量，不是新写的违规。分四类：
+
+| 类别 | 条目 | 处置 |
+|---|---|---|
+| 内置引擎（当前形态，非设计目标） | `tts/moss.rs`、`tts/mod.rs`、`commands/tts.rs`、前端的 `moss` | 真正的活是“把 MOSS 插件化”，拆完自然归 0 |
+| 遗留字段与默认值 | `storage/types.rs`、`storage/settings.rs`、`src/types/index.ts`、`settingsStore.test.ts` 的 `mimo`/`minimax`/`moss`/`edge-tts` | 设计 §3.4-4 明确“字段保留、两步走退役”，本版本不动 |
+| 一次性迁移表与运营字段 | `plugins/mod.rs`（旧标识→插件 id 映射）、`commands/remote.rs`（`mimo_invite_code`） | 旧键退役/线上 JSON 改字段后归 0 |
+| **已知的基座缺口（下一批要拆）** | `commands/plugins.rs` 的 `genie` 31 处（基座写死了离线资源包的 zip 结构）、`minimax_clone.rs` + `MinimaxVoicePanel.tsx` + `invoke.ts`（MiniMax 克隆通道整体还在宿主/前端）、`usePluginInventory.ts` 的 `CLONE_CAPABLE` 集合（**就是第 1 条的在册反例**）、`InstalledCard/PluginSetupPanel/ResourcePackLinks.tsx` 的 `p.id === "genie-tts"` 分支 | 能力应改由插件自述（资源清单进 manifest、克隆能力进能力位）；拆一段跑一次 `-UpdateBaseline` |
+
+测试夹具里的引擎名（`perf.rs`、`manifest.rs`、`registry.rs`、`pluginTaskStore.test.ts` 等）
+只是样例数据，不必拆；它们占位是为了“数字不变就是没新写入”。
