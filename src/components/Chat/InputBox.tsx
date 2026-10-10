@@ -11,6 +11,7 @@ import { MicToggle } from "./MicToggle";
 import { useVoiceInputStore } from "../../stores/voiceInputStore";
 import { showInfo } from "../common/ConfirmDialog";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useDraftStore } from "../../stores/draftStore";
 
 interface Props {
   onSend: (text: string) => Promise<void>;
@@ -19,7 +20,11 @@ interface Props {
 }
 
 export function InputBox({ onSend, onOpenSettings }: Props) {
-  const [text, setText] = useState("");
+  // 草稿放在 store 而不是局部 state：App.tsx 切标签页是条件渲染，本组件会被卸载，
+  // 局部 state 归零 → 用户表现为“切个页面刚输入的文字就没了”。setter 兼容函数式更新，
+  // 所以下面 setText((prev) => …) 的写法无需改动。
+  const text = useDraftStore((s) => s.draft);
+  const setText = useDraftStore((s) => s.setDraft);
   const [sending, setSending] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 

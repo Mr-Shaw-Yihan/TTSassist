@@ -12,6 +12,7 @@ import {
   importResourcePackFlow,
 } from "../../services/invoke";
 import type { PluginInfo, MossVoice } from "../../types";
+import { resolveSelectedValue } from "../../utils/selectValue";
 import { Field, SubPanel, SecretInput } from "../common/SettingsSection";
 import { EngineCard } from "./EngineCard";
 import { MinimaxVoicePanel } from "./MinimaxVoicePanel";
@@ -57,6 +58,17 @@ export function VoiceSynthPanel() {
   // 没拿到设置前用空串，不拿任何引擎名兜底：默认引擎是宿主的职责
   //（Settings::default 已给出），前端再兜一层只会多一处基座里的引擎身份字面量
   const engineId = settings?.tts_engine ?? "";
+  // 当前生效音色：存储值为空或是已删除的脏 id 时回落到库里第一项。
+  // 实测缺陷：库里只有一个音色时，`value=""` 在选项里没匹配项，React 把 selectedIndex
+  // 置成 -1，用户点那唯一一项不触发 change——“选了却像没选”，合成侧报未配置音色 id；
+  // 加到两个音色后改选另一项才能生效。兜底函数本身不认识引擎（见 utils/selectValue.ts）。
+  const curVoiceId = resolveSelectedValue(settings?.moss_voice_id, mossVoices.map((v) => v.voice_id)); // baseok: 内置云端引擎尚未插件化，它的音色字段只能在基座里读写
+  // 生效值与存储值不一致时补写一次，保证下拉显示的与后端读到的是同一个值；
+  // 补写后两者相等、守卫不通过，不会死循环。依赖数组只列中性变量，避免多一处引擎命中。
+  useEffect(() => {
+    // baseok: 同上——补写的是尚未插件化的内置引擎字段
+    if (curVoiceId && settings?.moss_voice_id !== curVoiceId) void patch("moss_voice_id", curVoiceId);
+  }, [curVoiceId, settings, patch]);
 
   /** 取插件音色的干净展示名（去掉"· 待下载"后缀） */
   function voiceLabel(plugin: PluginInfo, voiceId: string): string {
@@ -240,7 +252,7 @@ export function VoiceSynthPanel() {
 
           <SubPanel title="音色管理" desc="选择当前使用音色，或维护你的音色库。">
             <select
-              value={settings?.moss_voice_id ?? ""}
+              value={curVoiceId}
               onChange={(e) => patch("moss_voice_id", e.target.value)}
               className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
             >
