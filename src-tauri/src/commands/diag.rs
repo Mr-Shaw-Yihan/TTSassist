@@ -358,8 +358,6 @@ fn render_settings_summary(state: &State<AppState>) -> String {
     lines.push(format!("  - asr_plugin: {}", s.asr_plugin));
     lines.push(format!("  - asr_language: {}", s.asr_language));
     lines.push(format!("  - theme: {}", s.theme));
-    lines.push(format!("  - floating_ball_perf_mode: {}", s.floating_ball_perf_mode));
-    lines.push(format!("  - floating_ball_skin: {}", s.floating_ball_skin));
     lines.push(format!("  - subtitle_position: {}", s.subtitle_position));
     lines.push(format!("  - subtitle_language: {}", s.subtitle_language));
     lines.push(format!("  - subtitle_vad_sensitivity: {}", s.subtitle_vad_sensitivity));
@@ -367,7 +365,6 @@ fn render_settings_summary(state: &State<AppState>) -> String {
     lines.push(format!("  - playback_volume: {:.2}", s.playback_volume));
     lines.push(format!("  - playback_rate: {:.2}", s.playback_rate));
     lines.push(format!("  - mic_playback_volume: {:.2}", s.mic_playback_volume));
-    lines.push(format!("  - floating_ball_size: {}", s.floating_ball_size));
     lines.push(format!("  - subtitle_opacity: {:.2}", s.subtitle_opacity));
     lines.push(format!("  - subtitle_font_size: {}", s.subtitle_font_size));
     lines.push(format!("  - subtitle_max_lines: {}", s.subtitle_max_lines));
@@ -375,7 +372,6 @@ fn render_settings_summary(state: &State<AppState>) -> String {
     // 布尔
     lines.push(format!("  - mic_send_enabled: {}", s.mic_send_enabled));
     lines.push(format!("  - voice_input_enabled: {}", s.voice_input_enabled));
-    lines.push(format!("  - floating_ball_enabled: {}", s.floating_ball_enabled));
     lines.push(format!("  - diagnostics_log_enabled: {}", s.diagnostics_log_enabled));
     lines.push(format!("  - subtitle_enabled: {}", s.subtitle_enabled));
     lines.push(format!("  - subtitle_always_on_top: {}", s.subtitle_always_on_top));

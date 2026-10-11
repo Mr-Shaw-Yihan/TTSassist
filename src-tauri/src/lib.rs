@@ -385,36 +385,6 @@ pub fn run() {
             // 加载收藏用于注册收藏快捷键（content_dir 随后移入 AppState）
             let favorites = storage::favorites::load_favorites(&content_dir);
 
-            // 悬浮球启动序列：球窗先出播 progress（主窗 visible=false 延迟到 va:boot:done）。
-            // 位置：有保存值用保存值，否则主显示器居中；窗口尺寸 = 球径×1.5 画布。
-            // 启动后是否收球由前端按 floating_ball_enabled 决定（见 FloatingBall.tsx boot 控制器）
-            if let Some(ball) = app.get_webview_window("floating_ball") {
-                let ball_px = storage::types::clamp_ball_size(settings.floating_ball_size);
-                let scale = app
-                    .primary_monitor()
-                    .ok()
-                    .flatten()
-                    .map(|m| m.scale_factor())
-                    .unwrap_or(1.0);
-                let canvas_phys = ((ball_px as f64) * 1.5 * scale) as i32;
-                let (mut x, mut y) = (settings.floating_ball_x, settings.floating_ball_y);
-                if x < 0 || y < 0 {
-                    if let Ok(Some(mon)) = app.primary_monitor() {
-                        let size = mon.size();
-                        x = (size.width as i32 - canvas_phys) / 2;
-                        y = (size.height as i32 - canvas_phys) / 2;
-                    }
-                }
-                if x >= 0 && y >= 0 {
-                    let _ = ball.set_position(tauri::PhysicalPosition::new(x, y));
-                }
-                let canvas_log = (ball_px as f64 * 1.5) as u32;
-                let _ = ball.set_size(tauri::LogicalSize::new(canvas_log, canvas_log));
-                // 悬浮球点击不激活窗口、不抢游戏焦点（config 的 focus:false 只管创建时机，不够）
-                crate::win32::set_no_activate(&ball, true);
-                let _ = ball.show();
-            }
-
             // 焦点诊断：记录 quick_input 焦点变化与当时的前台窗口（排查游戏内浮窗自动消失）
             if let Some(qi) = app.get_webview_window("quick_input") {
                 // 直播伴侣形态：浮窗永久挂 WS_EX_NOACTIVATE——点击只送达鼠标消息、
@@ -445,12 +415,6 @@ pub fn run() {
             // 系统托盘
             tray::setup(app)?;
             tray::install_close_to_tray(app.handle());
-            // 后端初始化完成 → 通知球窗前端（boot 控制器等 max(ready, 800ms) 后收球开主窗）
-            {
-                crate::commands::floating_ball::mark_boot_ready();
-                use tauri::Emitter;
-                let _ = app.handle().emit("va:boot:ready", ());
-            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -528,19 +492,7 @@ pub fn run() {
             crate::hotkey::set_voice_input_hotkey,
             crate::hotkey::set_play_last_hotkey,
             crate::hotkey::set_mic_toggle_hotkey,
-                        crate::commands::floating_ball::toggle_quick_input,
             crate::hotkey::focus_quick_input_content,
-            crate::commands::floating_ball::toggle_mic_send,
-            crate::commands::floating_ball::set_floating_ball_enabled,
-            crate::commands::floating_ball::save_floating_ball_pos,
-            crate::commands::floating_ball::start_outside_click_watch,
-            crate::commands::floating_ball::stop_outside_click_watch,
-            crate::commands::floating_ball::reset_floating_ball_pos,
-            crate::commands::floating_ball::is_boot_ready,
-            crate::commands::floating_ball::start_cursor_watch,
-            crate::commands::floating_ball::stop_cursor_watch,
-            crate::commands::floating_ball::update_ball_hit_rect,
-            crate::commands::floating_ball::set_ball_passthrough_override,
             crate::show_main_window,
         ])
         .run(tauri::generate_context!())
