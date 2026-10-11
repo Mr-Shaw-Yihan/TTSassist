@@ -641,7 +641,7 @@ Task 3 先完成了插件重数据分离；本步把“哪些读写走配置根�
 验收：改完跑一次全量门禁（期望测试数不变，纯改参数来源），再请用户确认一遍“设置仍可读”；
 完成后才能进 Task 4 Step 6 翻默认。
 
-### Task 4: 首启数据检测与可回退迁移
+### Task 4: 首启数据检测与可回退迁移 —— Step 1-5 已完成（bbb04c1），Step 6 待真机验收
 
 **Files:**
 - Create: `src-tauri/src/storage/migrate.rs`
@@ -881,6 +881,10 @@ git commit -m "feat(存储): 首启数据检测与可回退迁移执行器（先
 
 - [ ] **Step 6: 翻默认——把内容根指向安装位置（与上面的迁移能力同批发布）**
 
+> ⚠ 实施时发现排序缺陷：本步的真机验收要「看到 Migratable 提示与体积数字 → **执行迁移**」，
+> 而“执行迁移”的命令要到 Task 5 才存在。正确执行顺序：Task 5 → Task 6 → 本步（翻默认）+ 真机验收，
+> 不要把 Step 6 当成 Task 4 的尾巴单独跑。
+
 这是全计划**唯一会让数据换地方**的一步，所以必须排在迁移能力之后：
 
 ```rust
@@ -900,7 +904,7 @@ git commit -m "feat(存储): 内容根默认改跟随安装位置（迁移能力
 
 ---
 
-### Task 5: 存储报告与残留治理命令
+### Task 5: 存储报告与残留治理命令 —— ✅ 已完成（f09b72c）
 
 **Files:**
 - Create: `src-tauri/src/commands/storage.rs`
@@ -997,6 +1001,43 @@ Expected: `test result: ok. 196 passed; 0 failed; 3 ignored`（+2 例）。
 git add src-tauri/src/commands/storage.rs src-tauri/src/commands/mod.rs src-tauri/src/lib.rs
 git commit -m "feat(存储): 新增 storage_report/delete_plugin_data/migrate_storage_now 三个读口"
 ```
+
+**实施记录（与计划的差异）**
+- 计划给的是带 `/* */` 的骨架，实现时发现：两根仍相同（未翻默认）时 `migrate_storage_now` 必须能
+  拒绝，否则会把数据往自己里拷。判定从 lib.rs 抽成 `migrate::detect_in(paths)`，启动日志与命令共用。
+- `MigrationPending` 持有器下线：界面每次读实时状态。缓存快照会在用户搬完家后继续报 Migratable（两处真相）。
+- `pointer_json` 之前零调用点：迁移完成后写 `storage.json`（设计 §四 step 4），本 Task 补上。
+- 计划预期的测试数（196）已过时，实际 `cargo test --lib` 208 passed / 0 failed。
+- 测试夹具不得使用引擎名（`edge-tts`/`genie-tts` 会被基座护栏抓），改用中性 id。
+
+---
+
+### Task 5b: 数据回退急救程序 `va-data-rescue` —— ✅ 已完成（2fa8d5d）
+
+背景：设计文档 §五/§六.3 要求的「从备份回退」与「内容根可改」在本计划里没安排任务（计划范围遗漏）。
+2026-10-11 与用户定：只做回退，且不做成设置页按钮而是独立急救程序；不进安装包、不进 Release。
+
+**Files:**
+- Create: `src-tauri/src/bin/va-data-rescue.rs`
+- Modify: `src-tauri/src/storage/migrate.rs`（抽出 `copy_all_and_verify`，新增 `backup_items`/`restore_conflicts`/`restore_items`/`find_backups`）、`src-tauri/src/storage/paths.rs`（`CONFIG_DIR_NAME`/`POINTER_FILE_NAME`/`config_root_from`）
+
+关键决策：
+- 为什么是独立程序：内容根指向的盘没接上时主程序自己都起不来，界面里的按钮点不到。
+- 不写第二份复制逻辑：`restore_items` 与 `migrate_items` 共用 `copy_all_and_verify`（设计 §五）。
+- **指针指回配置根而不是删掉**：翻默认后删指针 = 内容根退回空的 `exe\data`，刚恢复的数据反而看不见（设计原文已同步修正）。
+- 同名条目整批拒绝、备份一律保留、多份备份只取最新但把更早的打印出来。
+- 「内容根可改」不做：自动回退 + `VA_STORAGE_DIR` 环境变量已覆盖，1.9.0 不加界面入口。
+
+验收（已跑，不靠“能编译”当“能用”）：
+```powershell
+cd src-tauri
+CARGO_HTTP_CHECK_REVOKE=false; cargo build --bin va-data-rescue
+# 假环境：cfg\.migrated-backup-20261011\{messages.json,audio\m_1.wav} + settings.json
+target\debug\va-data-rescue.exe --config-root <cfg> --list   # 只列不动
+target\debug\va-data-rescue.exe --config-root <cfg> --yes     # 回退 + 写指针，exit=0
+target\debug\va-data-rescue.exe --config-root <cfg> --yes     # 再跑：同名拒绝，exit=1
+```
+实测结果：条目归位、备份保留、`settings.json` 未被触碰、`storage.json` 内容根 == 配置根。
 
 ---
 
