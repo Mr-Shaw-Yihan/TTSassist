@@ -6,7 +6,8 @@
 use std::path::{Path, PathBuf};
 
 use super::paths::{
-    AUDIO_DIR_NAME, CACHE_DIR_NAME, DOWNLOADS_DIR_NAME, LOGS_DIR_NAME, SAMPLES_DIR_NAME,
+    StoragePaths, AUDIO_DIR_NAME, CACHE_DIR_NAME, DOWNLOADS_DIR_NAME, LOGS_DIR_NAME,
+    SAMPLES_DIR_NAME,
 };
 
 /// 启动时的存储布局状态。
@@ -79,14 +80,25 @@ fn dir_has_entries(p: &Path) -> bool {
 ///
 /// 两根仍相同时（内容根尚未翻默认到安装位置）根本没“搬家”这回事，必须返回 Current：
 /// 否则 `messages.json` 会被同时看成“新位置已有”与“旧位置待迁”，误判成 Conflict。
-pub fn detect_in(paths: &super::paths::StoragePaths) -> StorageState {
+///
+/// 旧位置仍有数据时，**不能拿“新位置已有数据”当冲突依据**：拷贝就是先填新位置的，
+/// 搬一半崩了新位置必然已有数据。设计 §五 承诺的“断电后重跑”要求这种情况仍判可迁移，
+/// 只有「同名且内容不同」（两边各自有新数据）才真需要人来处置。
+pub fn detect_in(paths: &StoragePaths) -> StorageState {
     if paths.content_root == paths.config_root {
         return StorageState::Current;
     }
-    detect_state(
-        content_has_data(&paths.content_root),
-        !legacy_items(&paths.config_root).is_empty(),
-    )
+    let legacy = legacy_items(&paths.config_root);
+    if legacy.is_empty() {
+        // 旧位置已清空：新位置有数据 = 已就位，没数据 = 全新安装
+        return detect_state(content_has_data(&paths.content_root), false);
+    }
+    let (_, _, conflicts) = partition_items(&legacy, &paths.content_root);
+    if conflicts.is_empty() {
+        StorageState::Migratable
+    } else {
+        StorageState::Conflict
+    }
 }
 
 /// 内容根是否已有内容类数据（判“新布局已就位”用）。
@@ -158,16 +170,36 @@ pub fn migrate_items_with_verify(
     // 走到这里才创建备份目录并把原件移进去（失败也不删原件，下次仍会看到旧项）
     std::fs::create_dir_all(&backup).map_err(|e| format!("创建备份目录失败: {e}"))?;
     for (src, _) in done {
-        let target = match src.file_name() {
-            Some(n) => backup.join(n),
+        let name = match src.file_name() {
+            Some(n) => n.to_string_lossy().into_owned(),
             None => continue,
         };
+        // 归档目标必须现算：重跑/回退后重搬时，同名归档可能已在（上一轮留下的）。
+        let target = free_backup_target(&backup, &name);
         match std::fs::rename(&src, &target) {
             Ok(()) => report.moved += 1,
             Err(e) => log_warn!("迁移原件入备份失败（数据已在新位置，原件保留）: {e}"),
         }
     }
     Ok(report)
+}
+
+/// 归档目标若已被占，改名存放而**不是盖上去**。
+/// 必须这样写：Windows 的 `fs::rename` 带 REPLACE 语义，目标存在时不报错而是
+/// **静默销毁旧归档**（实测就是这个 bug）——而归档是用户回退的唯一凭据。
+fn free_backup_target(backup_dir: &Path, name: &str) -> PathBuf {
+    let first = backup_dir.join(name);
+    if !first.exists() {
+        return first;
+    }
+    let mut i = 1usize;
+    loop {
+        let candidate = backup_dir.join(format!("{name}.{i}"));
+        if !candidate.exists() {
+            return candidate;
+        }
+        i += 1;
+    }
 }
 
 /// 回退结果。`restored` 是复制回目标的项数（备份原件一律保留）。
@@ -238,14 +270,26 @@ pub fn find_backups(config_root: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// 判两个文件是否同一内容。不能只看字节数：写错就是拿旧记录盖掉新记录。
+/// 这条不是过度设计——开发时写的“内容不同”用例恰好与新文件同长（10 字节），
+/// 只看长度的实现当场把它当成“已拷过”，冲突根本判不出来。
+/// 参与判重的只有 `messages.json` 这类固定名的记录文件（几十到几百 KB），
+/// 真比对内容的代价可以接受；大体积的目录走合并拷贝、不在这里比对。
+fn same_file_contents(a: &Path, b: &Path) -> bool {
+    let (Ok(x), Ok(y)) = (std::fs::read(a), std::fs::read(b)) else {
+        return false;
+    };
+    x == y
+}
+
 /// 把待迁移项按新位置现状分成三类：还要拷 / 已拷过 / 撞名且不同（冲突）。
 ///
 /// 只有**固定文件名的记录类文件**（`messages.json` 等）才参与判重：它们一边可能已有
 /// 升级后新写的数据，盖过去就是丢数据。目录（`audio/` 等）不判重、直接合并拷：
 /// 里面是按消息 id 命名的文件，id 不会撞，而“中途强杀后重跑”需要把上次没拷完的补上。
 ///
-/// 判身份只看字节数：与 `copy_all_and_verify` 里的校验强度一致（同大小不同内容属极小
-/// 概率），目的是既不让覆盖新数据、也不让重跑永远撞在自己留下的文件上。
+/// 判身份要**真比对文件内容**（见 `same_file_contents`），不能只看字节数。
+/// 目的是既不让覆盖新数据、也不让重跑永远撞在自己留下的文件上。
 fn partition_items(items: &[PathBuf], content_root: &Path) -> (Vec<PathBuf>, Vec<PathBuf>, Vec<String>) {
     let mut to_copy = Vec::new();
     let mut already = Vec::new();
@@ -254,11 +298,7 @@ fn partition_items(items: &[PathBuf], content_root: &Path) -> (Vec<PathBuf>, Vec
         let Some(name) = it.file_name() else { continue };
         let dst = content_root.join(name);
         if dst.is_file() {
-            let same = std::fs::metadata(it)
-                .ok()
-                .and_then(|a| std::fs::metadata(&dst).ok().map(|b| a.len() == b.len()))
-                .unwrap_or(false);
-            if same {
+            if same_file_contents(it, &dst) {
                 already.push(it.clone());
             } else {
                 conflicts.push(name.to_string_lossy().into_owned());
@@ -428,6 +468,64 @@ mod tests {
         let report = migrate_items(&legacy, &content, "20261011").unwrap();
         assert_eq!(report.moved, 0);
         assert_eq!(report.bytes, 0);
+    }
+
+    #[test]
+    fn 两边都有但内容相同时仍判可重跑_真撞车才判冲突() {
+        // 设计 §五 承诺“断电后重进仍可重跑”。但拷贝是先填新位置的，
+        // 因此“新位置已有数据”本身不能当成冲突——否则搬一半崩了就会被误判成
+        // Conflict（要人工处置），永远走不到重跑。只有**同名且内容不同**才是真撞车。
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("cfg");
+        let content = dir.path().join("data");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::create_dir_all(&content).unwrap();
+        let p = StoragePaths::from_dirs(cfg.clone(), content.clone(), dir.path().join("plugins"), false);
+
+        // 旧位置有数据、新位置空 → 可迁移
+        std::fs::write(cfg.join("messages.json"), b"same-bytes").unwrap();
+        assert_eq!(detect_in(&p), StorageState::Migratable);
+
+        // 两边都有、内容相同（断电重跑的真实形状）→ 仍应判可迁移，而不是冲突
+        std::fs::write(content.join("messages.json"), b"same-bytes").unwrap();
+        assert_eq!(detect_in(&p), StorageState::Migratable, "同内容不该算冲突");
+
+        // 两边都有、同名但内容不同 → 这才是要人处置的冲突
+        std::fs::write(content.join("messages.json"), b"different!").unwrap();
+        assert_eq!(detect_in(&p), StorageState::Conflict);
+    }
+
+    #[test]
+    fn 原件入备份遇同名时改名不覆盖不静默丢弃() {
+        // 回退过又重搬（或同一天多次搬迁）时，备份目录里可能已有同名项。
+        // Windows 上 rename 到已存在的文件会直接失败；若只记一条警告跳过，
+        // 原件就留在旧位置 → 下次仍判待迁移 → **每次启动重搬一遍、永远不收敛**。
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join("cfg");
+        let content = dir.path().join("data");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::create_dir_all(&content).unwrap();
+        // 先造好同日备份目录，并往里放一份同名项（模拟上一轮已归档）
+        let backup = legacy.join(".migrated-backup-20261011");
+        std::fs::create_dir_all(&backup).unwrap();
+        std::fs::write(backup.join("messages.json"), b"archived").unwrap();
+        // 旧位置待迁移项，与新位置内容相同（走“已拷过”分支）
+        std::fs::write(legacy.join("messages.json"), b"same-bytes").unwrap();
+        std::fs::write(content.join("messages.json"), b"same-bytes").unwrap();
+
+        let report = migrate_items(&legacy, &content, "20261011").unwrap();
+
+        assert_eq!(report.moved, 1, "原件必须被收走，否则迁移永不收敛");
+        assert!(!legacy.join("messages.json").exists(), "旧位置不该还留着它");
+        // 两份都在：上一轮的归档没被动过，这一轮的改名存放
+        assert_eq!(std::fs::read(backup.join("messages.json")).unwrap(), b"archived", "已有归档不得被覆盖");
+        let extra: Vec<String> = (std::fs::read_dir(&backup).unwrap())
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n != "messages.json")
+            .collect();
+        assert_eq!(extra.len(), 1, "本轮回退件应改名归档：{extra:?}");
+        assert_eq!(std::fs::read(backup.join(&extra[0])).unwrap(), b"same-bytes");
     }
 
     #[test]
