@@ -25,18 +25,60 @@ use crate::commands::AppState;
 use crate::hotkey::{FavoriteHotkeys, HotkeyState};
 use crate::storage::types::Settings;
 
-/// 解析插件根目录（阶段 22：脱离 APPDATA，跟随 exe 安装位置）。
-/// 优先级：环境变量 VA_PLUGINS_DIR > exe 同级 plugins/ 目录。
-fn resolve_plugins_root() -> std::path::PathBuf {
-    // 1. 环境变量覆盖（开发/测试/高级用户自定义）
-    if let Ok(dir) = std::env::var("VA_PLUGINS_DIR") {
-        return std::path::PathBuf::from(dir);
-    }
-    // 2. 默认：exe 所在目录的 plugins/ 子目录
-    let exe = std::env::current_exe().expect("无法获取 exe 路径");
-    exe.parent()
+/// 解析三根（配置 / 内容 / 插件），路径来源收口到 `storage::paths`。
+///
+/// ⚠ 行为不变约束：在迁移能力（`storage::migrate`，存储计划 Task 4）落地前，
+/// `exe_default` 传的是 **配置根**，即内容根默认 == 配置根 —— 本函数今天只收口“谁来定路径”，
+/// 不搬任何数据。翻默认（内容根 → `<exe>\data`）单独放在 Task 4 Step 6，与迁移提示同批发布；
+/// 否则用户会看到“消息/音频全空”（数据其实还在 AppData），等于我们自造一场数据丢失事故。
+fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths {
+    use std::path::PathBuf;
+    use storage::paths::*;
+    let config_root = app.path().app_data_dir().expect("无法获取配置目录");
+    let exe_dir = std::env::current_exe()
+        .expect("无法获取 exe 路径")
+        .parent()
         .expect("exe 无父目录")
-        .join("plugins")
+        .to_path_buf();
+
+    let env_dir = std::env::var("VA_STORAGE_DIR").ok().map(PathBuf::from);
+    let pointer = read_pointer(&config_root.join("storage.json"));
+    let local_fallback = std::env::var("LOCALAPPDATA")
+        .ok()
+        .map(|a| PathBuf::from(a).join("com.voiceassist.app").join("data"))
+        .unwrap_or_else(|| exe_dir.join("data-fallback"));
+
+    // Task 4 Step 6 前：exe_default = config_root（不搬数据）；之后改成 exe_dir.join("data")
+    let (content_root, fallback) = decide_content_root(
+        env_dir,
+        pointer,
+        config_root.clone(),
+        local_fallback,
+        &probe_writable,
+    );
+
+    // 插件代码根沿用阶段 22 口径：VA_PLUGINS_DIR > exe 同级 plugins/（跟随安装位置）
+    let plugins_root = std::env::var("VA_PLUGINS_DIR")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| exe_dir.join("plugins"));
+
+    let paths = storage::paths::StoragePaths::from_dirs(
+        config_root,
+        content_root,
+        plugins_root,
+        fallback,
+    );
+    if let Err(e) = paths.ensure_layout() {
+        log_warn!("创建存储目录失败: {e}");
+    }
+    if fallback {
+        log_warn!(
+            "内容数据回退到 {}（安装目录不可写或指定位置失效），设置页需向用户说明",
+            paths.content_root.display()
+        );
+    }
+    paths
 }
 
 /// 首次运行迁移：把旧 APPDATA 下的插件复制到新位置（exe 同级 plugins/）。
@@ -106,21 +148,25 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
-            let data_dir = app.path().app_data_dir()?;
+            // 三根在此一次解析；下面所有路径都从 paths 来（存储契约）
+            let paths = resolve_storage_paths(app.handle());
+            app.manage(paths.clone());
+            let (config_dir, data_dir) = (paths.config_root.clone(), paths.content_root.clone());
             storage::ensure_data_dirs(&data_dir)?;
 
             // 兼容迁移：老设置里的内置引擎标识 → 对应插件 id（幂等，直接改文件）
-            plugins::migrate_legacy_engine(&data_dir);
+            // settings.json 属配置 → 走配置根
+            plugins::migrate_legacy_engine(&config_dir);
 
-            let settings: Settings = storage::settings::load_settings(&data_dir);
+            let settings: Settings = storage::settings::load_settings(&config_dir);
 
             // 诊断日志（支持模式）：默认关仅 stderr；设置或 env VA_DIAG_LOG 命中时
-            // 同时落 app_data_dir/logs/app.log（仅本地、不含用户合成文本，启动超限自动轮转）
+            // 同时落 `<内容根>/logs/app.log`（仅本地、不含用户合成文本，启动超限自动轮转）
             {
                 let env_on = std::env::var("VA_DIAG_LOG")
                     .map(|v| matches!(v.as_str(), "1" | "true" | "TRUE" | "yes" | "on"))
                     .unwrap_or(false);
-                logging::init(&data_dir.join("logs"), settings.diagnostics_log_enabled || env_on);
+                logging::init(&paths.logs_dir(), settings.diagnostics_log_enabled || env_on);
                 // T-G：release 下前端首帧早于本 init，startup 埋点若已暂存则在此补写落盘
                 crate::perf::drain_startup_pending();
             }
@@ -150,14 +196,19 @@ pub fn run() {
 
             // AppState / MicPlayback / StreamPlayer 提前 manage：能力桥包装的合成、
             // 收藏播放、停止播放等能力依赖二者，插件 attach 时必须已就绪
-            app.manage(AppState::new(data_dir.clone(), settings.clone()));
+            app.manage(AppState::new(
+                config_dir.clone(),
+                data_dir.clone(),
+                settings.clone(),
+            ));
             app.manage(crate::commands::mic::MicPlayback::spawn());
             // 流式 TTS 播放线程（插件 WS 逐块 PCM → 边收边播）
             app.manage(crate::commands::tts_stream::StreamPlayer::spawn());
 
-            // 阶段 22：插件根目录改为 exe 同级 plugins/（脱离 APPDATA 系统盘）
-            let plugins_root = resolve_plugins_root();
-            migrate_plugins_if_needed(&data_dir, &plugins_root);
+            // 插件代码根跟随安装位置（阶段 22 口径），由 paths 统一给出
+            let plugins_root = paths.plugins_root.clone();
+            // 旧版插件在 `<AppData>\plugins`：那里现在仍是配置根下路径
+            migrate_plugins_if_needed(&config_dir, &plugins_root);
 
             // 移动端遥控已本体化：在插件加载前清理旧 lan-remote（迁移配对 token +
             // 删注册表条目/插件目录/残留内置 zip），避免其被重新加载与本体服务抢 45271

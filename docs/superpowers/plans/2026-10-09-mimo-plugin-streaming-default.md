@@ -4536,7 +4536,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\plugins\scripts\test-mimo-stream
    ```powershell
    Get-Content "$env:APPDATA\com.voiceassist.app\settings.json" | ConvertFrom-Json | Select-Object tts_engine, tts_model, clone_voice_path | Format-List
    ```
-2. 跑本工作树（`npm run tauri dev` 或打包后的 exe），看 `app.log`：
+2. 跑本工作树（`npm run tauri dev` 或打包后的 exe），看日志（⚠ 默认不写 app.log，
+   需先看设置里的“诊断日志（支持模式）”是否开着，否则直接看 dev 的 stdout）：
    - 有 `插件已加载: mimo-tts`（bootstrap 自动装了内置包）；
    - **无** `MIMO_API_KEY` 相关的旧注入行。
 3. 重读 `settings.json`，必须看到：`tts_engine: "mimo-tts"`、
@@ -4744,8 +4745,10 @@ test result: ok. 2 passed; 0 failed
 ### Task 13 第 3 轮（10-10 下午）：真机首轮 A 段、三个缺陷修复、zcode 交接对账
 
 **先记两条取证口径（后续会话别再踩）**：
-1. **dev 模式不写 `logs/app.log`**：本次 14:37 / 15:41 / 15:44 三次启动在 app.log 里零记录（日志只进 stdout）
-   ⇒ 真机验收要看 `npm run tauri dev` 的输出，不能按 AGENTS.md 那条去 grep app.log 的 `[perf] startup=`。
+1. **`logs/app.log` 只在“诊断日志（支持模式）”开着时才落盘**（已实测：`diagnostics_log_enabled = false`
+   ⇒ 本次 14:37 / 15:41 / 15:44 三次启动在 app.log 里零记录）。**本条曾被我误归因为
+   “dev 模式不写日志”，与 dev/release 无关。**
+   ⇒ 真机验收要看 `npm run tauri dev` 的输出，不能按 AGENTS.md 那条去 grep app.log 的 `[perf] startup=`（或者先把设置里的“诊断日志”打开，运行期即生效）。
 2. `npx` / `npm` **不能用 `*>>` 重定向**（PS 报 `StandardOutputEncoding is only supported when standard output
    is redirected`，命令根本没执行就返回）；用 `> file 2>&1`。读 `git log`/`git show` 前先
    `[Console]::OutputEncoding=UTF8`，否则中文提交信息看着像坏的（本轮我差点误判成提交内容坏了）。

@@ -9,8 +9,9 @@
 //   2. 记录型文件里不得写绝对路径（audio_path 等一律相对内容根）；
 //   3. 新增数据目录先加到本模块，再使用。
 
-// ⚠ 临时豁免（Task 2 接线后必须移除）：本模块现在只被测试使用，
-// 不加这一条会刷一片 dead_code warning，破坏「cargo check 零 warning」的门禁纪律。
+// ⚠ 临时豁免（存储计划 Task 3/4 把 getter 全部接上后必须移除）：现在只接线了启动解析，
+// 多数 getter 还没有调用方，不加这一条会刷一片 dead_code warning，破坏「cargo check 零 warning」门禁。
+// 移除时不得靠提高 allow 范围绕过，必须接完一个删一个。
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};

@@ -456,10 +456,14 @@ cd ..; pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\check-base-hygiene.
 
 - [ ] **Step 5: 手工回归（本 Task 唯一的真机步骤）**
 
-`npm run tauri dev` 后确认：**行为与今天完全一致**（因为本 Task 不翻默认）——
-设置能读写、发消息能出音频、日志仍在 `%APPDATA%\...\logs\app.log`；
-同时确认新文件已建立：`config_root` 下出现 `storage.json`？——**不该出现**（只有改过位置或迁移过才写）。
-另外把 `paths.rs` 顶部的 `#![allow(dead_code)]` 移除并确认 `cargo check` 仍零 warning（本 Task 接线后已全部在用）。
+`npm run tauri dev` 后确认：**行为与今天完全一致**（本 Task 不翻默认）——
+实测四项：① 设置能读写、发消息能出音频；② `%APPDATA%\com.voiceassist.app\` 下**不出现**
+`storage.json`（只有改过位置或迁移过才写）；③ `messages.json` 仍在原位置；
+④ **`<exe 同级>\data\` 不应被创建**（内容根仍 == 配置根，`ensure_layout` 不会多造目录）。
+日志验证口径：`app.log` 只在设置里“诊断日志（支持模式）”开着时才写（默认关），
+所以看 dev 的 stdout 或先打开该开关，**不得**把“没日志”当成回归信号。
+再把 `paths.rs` 顶部的 `#![allow(dead_code)]` 注释里标明的移除时机说清楚（Task 3/4 接完 getter 后），
+本 Task 结束时仍保留是正确的：多数 getter 确实还没调用方。
 
 - [ ] **Step 6: 提交**
 

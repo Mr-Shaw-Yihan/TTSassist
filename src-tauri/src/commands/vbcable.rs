@@ -4,7 +4,7 @@
 // 下载过程通过 Tauri 事件向前端发送进度更新。
 
 use std::path::PathBuf;
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
 /// GitHub  releases 下载 URL（与项目仓库中 VBCABLE_Driver_Pack45.zip 对应）
 const VBCABLE_DOWNLOAD_URL: &str =
@@ -66,8 +66,12 @@ fn verify_pinned_sha256(path: &std::path::Path) -> Result<(), String> {
 /// 下载过程通过 `vbcable:download-progress` 事件实时推送进度。
 /// 返回下载的 zip 文件绝对路径。
 #[tauri::command]
-pub async fn download_vb_cable(app: tauri::AppHandle) -> Result<String, String> {
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+pub async fn download_vb_cable(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, crate::commands::AppState>,
+) -> Result<String, String> {
+    // 下载物属内容数据 → 走内容根（存储契约：不得再自己调 app_data_dir 拼数据路径）
+    let data_dir = state.data_dir.clone();
     let download_dir = data_dir.join("downloads");
     std::fs::create_dir_all(&download_dir)
         .map_err(|e| format!("创建下载目录失败: {e}"))?;
