@@ -15,16 +15,16 @@ use super::favorites;
 /// 判断某条音频路径是否还被引用（出现在 messages 或 favorites 中）。
 ///
 /// `audio_path` 是相对 app_data_dir 的路径，如 "audio/m_xxx.mp3"。
-pub fn is_audio_referenced(data_dir: &Path, audio_path: &str) -> bool {
+pub fn is_audio_referenced(content_dir: &Path, audio_path: &str) -> bool {
     // messages 里有条目的 audio_path == 它
-    if messages::load_messages(data_dir)
+    if messages::load_messages(content_dir)
         .iter()
         .any(|m| m.audio_path == audio_path)
     {
         return true;
     }
     // favorites 里有条目的 audio_path == 它
-    if favorites::load_favorites(data_dir)
+    if favorites::load_favorites(content_dir)
         .iter()
         .any(|f| f.audio_path == audio_path)
     {
@@ -38,11 +38,11 @@ pub fn is_audio_referenced(data_dir: &Path, audio_path: &str) -> bool {
 /// - 文件不存在视为已删（忽略不报错）
 /// - 仍被引用则保留，什么也不做
 /// - 返回是否真的删了文件
-pub fn maybe_delete_audio(data_dir: &Path, audio_path: &str) -> Result<bool> {
-    if is_audio_referenced(data_dir, audio_path) {
+pub fn maybe_delete_audio(content_dir: &Path, audio_path: &str) -> Result<bool> {
+    if is_audio_referenced(content_dir, audio_path) {
         return Ok(false);
     }
-    let abs = data_dir.join(audio_path);
+    let abs = content_dir.join(audio_path);
     match std::fs::remove_file(&abs) {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -56,11 +56,11 @@ mod tests {
     use super::super::types::{Message, Favorite, gen_id, now_iso};
     use tempfile::tempdir;
 
-    /// 在 data_dir/audio/ 下造一个假音频文件，返回其相对路径
-    fn make_fake_audio(data_dir: &Path, name: &str) -> String {
+    /// 在 content_dir/audio/ 下造一个假音频文件，返回其相对路径
+    fn make_fake_audio(content_dir: &Path, name: &str) -> String {
         let rel = format!("audio/{name}.mp3");
-        let abs = data_dir.join(&rel);
-        std::fs::create_dir_all(data_dir.join("audio")).unwrap();
+        let abs = content_dir.join(&rel);
+        std::fs::create_dir_all(content_dir.join("audio")).unwrap();
         std::fs::write(&abs, b"fake audio bytes").unwrap();
         assert!(abs.exists(), "测试前置：假音频必须存在");
         rel

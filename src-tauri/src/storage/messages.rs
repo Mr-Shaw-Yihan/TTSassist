@@ -16,13 +16,13 @@ use super::types::Message;
 
 const FILE: &str = "messages.json";
 
-fn path(data_dir: &Path) -> std::path::PathBuf {
-    data_dir.join(FILE)
+fn path(content_dir: &Path) -> std::path::PathBuf {
+    content_dir.join(FILE)
 }
 
 /// 读全部消息，按存储顺序返回。文件不存在返回空 Vec。
-pub fn load_messages(data_dir: &Path) -> Vec<Message> {
-    let p = path(data_dir);
+pub fn load_messages(content_dir: &Path) -> Vec<Message> {
+    let p = path(content_dir);
     if !p.exists() {
         return Vec::new();
     }
@@ -36,11 +36,11 @@ pub fn load_messages(data_dir: &Path) -> Vec<Message> {
 /// before_id=None 表示取到最新；limit=None/0 表示不限（退化为读全部）。
 /// before_id 不存在时（如已被删）退化为取到最新。返回 (窗口消息, 前面是否还有更早的)。
 pub fn load_messages_page(
-    data_dir: &Path,
+    content_dir: &Path,
     limit: Option<usize>,
     before_id: Option<&str>,
 ) -> (Vec<Message>, bool) {
-    let all = load_messages(data_dir);
+    let all = load_messages(content_dir);
     let end = match before_id {
         Some(id) => all.iter().position(|m| m.id == id).unwrap_or(all.len()),
         None => all.len(),
@@ -53,16 +53,16 @@ pub fn load_messages_page(
 }
 
 /// 追加一条消息并原子写回。
-pub fn add_message(data_dir: &Path, message: Message) -> Result<()> {
-    let mut list = load_messages(data_dir);
+pub fn add_message(content_dir: &Path, message: Message) -> Result<()> {
+    let mut list = load_messages(content_dir);
     list.push(message);
-    write_json_pretty(&path(data_dir), &list)
+    write_json_pretty(&path(content_dir), &list)
 }
 
 /// 删除一条消息：连带(收藏置 None + 音频无引用则删)。
 /// 返回是否真的删了（false 表示没找到该 id）。
-pub fn delete_message(data_dir: &Path, id: &str) -> Result<bool> {
-    let list = load_messages(data_dir);
+pub fn delete_message(content_dir: &Path, id: &str) -> Result<bool> {
+    let list = load_messages(content_dir);
     let target = list.iter().find(|m| m.id == id).cloned();
     let Some(target) = target else {
         return Ok(false);
@@ -70,13 +70,13 @@ pub fn delete_message(data_dir: &Path, id: &str) -> Result<bool> {
 
     // 1. 过滤掉目标，原子写回
     let remaining: Vec<Message> = list.into_iter().filter(|m| m.id != id).collect();
-    write_json_pretty(&path(data_dir), &remaining)?;
+    write_json_pretty(&path(content_dir), &remaining)?;
 
     // 2. 收藏里的来源引用置 None
-    favorites::unlink_favorites_by_message(data_dir, id)?;
+    favorites::unlink_favorites_by_message(content_dir, id)?;
 
     // 3. 该消息音频无引用则删（先落数据再清文件）
-    maybe_delete_audio(data_dir, &target.audio_path)?;
+    maybe_delete_audio(content_dir, &target.audio_path)?;
 
     Ok(true)
 }

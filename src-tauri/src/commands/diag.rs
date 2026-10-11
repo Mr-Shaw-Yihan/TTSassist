@@ -111,7 +111,7 @@ fn render_versions(app: &AppHandle) -> String {
 
 // ── 路径节 ──────────────────────────────────────────
 
-fn render_paths(data_dir: &std::path::Path) -> String {
+fn render_paths(content_dir: &std::path::Path) -> String {
     let log_line = match crate::logging::log_file_path() {
         Some(p) => {
             let (size, mtime) = match std::fs::metadata(&p) {
@@ -133,7 +133,7 @@ fn render_paths(data_dir: &std::path::Path) -> String {
     };
     section(vec![
         "## 路径".into(),
-        format!("data_dir: {}", data_dir.display()),
+        format!("content_dir: {}", content_dir.display()),
         format!("日志文件: {log_line}"),
         format!("诊断日志开关: {}", if crate::logging::is_enabled() { "开启" } else { "关闭" }),
     ])
@@ -403,10 +403,10 @@ fn render_settings_summary(state: &State<AppState>) -> String {
 /// 主机名（COMPUTERNAME / HOSTNAME 及 mdns 实例名同源的 32 字符截断变体）
 /// 受「包含机器名」复选控制；用户名（USERNAME / USERPROFILE 的用户目录段）
 /// **永远脱敏，不在复选范围内**（第一轮 §3.4 C 红线的用户名部分，T-A 收口）。
-/// `data_dir` 的用户段是第三重来源：env 在异常环境（服务化、精简会话）可能读不到，
+/// `content_dir` 的用户段是第三重来源：env 在异常环境（服务化、精简会话）可能读不到，
 /// 那时 USERNAME/USERPROFILE 双双落空会让整条用户名防线**静默失效**，而诊断包里的
 /// 路径节必然含 `...\Users\<账户名>\...`——它才是最可靠的候选来源。
-fn candidate_identities(data_dir: &std::path::Path) -> (Vec<String>, Vec<String>) {
+fn candidate_identities(content_dir: &std::path::Path) -> (Vec<String>, Vec<String>) {
     let mut hosts: Vec<String> = Vec::new();
     for key in ["COMPUTERNAME", "HOSTNAME"] {
         if let Ok(h) = std::env::var(key) {
@@ -423,7 +423,7 @@ fn candidate_identities(data_dir: &std::path::Path) -> (Vec<String>, Vec<String>
             push_identity(&mut users, &seg.to_string_lossy());
         }
     }
-    if let Some(seg) = users_dir_segment(data_dir) {
+    if let Some(seg) = users_dir_segment(content_dir) {
         push_identity(&mut users, &seg);
     }
     (hosts, users)
@@ -582,10 +582,10 @@ pub fn export_diagnostics(
     include_host: Option<bool>,
 ) -> Result<DiagExportResult, String> {
     let include_host = include_host.unwrap_or(false);
-    let (host_cands, user_cands) = candidate_identities(&state.data_dir);
+    let (host_cands, user_cands) = candidate_identities(&state.content_dir);
     // 逐节采集（每节独立兜底）
     let versions = safe_section(|| render_versions(&app));
-    let paths = safe_section(|| render_paths(&state.data_dir));
+    let paths = safe_section(|| render_paths(&state.content_dir));
     let audio = safe_section(render_audio);
     let plugins = safe_section(|| render_plugins(&app));
     let remote = safe_section(|| render_remote(&app, include_host));
@@ -704,11 +704,11 @@ mod tests {
         let scrubbed = scrub_body(paths, false, &[], &["unituser".to_string()]);
         let data_line = scrubbed
             .lines()
-            .find(|l| l.starts_with("data_dir:"))
-            .expect("路径节必有 data_dir 行");
+            .find(|l| l.starts_with("content_dir:"))
+            .expect("路径节必有 content_dir 行");
         assert_eq!(
             data_line,
-            "data_dir: C:\\Users\\<redacted-host>\\AppData\\Roaming\\com.voiceassist.app"
+            "content_dir: C:\\Users\\<redacted-host>\\AppData\\Roaming\\com.voiceassist.app"
         );
         assert!(!scrubbed.contains("unituser"));
     }
@@ -729,11 +729,11 @@ mod tests {
         let scrubbed = scrub_body(paths, false, &hosts, &users);
         let data_line = scrubbed
             .lines()
-            .find(|l| l.starts_with("data_dir:"))
-            .expect("路径节必有 data_dir 行");
+            .find(|l| l.starts_with("content_dir:"))
+            .expect("路径节必有 content_dir 行");
         assert_eq!(
             data_line,
-            "data_dir: C:\\Users\\<redacted-host>\\AppData\\Roaming\\com.voiceassist.app"
+            "content_dir: C:\\Users\\<redacted-host>\\AppData\\Roaming\\com.voiceassist.app"
         );
         assert!(!scrubbed.contains(&user));
     }
@@ -840,17 +840,17 @@ mod tests {
 
     #[test]
     fn 环境变量缺失时由数据目录兜底() {
-        // 不依赖真实 env：只要 data_dir 带用户段，候选集必须含它（env 双落空时的唯一防线）
+        // 不依赖真实 env：只要 content_dir 带用户段，候选集必须含它（env 双落空时的唯一防线）
         let probe = std::path::Path::new("C:\\Users\\probeuserxyz\\AppData\\Roaming\\com.voiceassist.app");
         let (_, users) = candidate_identities(probe);
         assert!(
             users.iter().any(|u| u == "probeuserxyz"),
-            "data_dir 用户段必须成为用户名候选，实际: {users:?}"
+            "content_dir 用户段必须成为用户名候选，实际: {users:?}"
         );
-        // 且不因 env 是否存在而改变结果：同一 data_dir 能独立支撑脱敏
-        let body = "data_dir: C:\\Users\\probeuserxyz\\AppData".to_string();
+        // 且不因 env 是否存在而改变结果：同一 content_dir 能独立支撑脱敏
+        let body = "content_dir: C:\\Users\\probeuserxyz\\AppData".to_string();
         let out = scrub_body(body, false, &[], &users);
-        assert_eq!(out, "data_dir: C:\\Users\\<redacted-host>\\AppData");
+        assert_eq!(out, "content_dir: C:\\Users\\<redacted-host>\\AppData");
     }
 
     // ── T-B：输入设备小节 ──────────────────────────────

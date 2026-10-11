@@ -11,13 +11,13 @@ use super::types::Favorite;
 
 const FILE: &str = "favorites.json";
 
-fn path(data_dir: &Path) -> std::path::PathBuf {
-    data_dir.join(FILE)
+fn path(content_dir: &Path) -> std::path::PathBuf {
+    content_dir.join(FILE)
 }
 
 /// 读全部收藏。文件不存在返回空 Vec。
-pub fn load_favorites(data_dir: &Path) -> Vec<Favorite> {
-    let p = path(data_dir);
+pub fn load_favorites(content_dir: &Path) -> Vec<Favorite> {
+    let p = path(content_dir);
     if !p.exists() {
         return Vec::new();
     }
@@ -29,35 +29,35 @@ pub fn load_favorites(data_dir: &Path) -> Vec<Favorite> {
 
 /// 添加一条收藏并原子写回。
 /// note 不得为空（仅空白也算空），否则报错。
-pub fn add_favorite(data_dir: &Path, favorite: Favorite) -> Result<()> {
+pub fn add_favorite(content_dir: &Path, favorite: Favorite) -> Result<()> {
     if favorite.note.trim().is_empty() {
         return Err(StorageError::EmptyNote);
     }
-    let mut list = load_favorites(data_dir);
+    let mut list = load_favorites(content_dir);
     list.push(favorite);
-    write_json_pretty(&path(data_dir), &list)
+    write_json_pretty(&path(content_dir), &list)
 }
 
 /// 删除一条收藏：音频无引用则删。返回是否真的删了。
-pub fn delete_favorite(data_dir: &Path, id: &str) -> Result<bool> {
-    let list = load_favorites(data_dir);
+pub fn delete_favorite(content_dir: &Path, id: &str) -> Result<bool> {
+    let list = load_favorites(content_dir);
     let target = list.iter().find(|f| f.id == id).cloned();
     let Some(target) = target else {
         return Ok(false);
     };
 
     let remaining: Vec<Favorite> = list.into_iter().filter(|f| f.id != id).collect();
-    write_json_pretty(&path(data_dir), &remaining)?;
+    write_json_pretty(&path(content_dir), &remaining)?;
 
     // 先落数据再清文件
-    maybe_delete_audio(data_dir, &target.audio_path)?;
+    maybe_delete_audio(content_dir, &target.audio_path)?;
 
     Ok(true)
 }
 
 /// 删消息时被调：把所有 source_message_id == message_id 的收藏置 None，原子写回。
-pub fn unlink_favorites_by_message(data_dir: &Path, message_id: &str) -> Result<()> {
-    let list = load_favorites(data_dir);
+pub fn unlink_favorites_by_message(content_dir: &Path, message_id: &str) -> Result<()> {
+    let list = load_favorites(content_dir);
     if list.iter().all(|f| f.source_message_id.as_deref() != Some(message_id)) {
         // 没有需要改的，直接返回，避免无谓写入
         return Ok(());
@@ -71,12 +71,12 @@ pub fn unlink_favorites_by_message(data_dir: &Path, message_id: &str) -> Result<
             f
         })
         .collect();
-    write_json_pretty(&path(data_dir), &updated)
+    write_json_pretty(&path(content_dir), &updated)
 }
 
 /// 设置某收藏的快捷键（hotkey=None 表示移除）。返回更新后的完整收藏列表。
-pub fn set_favorite_hotkey(data_dir: &Path, id: &str, hotkey: Option<String>) -> Result<Vec<Favorite>> {
-    let list = load_favorites(data_dir);
+pub fn set_favorite_hotkey(content_dir: &Path, id: &str, hotkey: Option<String>) -> Result<Vec<Favorite>> {
+    let list = load_favorites(content_dir);
     let updated: Vec<Favorite> = list
         .into_iter()
         .map(|mut f| {
@@ -86,7 +86,7 @@ pub fn set_favorite_hotkey(data_dir: &Path, id: &str, hotkey: Option<String>) ->
             f
         })
         .collect();
-    write_json_pretty(&path(data_dir), &updated)?;
+    write_json_pretty(&path(content_dir), &updated)?;
     Ok(updated)
 }
 

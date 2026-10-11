@@ -206,7 +206,7 @@ fn write_out(out: *mut *mut c_char, s: String) {
 pub fn play_favorite_by_id(app: &AppHandle, id: &str) -> Result<(), String> {    let state = app
         .try_state::<crate::commands::AppState>()
         .ok_or("宿主状态未就绪")?;
-    let favorites = crate::storage::favorites::load_favorites(&state.data_dir);
+    let favorites = crate::storage::favorites::load_favorites(&state.content_dir);
     let fav = favorites
         .into_iter()
         .find(|f| f.id == id)
@@ -219,7 +219,7 @@ pub fn play_favorite_by_id(app: &AppHandle, id: &str) -> Result<(), String> {   
     };
     if enabled && !device.is_empty() {
         if let Some(mic) = app.try_state::<MicPlayback>() {
-            let abs = state.data_dir.join(&fav.audio_path);
+            let abs = state.content_dir.join(&fav.audio_path);
             mic.play(abs, device, volume);
         }
     }
@@ -243,7 +243,7 @@ pub fn state_json(app: &AppHandle) -> String {
 
     let playing_id = playing_path.as_deref().and_then(|path| {
         let state = app.try_state::<crate::commands::AppState>()?;
-        let favs = crate::storage::favorites::load_favorites(&state.data_dir);
+        let favs = crate::storage::favorites::load_favorites(&state.content_dir);
         favs.into_iter().find(|f| f.audio_path == path).map(|f| f.id)
     });
 
@@ -261,7 +261,7 @@ pub fn state_json(app: &AppHandle) -> String {
 pub fn native_list_favorites(app: &AppHandle) -> String {
     let list = app
         .try_state::<crate::commands::AppState>()
-        .map(|s| crate::storage::favorites::load_favorites(&s.data_dir))
+        .map(|s| crate::storage::favorites::load_favorites(&s.content_dir))
         .unwrap_or_default();
     let items: Vec<serde_json::Value> = list
         .iter()

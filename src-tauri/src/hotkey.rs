@@ -252,7 +252,7 @@ fn register_favorite_hotkey(app: &AppHandle, hotkey: &str, audio_path: String) -
                 };
                 if enabled && !device.is_empty() {
                     if let Some(mic) = app.try_state::<MicPlayback>() {
-                        let abs = state.data_dir.join(&audio_path);
+                        let abs = state.content_dir.join(&audio_path);
                         mic.play(abs, device, volume);
                     }
                 }
@@ -331,7 +331,7 @@ pub fn find_accel_conflict(app_state: &AppState, accel: &str, exclude_key: Optio
     if exclude_key != Some("subtitle_pause_hotkey") && !s.subtitle_pause_hotkey.is_empty() && s.subtitle_pause_hotkey == accel {
         return Some("字幕监听开关".to_string());
     }
-    let favorites = crate::storage::favorites::load_favorites(&app_state.data_dir);
+    let favorites = crate::storage::favorites::load_favorites(&app_state.content_dir);
     favorites
         .iter()
         .find(|f| f.hotkey.as_deref() == Some(accel))

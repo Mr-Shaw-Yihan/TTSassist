@@ -37,7 +37,7 @@ pub async fn generate_tts_impl(app: &AppHandle, text: &str) -> Result<Message, S
     let _synth_flag = SynthesizingFlag(app.clone());
     crate::plugins::bridge::set_synthesizing(app, true);
 
-    let data_dir = state.data_dir.clone();
+    let content_dir = state.content_dir.clone();
 
     // 1. 读设置
     let (tts_engine, moss_key, moss_voice, plugin_voices, mic_send_enabled, mic_device, mic_volume) = {
@@ -65,13 +65,13 @@ pub async fn generate_tts_impl(app: &AppHandle, text: &str) -> Result<Message, S
             if moss_voice.is_empty() {
                 return Err("请在设置中填写 Moss-TTS voice_id".into());
             }
-            let engine = MossEngine::new(moss_key, moss_voice, data_dir.clone());
+            let engine = MossEngine::new(moss_key, moss_voice, content_dir.clone());
             engine.generate(&text).await.map_err(|e| format!("{e}"))?
         }
         plugin_id => {
             // 其余引擎名按插件 id 查找
             let engine = plugins
-                .build_engine(plugin_id, &data_dir)
+                .build_engine(plugin_id, &content_dir)
                 .ok_or_else(|| {
                     format!("引擎「{plugin_id}」不可用：插件未安装或加载失败，请在插件管理中检查")
                 })?;
@@ -114,7 +114,7 @@ pub async fn generate_tts_impl(app: &AppHandle, text: &str) -> Result<Message, S
         created_at: now_iso(),
     };
     let result = message.clone();
-    crate::storage::messages::add_message(&data_dir, message)
+    crate::storage::messages::add_message(&content_dir, message)
         .map_err(|e| format!("保存消息失败: {e}"))?;
 
     // 4. 广播事件
@@ -122,7 +122,7 @@ pub async fn generate_tts_impl(app: &AppHandle, text: &str) -> Result<Message, S
 
     // 5. 全局开关开启且配置了麦克风设备 → 同时发到虚拟麦克风（扬声器播放由前端负责）
     if mic_send_enabled && !mic_device.is_empty() {
-        let abs = data_dir.join(&result.audio_path);
+        let abs = content_dir.join(&result.audio_path);
         mic.play(abs, mic_device, mic_volume);
     }
 

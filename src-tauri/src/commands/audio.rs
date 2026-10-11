@@ -7,7 +7,7 @@ use tauri::{AppHandle, State};
 use crate::commands::AppState;
 
 /// 接收 messages/favorites 中存的相对音频路径（如 "audio/m_xxx.wav"），
-/// 拼上 data_dir 返回绝对路径。
+/// 拼上 content_dir 返回绝对路径。
 ///
 /// `_apply_fx`：历史参数（效果器已移除），保留以兼容前端既有调用（revealAudio 显式传 false）。
 #[tauri::command]
@@ -17,5 +17,5 @@ pub async fn resolve_audio_url(
     _app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    Ok(state.data_dir.join(&rel_path).to_string_lossy().into_owned())
+    Ok(state.content_dir.join(&rel_path).to_string_lossy().into_owned())
 }

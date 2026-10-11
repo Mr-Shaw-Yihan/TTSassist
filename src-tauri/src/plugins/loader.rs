@@ -110,15 +110,15 @@ impl LoadedPlugin {
         // 1.5 为插件准备数据目录并通过环境变量告知（本地模型类插件在此放模型/缓存）。
         // 变量名按插件 id 区分（大写、连字符转下划线），多插件互不覆盖；
         // 加载是串行进行的，此处 set_var 无并发问题。插件应在初始化时读取并缓存。
-        let data_dir = plugin_data_dir_for(plugin_dir, &manifest.id);
-        if let Err(e) = std::fs::create_dir_all(&data_dir) {
+        let content_dir = plugin_data_dir_for(plugin_dir, &manifest.id);
+        if let Err(e) = std::fs::create_dir_all(&content_dir) {
             log_warn!("提示：插件「{}」数据目录创建失败: {e}", manifest.id);
         }
         let env_key = format!(
             "VA_PLUGIN_DATA_DIR_{}",
             manifest.id.to_ascii_uppercase().replace('-', "_")
         );
-        std::env::set_var(&env_key, &data_dir);
+        std::env::set_var(&env_key, &content_dir);
 
         // 2. SHA-256 校验 dll
         let dll_path = plugin_dir.join(&manifest.entry);
@@ -631,12 +631,12 @@ pub fn sha256_file(path: &Path) -> Result<String, PluginError> {
 /// 把已加载插件包装成 TTSEngine：合成 → 写 audio/ 目录 → 返回相对路径
 pub struct PluginEngine {
     plugin: Arc<LoadedPlugin>,
-    data_dir: PathBuf,
+    content_dir: PathBuf,
 }
 
 impl PluginEngine {
-    pub fn new(plugin: Arc<LoadedPlugin>, data_dir: PathBuf) -> Self {
-        Self { plugin, data_dir }
+    pub fn new(plugin: Arc<LoadedPlugin>, content_dir: PathBuf) -> Self {
+        Self { plugin, content_dir }
     }
 }
 
@@ -691,7 +691,7 @@ impl TTSEngine for PluginEngine {
         let ext = if ext.is_empty() { "mp3" } else { ext };
         let id = gen_id("m");
         let rel_path = format!("audio/{id}.{ext}");
-        let abs = self.data_dir.join(&rel_path);
+        let abs = self.content_dir.join(&rel_path);
         if let Some(parent) = abs.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| TtsError::WriteFile(format!("创建目录失败: {e}")))?;
@@ -906,15 +906,15 @@ impl LoadedServicePlugin {
         manifest.validate(app_version)?;
 
         // 2. 数据目录环境变量（与 TTS/ASR 插件同约定）
-        let data_dir = plugin_data_dir_for(plugin_dir, &manifest.id);
-        if let Err(e) = std::fs::create_dir_all(&data_dir) {
+        let content_dir = plugin_data_dir_for(plugin_dir, &manifest.id);
+        if let Err(e) = std::fs::create_dir_all(&content_dir) {
             log_warn!("提示：插件「{}」数据目录创建失败: {e}", manifest.id);
         }
         let env_key = format!(
             "VA_PLUGIN_DATA_DIR_{}",
             manifest.id.to_ascii_uppercase().replace('-', "_")
         );
-        std::env::set_var(&env_key, &data_dir);
+        std::env::set_var(&env_key, &content_dir);
 
         // 3. SHA-256 校验 dll
         let dll_path = plugin_dir.join(&manifest.entry);
@@ -1008,15 +1008,15 @@ impl LoadedFxPlugin {
         manifest.validate(app_version)?;
 
         // 2. 数据目录环境变量（与其它类型同约定；效果器通常用不到，保持一致性）
-        let data_dir = plugin_data_dir_for(plugin_dir, &manifest.id);
-        if let Err(e) = std::fs::create_dir_all(&data_dir) {
+        let content_dir = plugin_data_dir_for(plugin_dir, &manifest.id);
+        if let Err(e) = std::fs::create_dir_all(&content_dir) {
             log_warn!("提示：插件「{}」数据目录创建失败: {e}", manifest.id);
         }
         let env_key = format!(
             "VA_PLUGIN_DATA_DIR_{}",
             manifest.id.to_ascii_uppercase().replace('-', "_")
         );
-        std::env::set_var(&env_key, &data_dir);
+        std::env::set_var(&env_key, &content_dir);
 
         // 3. SHA-256 校验 dll
         let dll_path = plugin_dir.join(&manifest.entry);

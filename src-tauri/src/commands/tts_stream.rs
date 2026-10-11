@@ -174,7 +174,7 @@ pub async fn generate_tts_stream_impl(
     let _synth_flag = SynthesizingFlag(app.clone());
     crate::plugins::bridge::set_synthesizing(&app, true);
 
-    let data_dir = app.state::<AppState>().data_dir.clone();
+    let content_dir = app.state::<AppState>().content_dir.clone();
 
     // 2. 打开流式会话（连接+握手；blocking 线程执行）
     let voice = plugin_voices
@@ -230,9 +230,9 @@ pub async fn generate_tts_stream_impl(
     // （旧实现文件名用 fid、消息另取一个 id，同一段音频会有两个名字）。
     let msg_id = gen_id("m");
     let (wav_rel, tmp_name) = stream_paths_for(&msg_id);
-    std::fs::create_dir_all(crate::storage::paths::audio_dir_in(&data_dir))
+    std::fs::create_dir_all(crate::storage::paths::audio_dir_in(&content_dir))
         .map_err(|e| format!("创建音频目录失败: {e}"))?;
-    let tmp_pcm = data_dir.join(&tmp_name);
+    let tmp_pcm = content_dir.join(&tmp_name);
 
     let (ack_tx, ack_rx) = channel();
     let has_mic_target = mic_send_enabled && !mic_device.is_empty();
@@ -351,7 +351,7 @@ pub async fn generate_tts_stream_impl(
     }
 
     // 5. PCM → WAV 归档（历史记录可整段重播）
-    if let Err(e) = finalize_wav(&tmp_pcm, &data_dir.join(&wav_rel), sample_rate, channels) {
+    if let Err(e) = finalize_wav(&tmp_pcm, &content_dir.join(&wav_rel), sample_rate, channels) {
         cleanup_failed_stream(&app, &plugin, &session, &tmp_pcm);
         return Err(e);
     }
@@ -365,7 +365,7 @@ pub async fn generate_tts_stream_impl(
         audio_path: wav_rel,
         created_at: now_iso(),
     };
-    crate::storage::messages::add_message(&data_dir, message.clone())
+    crate::storage::messages::add_message(&content_dir, message.clone())
         .map_err(|e| format!("保存消息失败: {e}"))?;
     notify_changed(&app, EVENT_MESSAGE_CHANGED);
 

@@ -28,8 +28,8 @@ pub fn import_clone_voice(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let data_dir = &state.data_dir;
-    // 样本文件属内容（data_dir），而两次设置回写属配置（config_dir）——
+    let content_dir = &state.content_dir;
+    // 样本文件属内容（content_dir），而两次设置回写属配置（config_dir）——
     // 两者在翻默认前是同一个目录，但归属必须现在就分清
     let config_dir = &state.config_dir;
     let src = Path::new(&file_path);
@@ -51,7 +51,7 @@ pub fn import_clone_voice(
         return Err("样本仅支持 mp3 / wav / m4a / flac / ogg 格式".into());
     }
 
-    let target_dir = crate::storage::paths::samples_dir_in(data_dir);
+    let target_dir = crate::storage::paths::samples_dir_in(content_dir);
     std::fs::create_dir_all(&target_dir).map_err(|e| format!("创建样本目录失败: {e}"))?;
 
     // 若已存在旧样本，先移除文件
@@ -61,13 +61,13 @@ pub fn import_clone_voice(
             .read()
             .map_err(|e| format!("读取设置失败: {e}"))?;
         if !s.clone_voice_path.is_empty() {
-            let old = data_dir.join(&s.clone_voice_path);
+            let old = content_dir.join(&s.clone_voice_path);
             let _ = std::fs::remove_file(&old);
         }
     }
 
     let rel_path = crate::storage::paths::samples_rel("clone", &ext);
-    let dest = data_dir.join(&rel_path);
+    let dest = content_dir.join(&rel_path);
     std::fs::copy(src, &dest).map_err(|e| format!("复制样本失败: {e}"))?;
     // 文件一落地就告知插件：复制成功而后续设置写入失败时，磁盘上已经有样本，
     // 让 env 与文件保持同一时序，插件不会出现「有样本文件却读不到路径」
@@ -100,7 +100,7 @@ pub fn remove_clone_voice(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    let data_dir = &state.data_dir;
+    let content_dir = &state.content_dir;
     let config_dir = &state.config_dir;
 
     let old_path = {
@@ -112,7 +112,7 @@ pub fn remove_clone_voice(
     };
 
     if !old_path.is_empty() {
-        let _ = std::fs::remove_file(data_dir.join(&old_path));
+        let _ = std::fs::remove_file(content_dir.join(&old_path));
     }
 
     crate::storage::settings::update_setting(config_dir, "clone_voice_path", serde_json::json!(""))

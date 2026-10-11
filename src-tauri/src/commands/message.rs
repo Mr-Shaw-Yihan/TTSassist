@@ -21,7 +21,7 @@ pub fn list_messages(
     state: State<'_, AppState>,
 ) -> MessagePage {
     let (messages, has_more) = crate::storage::messages::load_messages_page(
-        &state.data_dir,
+        &state.content_dir,
         limit,
         before_id.as_deref(),
     );
@@ -35,8 +35,8 @@ pub fn delete_message(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<bool, String> {
-    let data_dir = &state.data_dir;
-    let result = crate::storage::messages::delete_message(data_dir, &id)
+    let content_dir = &state.content_dir;
+    let result = crate::storage::messages::delete_message(content_dir, &id)
         .map_err(|e| format!("删除消息失败: {e}"))?;
     if result {
         notify_changed(&app, EVENT_MESSAGE_CHANGED);

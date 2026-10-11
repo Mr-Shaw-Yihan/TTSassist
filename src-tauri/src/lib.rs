@@ -88,8 +88,8 @@ fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths
 
 /// 首次运行迁移：把旧 APPDATA 下的插件复制到新位置（exe 同级 plugins/）。
 /// 旧目录保留不删（安全起见）；新位置已有 registry.json 则跳过（避免覆盖）。
-fn migrate_plugins_if_needed(data_dir: &std::path::Path, plugins_root: &std::path::Path) {
-    let old_root = data_dir.join("plugins");
+fn migrate_plugins_if_needed(content_dir: &std::path::Path, plugins_root: &std::path::Path) {
+    let old_root = content_dir.join("plugins");
     let old_registry = old_root.join("registry.json");
     let new_registry = plugins_root.join("registry.json");
 
@@ -156,8 +156,8 @@ pub fn run() {
             // 三根在此一次解析；下面所有路径都从 paths 来（存储契约）
             let paths = resolve_storage_paths(app.handle());
             app.manage(paths.clone());
-            let (config_dir, data_dir) = (paths.config_root.clone(), paths.content_root.clone());
-            storage::ensure_data_dirs(&data_dir)?;
+            let (config_dir, content_dir) = (paths.config_root.clone(), paths.content_root.clone());
+            storage::ensure_data_dirs(&content_dir)?;
 
             // 兼容迁移：老设置里的内置引擎标识 → 对应插件 id（幂等，直接改文件）
             // settings.json 属配置 → 走配置根
@@ -182,7 +182,7 @@ pub fn run() {
             // 为什么不能只改 tauri.conf.json：内容根是 `VA_STORAGE_DIR` > storage.json 指针 >
             // `<exe>\data` > 不可写时回退 LOCALAPPDATA 动态定出来的，静态配置表达不了“它今天是谁”。
             // $APPDATA/** 仍保留在配置里：用急救程序把指针指回配置根（旧布局）时靠它。
-            if let Err(e) = app.asset_protocol_scope().allow_directory(&data_dir, true) {
+            if let Err(e) = app.asset_protocol_scope().allow_directory(&content_dir, true) {
                 log_warn!("放行内容根的 asset 访问失败，历史音频可能无法回放: {e}");
             }
 
@@ -227,7 +227,7 @@ pub fn run() {
                 let sample_abs: Option<std::path::PathBuf> = if settings.clone_voice_path.is_empty() {
                     None
                 } else {
-                    let p = data_dir.join(&settings.clone_voice_path);
+                    let p = content_dir.join(&settings.clone_voice_path);
                     p.exists().then_some(p)
                 };
                 match sample_abs {
@@ -246,7 +246,7 @@ pub fn run() {
             // 收藏播放、停止播放等能力依赖二者，插件 attach 时必须已就绪
             app.manage(AppState::new(
                 config_dir.clone(),
-                data_dir.clone(),
+                content_dir.clone(),
                 settings.clone(),
             ));
             app.manage(crate::commands::mic::MicPlayback::spawn());
@@ -280,13 +280,13 @@ pub fn run() {
             // 远程配置预热：后台拉一次并写本地缓存，供 get_plugin_config 的 help_url
             // 覆盖读取（那条命令是同步的、不能联网）。失败静默，不阻塞启动。
             // ⚠ 必须用配置根：缓存的读侧（get_remote_config / effective_help_url）走的是
-            // state.config_dir。之前这里传的是 data_dir（内容根），翻默认前两根相等看不出来，
+            // state.config_dir。之前这里传的是 content_dir（内容根），翻默认前两根相等看不出来，
             // 翻完就变成“写在一个文件、读另一个”——远程 help_url 覆盖会静默失效。
             commands::remote::prime_cache(config_dir.clone());
 
             // 移动端遥控（本体常驻服务）：WS 服务 + mDNS 广播。须在 HostBridge/AppState/
             // MicPlayback 就绪后启动（native_* 能力依赖三者）；RemoteCore 供 remote_session_info 读取
-            let remote_shared = remote::spawn(app.handle().clone(), data_dir.clone());
+            let remote_shared = remote::spawn(app.handle().clone(), content_dir.clone());
             app.manage(remote::RemoteCore::new(remote_shared));
 
             // 字幕监听运行态（采集/VAD/ASR 编排会话的启停与历史）
@@ -376,8 +376,8 @@ pub fn run() {
                 current: Mutex::new(sp_ok.then_some(sp_accel)),
             });
 
-            // 加载收藏用于注册收藏快捷键（data_dir 随后移入 AppState）
-            let favorites = storage::favorites::load_favorites(&data_dir);
+            // 加载收藏用于注册收藏快捷键（content_dir 随后移入 AppState）
+            let favorites = storage::favorites::load_favorites(&content_dir);
 
             // 悬浮球启动序列：球窗先出播 progress（主窗 visible=false 延迟到 va:boot:done）。
             // 位置：有保存值用保存值，否则主显示器居中；窗口尺寸 = 球径×1.5 画布。
@@ -414,7 +414,7 @@ pub fn run() {
                 // 直播伴侣形态：浮窗永久挂 WS_EX_NOACTIVATE——点击只送达鼠标消息、
                 // 不激活窗口，前台永远是游戏；打字靠 SetFocus webview 子窗口建立键盘路由。
                 crate::win32::set_no_activate(&qi, true);
-                let log_dir = data_dir.clone(); // data_dir 之后还要移入 AppState，先克隆
+                let log_dir = content_dir.clone(); // content_dir 之后还要移入 AppState，先克隆
                 qi.on_window_event(move |event| {
                     if let tauri::WindowEvent::Focused(focused) = event {
                         let (hwnd, title) = crate::win32::foreground_info();

@@ -13,12 +13,12 @@ use crate::tts::traits::TtsError;
 pub struct MossEngine {
     api_key: String,
     voice_id: String,
-    data_dir: PathBuf,
+    content_dir: PathBuf,
 }
 
 impl MossEngine {
-    pub fn new(api_key: String, voice_id: String, data_dir: PathBuf) -> Self {
-        Self { api_key, voice_id, data_dir }
+    pub fn new(api_key: String, voice_id: String, content_dir: PathBuf) -> Self {
+        Self { api_key, voice_id, content_dir }
     }
 
     /// 构造请求体
@@ -111,7 +111,7 @@ impl MossEngine {
         // 4. 存为 mp3
         let id = gen_id("m");
         let rel_path = crate::storage::paths::audio_rel(&id, "mp3");
-        let abs_path = self.data_dir.join(&rel_path);
+        let abs_path = self.content_dir.join(&rel_path);
         if let Some(parent) = abs_path.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| TtsError::WriteFile(format!("创建目录失败: {e}")))?;

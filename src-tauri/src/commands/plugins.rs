@@ -552,14 +552,14 @@ fn clean_failed_resources_inner(plugins_root: &Path, plugin_id: &str) -> Result<
     {
         return Err(format!("非法插件 id：{plugin_id}"));
     }
-    let data_dir =
+    let content_dir =
         crate::plugins::loader::plugin_data_dir_for(&plugins_root.join(plugin_id), plugin_id);
-    if !data_dir.exists() {
+    if !content_dir.exists() {
         return Ok("没有需要清除的失败资源".to_string());
     }
     let mut removed = Vec::new();
     for name in ["GenieData", ".dl", ".dl-cache"] {
-        let p = data_dir.join(name);
+        let p = content_dir.join(name);
         if p.exists() {
             std::fs::remove_dir_all(&p)
                 .map_err(|e| format!("清除 {name} 失败（可能有进程占用，请关闭应用后重试）: {e}"))?;

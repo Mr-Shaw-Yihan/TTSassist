@@ -76,7 +76,7 @@ impl CacheFile {
 }
 
 /// 缓存文件路径。参数**必须是配置根**（与 settings 同族）：本模块的函数参数都叫
-/// `config_dir` 而不叫 `data_dir`，因为两个根都是 `PathBuf`、编译器分不清，
+/// `config_dir` 而不叫 `content_dir`，因为两个根都是 `PathBuf`、编译器分不清，
 /// 而一旦写错就是“存一个文件、读另一个”的静默失效（翻默认时实测踩过）。
 fn cache_path(config_dir: &Path) -> PathBuf {
     config_dir.join("remote-config-cache.json")

@@ -13,7 +13,7 @@ use crate::sync::{notify_changed, EVENT_FAVORITE_CHANGED};
 /// 读取全部收藏。
 #[tauri::command]
 pub fn list_favorites(state: State<'_, AppState>) -> Vec<Favorite> {
-    crate::storage::favorites::load_favorites(&state.data_dir)
+    crate::storage::favorites::load_favorites(&state.content_dir)
 }
 
 /// 从消息添加收藏：通过 source_message_id 找到原消息音频路径，
@@ -26,10 +26,10 @@ pub fn add_favorite(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Favorite, String> {
-    let data_dir = &state.data_dir;
+    let content_dir = &state.content_dir;
 
     // 查找源消息获取 audio_path
-    let messages = crate::storage::messages::load_messages(data_dir);
+    let messages = crate::storage::messages::load_messages(content_dir);
     let msg = messages
         .iter()
         .find(|m| m.id == source_message_id)
@@ -45,7 +45,7 @@ pub fn add_favorite(
     };
 
     let result = fav.clone();
-    crate::storage::favorites::add_favorite(data_dir, fav)
+    crate::storage::favorites::add_favorite(content_dir, fav)
         .map_err(|e| format!("{e}"))?;
 
     notify_changed(&app, EVENT_FAVORITE_CHANGED);
@@ -61,12 +61,12 @@ pub fn delete_favorite(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    let data_dir = &state.data_dir;
-    let result = crate::storage::favorites::delete_favorite(data_dir, &id)
+    let content_dir = &state.content_dir;
+    let result = crate::storage::favorites::delete_favorite(content_dir, &id)
         .map_err(|e| format!("删除收藏失败: {e}"))?;
     if result {
         // 刷新快捷键注册：注销已删收藏残留的全局快捷键
-        let remaining = crate::storage::favorites::load_favorites(data_dir);
+        let remaining = crate::storage::favorites::load_favorites(content_dir);
         crate::hotkey::refresh_favorite_hotkeys(&app, &remaining)?;
         notify_changed(&app, EVENT_FAVORITE_CHANGED);
     }
@@ -84,7 +84,7 @@ pub fn import_favorite(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Favorite, String> {
-    let data_dir = &state.data_dir;
+    let content_dir = &state.content_dir;
     let src = Path::new(&file_path);
 
     // 取扩展名（小写），无扩展名默认 mp3
@@ -97,7 +97,7 @@ pub fn import_favorite(
     // 生成收藏 id 与目标文件名
     let id = gen_id("f");
     let rel_path = crate::storage::paths::audio_rel(&id, &ext);
-    let dest = data_dir.join(&rel_path);
+    let dest = content_dir.join(&rel_path);
 
     // 确保目录存在
     if let Some(parent) = dest.parent() {
@@ -118,7 +118,7 @@ pub fn import_favorite(
     };
 
     let result = fav.clone();
-    crate::storage::favorites::add_favorite(data_dir, fav)
+    crate::storage::favorites::add_favorite(content_dir, fav)
         .map_err(|e| format!("{e}"))?;
 
     notify_changed(&app, EVENT_FAVORITE_CHANGED);
@@ -147,23 +147,23 @@ pub fn set_favorite_hotkey(
     }
 
     // 冲突检测 2：与其它收藏的快捷键相同
-    let favorites = crate::storage::favorites::load_favorites(&state.data_dir);
+    let favorites = crate::storage::favorites::load_favorites(&state.content_dir);
     let conflict = favorites
         .iter()
         .find(|f| f.id != id && f.hotkey.as_deref() == Some(hotkey.as_str()));
     let updated = match (conflict, takeover.unwrap_or(false)) {
         (Some(f), true) => {
             // 接管：先解绑冲突收藏的快捷键，再绑定当前收藏
-            crate::storage::favorites::set_favorite_hotkey(&state.data_dir, &f.id, None)
+            crate::storage::favorites::set_favorite_hotkey(&state.content_dir, &f.id, None)
                 .map_err(|e| format!("{e}"))?;
-            crate::storage::favorites::set_favorite_hotkey(&state.data_dir, &id, Some(hotkey))
+            crate::storage::favorites::set_favorite_hotkey(&state.content_dir, &id, Some(hotkey))
                 .map_err(|e| format!("{e}"))?
         }
         (Some(f), false) => {
             return Err(format!("与收藏「{}」的快捷键冲突，请换一个", f.note));
         }
         (None, _) => crate::storage::favorites::set_favorite_hotkey(
-            &state.data_dir,
+            &state.content_dir,
             &id,
             Some(hotkey),
         )
@@ -185,7 +185,7 @@ pub fn remove_favorite_hotkey(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<Vec<Favorite>, String> {
-    let updated = crate::storage::favorites::set_favorite_hotkey(&state.data_dir, &id, None)
+    let updated = crate::storage::favorites::set_favorite_hotkey(&state.content_dir, &id, None)
         .map_err(|e| format!("{e}"))?;
 
     crate::hotkey::refresh_favorite_hotkeys(&app, &updated)?;

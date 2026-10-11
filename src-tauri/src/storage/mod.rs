@@ -19,10 +19,10 @@ use atomic::Result;
 /// 子目录名字只来自 `paths`（存储契约：路径不得在业务代码里拼字面量）。
 /// 通常在应用启动时调用一次。
 /// 注意：阶段 22 起 plugins 目录不再在此创建（位于 exe 同级，由 PluginManager 管理）。
-pub fn ensure_data_dirs(data_dir: &Path) -> Result<()> {
-    std::fs::create_dir_all(data_dir)?;
-    std::fs::create_dir_all(paths::audio_dir_in(data_dir))?;
-    std::fs::create_dir_all(paths::samples_dir_in(data_dir))?;
+pub fn ensure_data_dirs(content_dir: &Path) -> Result<()> {
+    std::fs::create_dir_all(content_dir)?;
+    std::fs::create_dir_all(paths::audio_dir_in(content_dir))?;
+    std::fs::create_dir_all(paths::samples_dir_in(content_dir))?;
     Ok(())
 }
 

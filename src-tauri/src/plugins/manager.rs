@@ -250,7 +250,7 @@ impl PluginManager {
         loaded_ids
     }
 
-    /// 插件根目录（<data_dir>/plugins）
+    /// 插件根目录（<content_dir>/plugins）
     pub fn plugins_root(&self) -> &Path {
         &self.plugins_root
     }
@@ -544,8 +544,8 @@ impl PluginManager {
     }
 
     /// 把插件包装成 TTS 引擎；插件未加载返回 None
-    pub fn build_engine(&self, id: &str, data_dir: &Path) -> Option<PluginEngine> {
-        self.get(id).map(|p| PluginEngine::new(p, data_dir.to_path_buf()))
+    pub fn build_engine(&self, id: &str, content_dir: &Path) -> Option<PluginEngine> {
+        self.get(id).map(|p| PluginEngine::new(p, content_dir.to_path_buf()))
     }
 
     /// 已安装插件列表（含加载失败的），供插件管理页展示
@@ -705,10 +705,10 @@ impl PluginManager {
         // 2.5 只有用户显选了“删除引擎数据”才动 plugin-data（默认保留）
         if delete_data {
             if let Some(root) = crate::plugins::loader::plugin_data_root() {
-                let data_dir = root.join(id);
-                if data_dir.exists() {
-                    let freed = crate::storage::paths::dir_size(&data_dir);
-                    match std::fs::remove_dir_all(&data_dir) {
+                let content_dir = root.join(id);
+                if content_dir.exists() {
+                    let freed = crate::storage::paths::dir_size(&content_dir);
+                    match std::fs::remove_dir_all(&content_dir) {
                         Ok(()) => log_info!(
                             "已删除插件「{id}」的引擎数据（释放 {} MB）",
                             freed / (1024 * 1024)
@@ -978,12 +978,12 @@ mod tests {
     }
 
     /// 在临时目录布置一个可加载的 test-plugin（dll + manifest + registry）
-    fn install_test_plugin(data_dir: &Path, checksum_override: Option<&str>) {
+    fn install_test_plugin(content_dir: &Path, checksum_override: Option<&str>) {
         use crate::plugins::loader::sha256_file;
         use crate::plugins::registry::{Registry, RegistryEntry};
 
         let dll_src = build_test_plugin_dll();
-        let plugin_dir = data_dir.join("plugins/test-plugin");
+        let plugin_dir = content_dir.join("plugins/test-plugin");
         std::fs::create_dir_all(&plugin_dir).unwrap();
         std::fs::copy(&dll_src, plugin_dir.join("plugin.dll")).unwrap();
 
@@ -1016,7 +1016,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        registry::save_registry(&data_dir.join("plugins"), &reg).unwrap();
+        registry::save_registry(&content_dir.join("plugins"), &reg).unwrap();
     }
 
     #[test]
@@ -1098,8 +1098,8 @@ mod tests {
 
         // 数据目录环境变量应在加载时注入（指向 <插件目录>/data）
         let env_key = "VA_PLUGIN_DATA_DIR_GENIE_TTS";
-        let data_dir = std::env::var(env_key).expect("数据目录环境变量应已注入");
-        assert!(data_dir.ends_with("data"), "数据目录应以 data 结尾: {data_dir}");
+        let content_dir = std::env::var(env_key).expect("数据目录环境变量应已注入");
+        assert!(content_dir.ends_with("data"), "数据目录应以 data 结尾: {content_dir}");
 
         // 动态音色表：应含预置角色（磁盘扫描 + 内置清单，不触发网络）
         let voices_json = plugin.query_voices_json();

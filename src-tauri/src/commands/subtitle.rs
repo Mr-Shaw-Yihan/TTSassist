@@ -86,30 +86,30 @@ pub const SUBTITLE_STATE_EVENT: &str = "subtitle:state";
 
 // ── 历史落盘 ────────────────────────────────────
 
-fn history_path(data_dir: &Path) -> PathBuf {
-    data_dir.join(HISTORY_FILE)
+fn history_path(content_dir: &Path) -> PathBuf {
+    content_dir.join(HISTORY_FILE)
 }
 
-fn load_history(data_dir: &Path) -> Vec<SubtitleSession> {
-    let p = history_path(data_dir);
+fn load_history(content_dir: &Path) -> Vec<SubtitleSession> {
+    let p = history_path(content_dir);
     std::fs::read_to_string(&p)
         .ok()
         .and_then(|s| serde_json::from_str::<Vec<SubtitleSession>>(&s).ok())
         .unwrap_or_default()
 }
 
-fn save_history(data_dir: &Path, sessions: &[SubtitleSession]) {
-    let p = history_path(data_dir);
+fn save_history(content_dir: &Path, sessions: &[SubtitleSession]) {
+    let p = history_path(content_dir);
     if let Ok(json) = serde_json::to_string_pretty(sessions) {
         let _ = std::fs::write(p, json);
     }
 }
 
 /// 把内存历史首次访问时从盘载入（幂等：已加载则不覆盖）。
-fn ensure_history_loaded(state: &SubtitleState, data_dir: &Path) {
+fn ensure_history_loaded(state: &SubtitleState, content_dir: &Path) {
     if let Ok(mut g) = state.sessions.lock() {
         if g.is_empty() {
-            *g = load_history(data_dir);
+            *g = load_history(content_dir);
         }
     }
 }
@@ -275,11 +275,11 @@ fn stop_impl(app: &AppHandle) -> Result<(), String> {
             process: session.process,
             lines,
         };
-        ensure_history_loaded(&state, &app_state.data_dir);
+        ensure_history_loaded(&state, &app_state.content_dir);
         if let Ok(mut g) = state.sessions.lock() {
             g.insert(0, record);
             g.truncate(MAX_SESSIONS);
-            save_history(&app_state.data_dir, &g);
+            save_history(&app_state.content_dir, &g);
         }
     }
 
@@ -352,7 +352,7 @@ pub fn get_subtitle_sessions(
     state: State<'_, SubtitleState>,
     app_state: State<'_, AppState>,
 ) -> Vec<SubtitleSession> {
-    ensure_history_loaded(&state, &app_state.data_dir);
+    ensure_history_loaded(&state, &app_state.content_dir);
     state.sessions.lock().map(|g| g.clone()).unwrap_or_default()
 }
 
@@ -363,7 +363,7 @@ pub fn export_subtitle_history(
     state: State<'_, SubtitleState>,
     app_state: State<'_, AppState>,
 ) -> Result<(), String> {
-    ensure_history_loaded(&state, &app_state.data_dir);
+    ensure_history_loaded(&state, &app_state.content_dir);
     let sessions = state.sessions.lock().map(|g| g.clone()).unwrap_or_default();
     let mut out = String::new();
     for (idx, s) in sessions.iter().enumerate() {

@@ -71,8 +71,8 @@ pub async fn download_vb_cable(
     state: tauri::State<'_, crate::commands::AppState>,
 ) -> Result<String, String> {
     // 下载物属内容数据 → 走内容根（存储契约：不得再自己调 app_data_dir 拼数据路径）
-    let data_dir = state.data_dir.clone();
-    let download_dir = crate::storage::paths::downloads_dir_in(&data_dir);
+    let content_dir = state.content_dir.clone();
+    let download_dir = crate::storage::paths::downloads_dir_in(&content_dir);
     std::fs::create_dir_all(&download_dir)
         .map_err(|e| format!("创建下载目录失败: {e}"))?;
     let zip_path = download_dir.join("VBCABLE_Driver_Pack45.zip");
