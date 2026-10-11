@@ -145,7 +145,7 @@ pub fn set_hotkey(
 
     // 4. 持久化 + 同步内存 settings
     crate::storage::settings::update_setting(
-        &app_state.data_dir,
+        &app_state.config_dir,
         "hotkey_show_window",
         serde_json::json!(accel),
     )
@@ -224,7 +224,7 @@ pub fn set_voice_input_hotkey(
 
     // 4. 持久化 + 同步内存 settings + 广播
     crate::storage::settings::update_setting(
-        &app_state.data_dir,
+        &app_state.config_dir,
         "voice_input_hotkey",
         serde_json::json!(accel),
     )
@@ -300,7 +300,7 @@ pub fn toggle_mic_send(app: &AppHandle) {
         Err(_) => return,
     };
     if let Err(e) = crate::storage::settings::update_setting(
-        &state.data_dir,
+        &state.config_dir,
         "mic_send_enabled",
         serde_json::json!(new_val),
     ) {
@@ -382,7 +382,7 @@ fn replace_hotkey(
 
     // 5. 持久化 + 同步内存 settings + 广播
     crate::storage::settings::update_setting(
-        &app_state.data_dir,
+        &app_state.config_dir,
         setting_key,
         serde_json::json!(accel),
     )

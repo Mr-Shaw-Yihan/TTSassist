@@ -357,7 +357,7 @@ fn set_own_config_impl(app: &AppHandle, plugin_id: &str, key: &str, value: &str)
     // 只刷 plugin_config（其它字段以磁盘为准），避免多实例共享数据目录时
     // 旧内存快照把 tts_engine 等不相关字段刷回默认。
     let updated = crate::storage::settings::update_setting(
-        &state.data_dir,
+        &state.config_dir,
         "plugin_config",
         serde_json::json!(snapshot),
     )

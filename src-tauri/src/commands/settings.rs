@@ -28,10 +28,11 @@ pub fn update_setting(
     plugins: State<'_, PluginManager>,
     app: AppHandle,
 ) -> Result<Settings, String> {
-    let data_dir = &state.data_dir;
+    // settings.json 属配置 → 写配置根（存储契约）
+    let config_dir = &state.config_dir;
 
     // 先写文件（确保持久化优先）
-    let settings = crate::storage::settings::update_setting(data_dir, &key, value)
+    let settings = crate::storage::settings::update_setting(config_dir, &key, value)
         .map_err(|e| format!("保存设置失败: {e}"))?;
 
     // 再更新内存（读写锁）

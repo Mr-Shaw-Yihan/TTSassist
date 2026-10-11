@@ -157,7 +157,8 @@ pub async fn get_remote_config(
     state: State<'_, AppState>,
 ) -> Result<RemoteConfig, String> {
     // 先 clone 再 await：Tauri 命令的 Future 要求 'static，不能持有 State 借用
-    let data_dir = state.data_dir.clone();
+    // 远程配置缓存属小而常读的配置类数据 → 跟 settings 同放配置根
+    let data_dir = state.config_dir.clone();
     Ok(get_remote_config_inner(&data_dir, force.unwrap_or(false)).await)
 }
 

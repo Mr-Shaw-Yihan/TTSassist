@@ -112,7 +112,7 @@ pub fn uninstall_plugin(
             .plugin_config
             .clone();
         let updated = crate::storage::settings::update_setting(
-            &state.data_dir,
+            &state.config_dir,
             "plugin_config",
             serde_json::json!(plugin_cfg),
         )
@@ -152,7 +152,7 @@ pub fn uninstall_plugin(
                 .read()
                 .map_err(|e| format!("读取设置失败: {e}"))?
                 .clone();
-            crate::storage::settings::save_settings(&state.data_dir, &settings)
+            crate::storage::settings::save_settings(&state.config_dir, &settings)
                 .map_err(|e| format!("保存设置失败: {e}"))?;
             notify_changed(&app, EVENT_SETTINGS_CHANGED);
         }
@@ -187,7 +187,7 @@ pub fn uninstall_plugin(
                     // 切换落盘失败不得推翻已成功的卸载（磁盘上已经卸掉了），否则前端
                     // 会把「半成功」报成失败、既不刷新列表也不广播设置变更
                     match crate::storage::settings::update_setting(
-                        &state.data_dir,
+                        &state.config_dir,
                         "tts_engine",
                         serde_json::json!(next),
                     ) {
@@ -302,7 +302,7 @@ pub fn get_plugin_config(
         // help_url 按插件 id 走远程覆盖（运营链接不发版就能换），
         // 没覆盖时退回 manifest 静态值。前端只消费这一处（PluginConfigPanel）。
         help_url: crate::commands::remote::effective_help_url(
-            &state.data_dir,
+            &state.config_dir,
             &id,
             decl.help_url.as_deref(),
         ),
@@ -360,7 +360,7 @@ pub fn set_plugin_config(
         settings.plugin_config.clone()
     };
     let updated = crate::storage::settings::update_setting(
-        &state.data_dir,
+        &state.config_dir,
         "plugin_config",
         serde_json::json!(new_plugin_cfg),
     )
@@ -392,7 +392,7 @@ pub fn clear_plugin_config(
         settings.plugin_config.clone()
     };
     let updated = crate::storage::settings::update_setting(
-        &state.data_dir,
+        &state.config_dir,
         "plugin_config",
         serde_json::json!(new_plugin_cfg),
     )

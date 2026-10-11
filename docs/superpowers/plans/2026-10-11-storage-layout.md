@@ -575,7 +575,32 @@ git commit -m "feat(插件): 插件重数据独立到 data/plugin-data 并让卸
 
 ---
 
-### Task 3b: 调用点归属重分配（翻默认前必做完）
+### Task 3b: 调用点归属重分配（翻默认前必做完）—— ✅ 已完成
+
+实跑结果（一次正则 + 四处人工 + 机器审计）：14 处 `settings::update_setting/save_settings/load_settings`
+调用改走 `config_dir`；`clone_voice.rs` 两个函数里**同时用到两个根**（样本文件=内容、
+设置回写=配置），已拆开并注明；`remote-config-cache.json` 与读它的 `effective_help_url` 一并归**配置根**
+（小而常读的运营配置，与 settings 同族）——修正了设计初稿把 `cache/` 一律归内容根的含糊说法。
+审计输出（每条 settings 调用的目录参数）已全部是 config_dir；测试仍 192 passed / 零 warning；
+`git diff --stat` 仅 28+/22-（证明脚本没把换行/BOM 改掉，那些文件本来无 BOM）。
+
+⚠ 过程里两次被自己的工具打脸，记下来免得再犯：
+1. .NET 的 `ReadAllText/WriteAllText` 不看 PowerShell 的 `cd`（Process CWD 仍是仓库根），
+   第一次跑直接报“找不到路径”——必须用绝对路径（本项自已有记录，又踩一次）。
+2. SearchReplace 里为了多带一行上下文，把 `let src = Path::new(...)` 与一段注释首行一起替掉了；
+   靠 diff 逐行阅读才发现并补回。**改完必须读 diff**，不能只看编译通过。
+
+剩下的护栏钩子（写进 Task 7）：存储护栏要新增一条规则 ——
+`settings::(update_setting|save_settings|load_settings)` 的目录参数必须是 `config_dir`（或测试里的临时目录），
+命中 `data_dir` 即红。这是本次唯一能防“静默分裂”的机械化手段（两个根都是 PathBuf，编译器帮不了）。
+
+### Task 3c: 内容类字面量收口（Task 7 护栏上线前做完）
+
+业务代码里仍有零散的 `join("audio")` / `join("voice_samples")` 等字面量（tts_stream.rs、moss.rs、
+audio_gc.rs、clone_voice.rs、messages/favorites 内部），它们现在走 `state.data_dir`（=内容根）是对的，
+但存储契约要求路径只来自 `storage::paths`。处理：给 `AppState` 加 `audio_dir()/samples_dir()/downloads_dir()`
+转发到 `StoragePaths`（或由命令处 `app.state::<StoragePaths>()` 取），把这批字面量收敛掉，
+否则 Task 7 的护栏一上就会一片红。
 
 Task 3 先完成了插件重数据分离；本步把“哪些读写走配置根、哪些走内容根”逐个改对。
 **因为现在两根仍相等，这一步全部是行为中性改动**；但 Task 4 Step 6 翻默以前必须做完，

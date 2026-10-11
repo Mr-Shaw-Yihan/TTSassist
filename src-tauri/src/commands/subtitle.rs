@@ -381,7 +381,7 @@ pub fn export_subtitle_history(
 /// 更新 subtitle_enabled（写文件 + 内存，失败忽略不影响主流程）。
 fn set_enabled_flag(app_state: &AppState, enabled: bool) {
     if let Ok(settings) = crate::storage::settings::update_setting(
-        &app_state.data_dir,
+        &app_state.config_dir,
         "subtitle_enabled",
         serde_json::json!(enabled),
     ) {

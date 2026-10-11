@@ -29,6 +29,9 @@ pub fn import_clone_voice(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let data_dir = &state.data_dir;
+    // 样本文件属内容（data_dir），而两次设置回写属配置（config_dir）——
+    // 两者在翻默认前是同一个目录，但归属必须现在就分清
+    let config_dir = &state.config_dir;
     let src = Path::new(&file_path);
 
     // 通用防呆上限 20MB：宿主不检查引擎各自的限制（如某云端引擎要求 ≤10MB），
@@ -71,10 +74,10 @@ pub fn import_clone_voice(
     announce_clone_sample(&dest); // dest 是上面复制出来的样本绝对路径
 
     // 连续写两个键，第二次 update 返回的即最终状态
-    crate::storage::settings::update_setting(data_dir, "clone_voice_path", serde_json::json!(rel_path))
+    crate::storage::settings::update_setting(config_dir, "clone_voice_path", serde_json::json!(rel_path))
         .map_err(|e| format!("{e}"))?;
     let new_settings = crate::storage::settings::update_setting(
-        data_dir,
+        config_dir,
         "clone_voice_name",
         serde_json::json!(name.clone()),
     )
@@ -98,6 +101,7 @@ pub fn remove_clone_voice(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let data_dir = &state.data_dir;
+    let config_dir = &state.config_dir;
 
     let old_path = {
         let s = state
@@ -111,10 +115,10 @@ pub fn remove_clone_voice(
         let _ = std::fs::remove_file(data_dir.join(&old_path));
     }
 
-    crate::storage::settings::update_setting(data_dir, "clone_voice_path", serde_json::json!(""))
+    crate::storage::settings::update_setting(config_dir, "clone_voice_path", serde_json::json!(""))
         .map_err(|e| format!("{e}"))?;
     let new_settings = crate::storage::settings::update_setting(
-        data_dir,
+        config_dir,
         "clone_voice_name",
         serde_json::json!(""),
     )

@@ -79,7 +79,7 @@ pub fn set_floating_ball_enabled(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     crate::storage::settings::update_setting(
-        &state.data_dir,
+        &state.config_dir,
         "floating_ball_enabled",
         serde_json::json!(enabled),
     )
@@ -119,7 +119,7 @@ pub fn save_floating_ball_pos(
 ) -> Result<(), String> {
     for (key, val) in [("floating_ball_x", x), ("floating_ball_y", y)] {
         crate::storage::settings::update_setting(
-            &state.data_dir,
+            &state.config_dir,
             key,
             serde_json::json!(val),
         )
@@ -280,7 +280,7 @@ pub fn reset_floating_ball_pos(
     let x = (size.width as i32 - canvas_phys) / 2;
     let y = (size.height as i32 - canvas_phys) / 2;
     for (key, val) in [("floating_ball_x", x), ("floating_ball_y", y)] {
-        crate::storage::settings::update_setting(&state.data_dir, key, serde_json::json!(val))
+        crate::storage::settings::update_setting(&state.config_dir, key, serde_json::json!(val))
             .map_err(|e| format!("保存悬浮球位置失败: {e}"))?;
     }
     if let Ok(mut s) = state.settings.write() {
