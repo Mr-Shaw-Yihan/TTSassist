@@ -75,24 +75,27 @@ impl CacheFile {
     }
 }
 
-fn cache_path(data_dir: &Path) -> PathBuf {
-    data_dir.join("remote-config-cache.json")
+/// 缓存文件路径。参数**必须是配置根**（与 settings 同族）：本模块的函数参数都叫
+/// `config_dir` 而不叫 `data_dir`，因为两个根都是 `PathBuf`、编译器分不清，
+/// 而一旦写错就是“存一个文件、读另一个”的静默失效（翻默认时实测踩过）。
+fn cache_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("remote-config-cache.json")
 }
 
 /// 读本地缓存（同步、不发网络）
 // pub(crate)：commands/plugins.rs 的 get_plugin_config 需要据此覆盖 help_url
-pub(crate) fn read_cache(data_dir: &Path) -> Option<CacheFile> {
-    let raw = std::fs::read_to_string(cache_path(data_dir)).ok()?;
+pub(crate) fn read_cache(config_dir: &Path) -> Option<CacheFile> {
+    let raw = std::fs::read_to_string(cache_path(config_dir)).ok()?;
     serde_json::from_str(&raw).ok()
 }
 
-fn write_cache(data_dir: &Path, data: &RemoteConfig) {
+fn write_cache(config_dir: &Path, data: &RemoteConfig) {
     let file = CacheFile {
         fetched_at: now_secs(),
         data: data.clone(),
     };
     if let Ok(json) = serde_json::to_string(&file) {
-        let _ = std::fs::write(cache_path(data_dir), json);
+        let _ = std::fs::write(cache_path(config_dir), json);
     }
 }
 
@@ -136,11 +139,11 @@ fn now_secs() -> u64 {
 /// 而后者是**更旧**的值，所以拿“过期但更新的覆盖”严格优于拿“新鲜但陈旧的兜底”。
 /// 缓存新鲜度的判定职责属于写入方 `get_remote_config_inner`（启动时由 `prime_cache` 走一次）。
 pub(crate) fn effective_help_url(
-    data_dir: &Path,
+    config_dir: &Path,
     plugin_id: &str,
     fallback: Option<&str>,
 ) -> Option<String> {
-    if let Some(cache) = read_cache(data_dir) {
+    if let Some(cache) = read_cache(config_dir) {
         if let Some(url) = cache.help_url_override(plugin_id) {
             return Some(url);
         }
@@ -158,13 +161,13 @@ pub async fn get_remote_config(
 ) -> Result<RemoteConfig, String> {
     // 先 clone 再 await：Tauri 命令的 Future 要求 'static，不能持有 State 借用
     // 远程配置缓存属小而常读的配置类数据 → 跟 settings 同放配置根
-    let data_dir = state.config_dir.clone();
-    Ok(get_remote_config_inner(&data_dir, force.unwrap_or(false)).await)
+    let config_dir = state.config_dir.clone();
+    Ok(get_remote_config_inner(&config_dir, force.unwrap_or(false)).await)
 }
 
 /// 可测试内核：不依赖 Tauri State
-async fn get_remote_config_inner(data_dir: &Path, force: bool) -> RemoteConfig {
-    let cache = read_cache(data_dir);
+async fn get_remote_config_inner(config_dir: &Path, force: bool) -> RemoteConfig {
+    let cache = read_cache(config_dir);
     let fresh = cache
         .as_ref()
         .is_some_and(|c| now_secs().saturating_sub(c.fetched_at) < CACHE_TTL_SECS);
@@ -172,7 +175,7 @@ async fn get_remote_config_inner(data_dir: &Path, force: bool) -> RemoteConfig {
         return cache.expect("checked").data;
     }
     if let Some(cfg) = fetch_online().await {
-        write_cache(data_dir, &cfg);
+        write_cache(config_dir, &cfg);
         return cfg;
     }
     // 拉取失败：有缓存用缓存（哪怕过期），否则内置默认值
@@ -187,9 +190,9 @@ async fn get_remote_config_inner(data_dir: &Path, force: bool) -> RemoteConfig {
 /// 「前端不调 → 覆盖表永远为空 → 不发版换链接的能力实际失效」的隐式依赖
 ///（全新安装根本没有缓存，连过期值都退不到）。写侧与读侧同归宿主，才不再依赖
 /// 某个页面是否被打开过。失败/超时静默：读侧会退 manifest 静态兜底。
-pub(crate) fn prime_cache(data_dir: PathBuf) {
+pub(crate) fn prime_cache(config_dir: PathBuf) {
     tauri::async_runtime::spawn(async move {
-        get_remote_config_inner(&data_dir, false).await;
+        get_remote_config_inner(&config_dir, false).await;
     });
 }
 

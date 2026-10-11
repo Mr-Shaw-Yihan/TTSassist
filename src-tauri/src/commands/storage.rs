@@ -8,7 +8,7 @@
 use std::path::Path;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
 use crate::plugins::PluginManager;
 use crate::storage::migrate::{self, StorageState};
@@ -193,6 +193,27 @@ pub async fn plugin_data_size(id: String, app: AppHandle) -> Result<u64, String>
     tauri::async_runtime::spawn_blocking(move || plugin_data_bytes(&paths, &id))
         .await
         .map_err(|e| format!("体积扫描任务失败: {e}"))
+}
+
+/// 首启自动迁移的一次性提示。
+///
+/// 为什么不用 event：搬迁在 setup 里完成，那时前端的 listen 还没注册，emit 出去必丢；
+/// 而启动时拉一次命令是一定能拿到的。取走即清空，不会下次启动再弹一遍。
+#[derive(Default)]
+pub struct MigrationNotice(pub std::sync::Mutex<Option<String>>);
+
+impl MigrationNotice {
+    pub fn set(&self, text: String) {
+        if let Ok(mut guard) = self.0.lock() {
+            *guard = Some(text);
+        }
+    }
+}
+
+/// 前端启动时取一次搬家结果（没有则 None）。同步命令：只读一个内存位。
+#[tauri::command]
+pub fn take_storage_notice(state: State<'_, MigrationNotice>) -> Option<String> {
+    state.0.lock().ok().and_then(|mut guard| guard.take())
 }
 
 /// 存储页打开时读一次：两根位置、各类占用、残留清单、能否搬家。

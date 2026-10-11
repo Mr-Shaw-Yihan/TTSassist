@@ -46,17 +46,18 @@ fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths
         .to_path_buf();
 
     let env_dir = std::env::var("VA_STORAGE_DIR").ok().map(PathBuf::from);
-    let pointer = read_pointer(&config_root.join("storage.json"));
+    let pointer = read_pointer(&config_root.join(POINTER_FILE_NAME));
     let local_fallback = std::env::var("LOCALAPPDATA")
         .ok()
         .map(|a| PathBuf::from(a).join("com.voiceassist.app").join("data"))
         .unwrap_or_else(|| exe_dir.join("data-fallback"));
 
-    // Task 4 Step 6 前：exe_default = config_root（不搬数据）；之后改成 exe_dir.join("data")
+    // 内容根默认跟随安装位置（存储计划 Task 4 Step 6：迁移能力、界面与急救程序都就位了才翻）。
+    // 装到不可写目录时 decide_content_root 会回退 LOCALAPPDATA 并置 fallback，界面必须向用户说明。
     let (content_root, fallback) = decide_content_root(
         env_dir,
         pointer,
-        config_root.clone(),
+        exe_dir.join("data"),
         local_fallback,
         &probe_writable,
     );
@@ -175,12 +176,42 @@ pub fn run() {
                 crate::perf::drain_startup_pending();
             }
 
-            // 首启数据检测（幂等，1.9+ 每版启动都跑）：放在日志初始化之后，否则这几行进不了日志。
-            // 只记日志、不弹框；界面要的状态由 storage_report 实时算（与这里同用 detect_in，不留缓存）。
-            // 两根仍相同时（翻默认前）detect_in 直接给 Current，不会把同一目录误判成 Conflict。
+            // asset: 协议必须放行内容根，否则 `<audio src>` 会被作用域直接拒掉，
+            // 症状是“点了没声、按钮还卡在播放中”——翻默认后音频已经不住在 $APPDATA 里了
+            //（真机验收当时就是这么暴出来的，单测与构建皆绿，只有跑起来才发现）。
+            // 为什么不能只改 tauri.conf.json：内容根是 `VA_STORAGE_DIR` > storage.json 指针 >
+            // `<exe>\data` > 不可写时回退 LOCALAPPDATA 动态定出来的，静态配置表达不了“它今天是谁”。
+            // $APPDATA/** 仍保留在配置里：用急救程序把指针指回配置根（旧布局）时靠它。
+            if let Err(e) = app.asset_protocol_scope().allow_directory(&data_dir, true) {
+                log_warn!("放行内容根的 asset 访问失败，历史音频可能无法回放: {e}");
+            }
+
+            // 首启数据搬家（幂等，1.9+ 每版启动都跑）：放在日志初始化之后、AppState 之前。
+            // 这个顺序是关键：会写内容根的命令全部依赖 AppState，此刻还没 manage，
+            // 所以不存在“后台正搬着、前端同时往 messages.json 写新数据”的竞态。
+            // 选“自动搬完只弹提示”而不是“等用户点”：升级后看到空聊天列表，
+            // 不懂技术的用户第一反应是“软件把数据弄没了”，甚至直接卸载重装。
+            app.manage(commands::storage::MigrationNotice::default());
             match storage::migrate::detect_in(&paths) {
                 storage::migrate::StorageState::Migratable => {
-                    log_info!("检测到旧位置数据待迁移（内容根尚未使用），等待用户在设置页确认")
+                    let legacy = paths.config_root.clone();
+                    let content = paths.content_root.clone();
+                    let stamp = chrono::Utc::now().format("%Y%m%d").to_string();
+                    match storage::migrate::migrate_items(&legacy, &content, &stamp) {
+                        Ok(r) => {
+                            let mb = r.bytes as f64 / 1024.0 / 1024.0;
+                            log_info!("自动迁移完成：{} 项 / {:.1} MB，原件在 {}", r.moved, mb, r.backup.display());
+                            app.state::<commands::storage::MigrationNotice>().set(format!(
+                                "已把旧位置的数据搬到 {}（共 {} 项，约 {:.1} MB）。原件保留在 {}，需要时可以退回。",
+                                content.display(),
+                                r.moved,
+                                mb,
+                                r.backup.display()
+                            ));
+                        }
+                        // 搬不动就退回手动：旧数据一条没动，设置-存储那张卡片仍在
+                        Err(e) => log_warn!("自动迁移未完成（可在设置页「存储」里手动重试）：{e}"),
+                    }
                 }
                 storage::migrate::StorageState::Conflict => {
                     log_warn!("新旧两处都有数据，需用户在设置页选择处置（不静默二选一）")
@@ -247,8 +278,11 @@ pub fn run() {
             app.state::<plugins::PluginManager>().attach_pending_bridges();
 
             // 远程配置预热：后台拉一次并写本地缓存，供 get_plugin_config 的 help_url
-            // 覆盖读取（那条命令是同步的、不能联网）。失败静默，不阻塞启动
-            commands::remote::prime_cache(data_dir.clone());
+            // 覆盖读取（那条命令是同步的、不能联网）。失败静默，不阻塞启动。
+            // ⚠ 必须用配置根：缓存的读侧（get_remote_config / effective_help_url）走的是
+            // state.config_dir。之前这里传的是 data_dir（内容根），翻默认前两根相等看不出来，
+            // 翻完就变成“写在一个文件、读另一个”——远程 help_url 覆盖会静默失效。
+            commands::remote::prime_cache(config_dir.clone());
 
             // 移动端遥控（本体常驻服务）：WS 服务 + mDNS 广播。须在 HostBridge/AppState/
             // MicPlayback 就绪后启动（native_* 能力依赖三者）；RemoteCore 供 remote_session_info 读取
@@ -456,6 +490,7 @@ pub fn run() {
             crate::commands::settings::get_settings,
             crate::commands::settings::update_setting,
             crate::commands::storage::storage_report,
+            crate::commands::storage::take_storage_notice,
             crate::commands::storage::plugin_data_size,
             crate::commands::storage::delete_plugin_data,
             crate::commands::storage::migrate_storage_now,

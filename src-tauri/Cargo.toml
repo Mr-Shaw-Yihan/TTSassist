@@ -4,6 +4,9 @@ version = "1.8.7"
 description = "VoiceAssist - 为语言障碍者打造的文本转语音沟通助手"
 authors = ["you"]
 edition = "2021"
+# 包里有第二个二进制（src/bin/va-data-rescue.rs 急救程序）后，`cargo run` 无法自行判定
+# 该跑哪一个，`tauri dev` 会直接报错起不来。显式指定主程序为默认目标。
+default-run = "voiceassist"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

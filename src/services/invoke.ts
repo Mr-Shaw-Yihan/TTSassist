@@ -704,3 +704,11 @@ export async function deletePluginData(id: string): Promise<number> {
 export async function migrateStorageNow(): Promise<string> {
   return invoke<string>("migrate_storage_now");
 }
+
+/**
+ * 取首启自动迁移的一次性提示（取走即清）。搬家在 setup 里完成，那时前端还没注册监听，
+ * 事件一定会丢；所以改成启动时拉一次。没搬过则返回 null。
+ */
+export async function takeStorageNotice(): Promise<string | null> {
+  return invoke<string | null>("take_storage_notice");
+}

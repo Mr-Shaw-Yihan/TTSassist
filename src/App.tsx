@@ -24,7 +24,7 @@ import { useSettingsStore } from "./stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "./stores/updateStore";
 import { usePluginTaskStore } from "./stores/pluginTaskStore";
 import { useWindowState } from "./hooks/useWindowState";
-import { ToastHost } from "./components/common/Toast";
+import { ToastHost, toast } from "./components/common/Toast";
 import { ConfirmDialogHost } from "./components/common/ConfirmDialog";
 import { playMicOnChime, playMicOffChime } from "./utils/chime";
 import { computeComposerHeight, COMPOSER_DEF, COMPOSER_MIN, COMPOSER_MAX_RATIO } from "./utils/composerResize";
@@ -45,6 +45,7 @@ import {
   listPlugins,
   promptEngineWarmup,
   perfStartupDone,
+  takeStorageNotice,
   ttsStreamMute,
 } from "./services/invoke";
 import type { Message, Favorite, PluginSetupProgress } from "./types";
@@ -122,6 +123,13 @@ function App() {
   useEffect(() => {
     // [perf] main 窗口前端首帧回执（后端只记第一次；失败静默，不影响业务）
     void perfStartupDone().catch(() => {});
+    // 首启自动搬家结果：后端在 setup 里搬完存在内存位上，这里取一次弹给用户（取走即清）。
+    // 不能用事件：搬迁时前端的 listen 还没注册，emit 必丢。
+    void takeStorageNotice()
+      .then((n) => {
+        if (n) toast(n);
+      })
+      .catch(() => {});
     (async () => {
       try {
         const s = await getSettings();
@@ -383,7 +391,17 @@ function App() {
       void emit("va:play:stop").catch(() => {});
       void emit("playback:stopped").catch(() => {});
     });
-    a.play().catch(() => { /* 用户首次播放可能被忽略 */ });
+    // 加载失败（文件缺失 / asset 作用域未放行 / 编码不支持）以前被静默吞掉：
+    // 结果是按钮永远停在「播放中」却一点声音都没有。这里必须把状态收回来并说清楚。
+    const bail = () => {
+      if (playingPathRef.current !== relPath) return; // 已被别的音频接管，别去动它的状态
+      playingPathRef.current = null;
+      setPlayingPath(null);
+      void emit("va:play:stop").catch(() => {});
+      void toast("无法播放这条音频：文件缺失或不可访问", "err");
+    };
+    a.addEventListener("error", bail);
+    a.play().catch(bail);
     if (wasPlaying) {
       void emit("va:play:stop").catch(() => {});
       void emit("playback:stopped").catch(() => {});
