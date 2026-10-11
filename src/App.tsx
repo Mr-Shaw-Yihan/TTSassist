@@ -25,7 +25,7 @@ import { useUpdateStore, shouldShowUpdateDot } from "./stores/updateStore";
 import { usePluginTaskStore } from "./stores/pluginTaskStore";
 import { useWindowState } from "./hooks/useWindowState";
 import { ToastHost, toast } from "./components/common/Toast";
-import { ConfirmDialogHost } from "./components/common/ConfirmDialog";
+import { ConfirmDialogHost, showInfo } from "./components/common/ConfirmDialog";
 import { playMicOnChime, playMicOffChime } from "./utils/chime";
 import { computeComposerHeight, COMPOSER_DEF, COMPOSER_MIN, COMPOSER_MAX_RATIO } from "./utils/composerResize";
 import {
@@ -125,9 +125,12 @@ function App() {
     void perfStartupDone().catch(() => {});
     // 首启自动搬家结果：后端在 setup 里搬完存在内存位上，这里取一次弹给用户（取走即清）。
     // 不能用事件：搬迁时前端的 listen 还没注册，emit 必丢。
+    // 用 showInfo 常驻对话框而不是 toast：搬家是一次性大事（告诉用户数据挪去哪了、原件备份在哪可退回），
+    // toast 3.5 秒右下角一闪就没——真机验收时用户「好像弹过一次、一瞬就没了，甚至可能看错」。
+    // 这种必须读到、且只在真发生迁移那一次出现的提示，得等用户点「知道了」才消失。
     void takeStorageNotice()
       .then((n) => {
-        if (n) toast(n);
+        if (n) void showInfo({ title: "数据已搬到新位置", message: n, confirmText: "知道了" });
       })
       .catch(() => {});
     (async () => {
