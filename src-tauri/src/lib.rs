@@ -267,6 +267,10 @@ pub fn run() {
             // 配对记录属配置 → 走配置根
             remote::purge_legacy_plugin(&plugins_root, &config_dir);
 
+            // 已下架的内置插件（映射表见 plugins::REPLACED_PLUGINS）：bootstrap 只装不删，
+            // 老用户本地会残留其目录与注册表条目、与承接者并存。按表在 load_all 前一次性清走并迁移设置。
+            plugins::sweep_replaced_plugins(&plugins_root, &config_dir);
+
             // 插件系统：加载已安装插件（单个插件失败只记日志，不影响主流程）；
             // 传入 AppHandle 供宿主能力桥注入（声明 requires_host_bridge 的插件）
             let plugin_manager = plugins::PluginManager::load_all(&plugins_root, Some(app.handle()));

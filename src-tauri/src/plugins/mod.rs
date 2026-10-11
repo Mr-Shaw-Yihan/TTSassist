@@ -138,6 +138,108 @@ pub enum PluginError {
     Io(String),
 }
 
+/// 已下架、由新插件承接的遗留插件映射表（引擎无关：只认插件 id 与承接者 id，不认识任何引擎内部）。
+///
+/// 为什么要这张表：内置插件一旦从某个版本里移除，`bootstrap_bundled_zips` 只负责“装”不负责“删”，
+/// 老用户本地 `<plugins>/<旧id>` 目录与 registry 条目会原样留着、下次启动继续加载，于是与承接者并存
+/// （表现就是“两个 MiniMax 国内版”）。启动加载前按这张表一次性清走旧插件，并把手动选过旧引擎的
+/// 用户改到承接者、把旧插件的 Key/音色搬到承接者（承接者已有值则作废，绝不覆盖用户在新面板填的）。
+const REPLACED_PLUGINS: &[(&str, &str)] = &[
+    ("minimax-tts", "minimax-tts-stream"),
+];
+
+/// 启动期清理已下架插件（须在 PluginManager::load_all 之前调用）。幂等：旧插件不在场时什么都不做。
+pub fn sweep_replaced_plugins(plugins_root: &Path, config_dir: &Path) {
+    for &(old, new) in REPLACED_PLUGINS {
+        let mut touched = false;
+
+        // 1) 删遗留插件代码目录（含其 pending）。不存在就是没什么可删。
+        let dir = plugins_root.join(old);
+        if dir.exists() {
+            match std::fs::remove_dir_all(&dir) {
+                Ok(()) => touched = true,
+                Err(e) => log_warn!("[插件清理] 删除已下架插件目录失败 {old}：{e}"),
+            }
+        }
+
+        // 2) 注册表移除旧条目（否则 load_all 仍会去加载那个目录已被删的插件）
+        let mut reg = registry::load_registry(plugins_root);
+        let before = reg.plugins.len();
+        reg.plugins.retain(|e| e.id != old);
+        if reg.plugins.len() != before {
+            match registry::save_registry(plugins_root, &reg) {
+                Ok(()) => touched = true,
+                Err(e) => log_warn!("[插件清理] 移除注册表旧条目失败 {old}：{e}"),
+            }
+        }
+
+        // 3) settings.json：引擎改指承接者 + 把旧插件的 plugin_config / plugin_voices 搬过去
+        if rewrite_settings_for_replaced(config_dir, old, new) {
+            touched = true;
+        }
+
+        if touched {
+            log_info!("[插件清理] 已下架插件 {old} 已清理并迁移到 {new}");
+        }
+    }
+}
+
+/// 就 settings.json 把一个已下架引擎的选中项与配置搬到承接者。直接改原始 JSON
+/// （与 migrate_legacy_engine 同法，不经 Settings 结构体，避免读写往返丢未知键）。返回是否改动。
+fn rewrite_settings_for_replaced(config_dir: &Path, old: &str, new: &str) -> bool {
+    let path = config_dir.join("settings.json");
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let mut value: serde_json::Value = match serde_json::from_str(raw.trim_start_matches('\u{FEFF}')) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let obj = match value.as_object_mut() {
+        Some(o) => o,
+        None => return false,
+    };
+    let mut changed = false;
+
+    if obj.get("tts_engine").and_then(|x| x.as_str()) == Some(old) {
+        obj.insert("tts_engine".into(), serde_json::Value::String(new.into()));
+        changed = true;
+    }
+    changed |= move_subtable(obj, "plugin_config", old, new);
+    changed |= move_subtable(obj, "plugin_voices", old, new);
+
+    if changed {
+        if let Err(e) = crate::storage::atomic::write_json_pretty(&path, &value) {
+            log_warn!("已下架插件设置迁移落盘失败：{e}");
+        }
+    }
+    changed
+}
+
+/// 把 `obj[field][old]` 搬到 `obj[field][new]`（new 缺失时），并删掉 `obj[field][old]`。返回是否改动。
+/// new 已有值时旧值作废——与“绝不覆盖用户在新面板填的东西”是同一条红线。
+fn move_subtable(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    field: &str,
+    old: &str,
+    new: &str,
+) -> bool {
+    let Some(sub) = obj.get_mut(field).and_then(|v| v.as_object_mut()) else {
+        return false;
+    };
+    if sub.get(old).is_none() {
+        return false;
+    }
+    if sub.get(new).is_none() {
+        if let Some(val) = sub.remove(old) {
+            sub.insert(new.to_string(), val);
+        }
+    } else {
+        sub.remove(old);
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,5 +367,87 @@ mod tests {
     fn 迁移_无设置文件不报错() {
         let dir = tempfile::tempdir().unwrap();
         migrate_legacy_engine(dir.path()); // 不 panic 即通过
+    }
+
+    #[test]
+    fn 清理已下架插件并改写引擎到承接者() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = root.path().join("plugins");
+        let config = root.path().join("config");
+        std::fs::create_dir_all(plugins.join("minimax-tts")).unwrap();
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(
+            plugins.join("registry.json"),
+            r#"{"plugins":[{"id":"minimax-tts","version":"0.1.0","installed_at":"x"},{"id":"zeta-tts","version":"0.1.1","installed_at":"y"}],"suppressed":[]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            config.join("settings.json"),
+            r#"{"tts_engine":"minimax-tts","plugin_config":{"minimax-tts":{"api_key":"K"}},"plugin_voices":{"minimax-tts":"中文女声"}}"#,
+        )
+        .unwrap();
+
+        sweep_replaced_plugins(&plugins, &config);
+
+        assert!(!plugins.join("minimax-tts").exists(), "旧插件目录应删除");
+        let reg_raw = std::fs::read_to_string(plugins.join("registry.json")).unwrap();
+        assert!(!reg_raw.contains("minimax-tts"), "注册表不应再有旧条目");
+        assert!(reg_raw.contains("zeta-tts"), "无关插件不能被误删");
+
+        let v = read_json(&config);
+        assert_eq!(v["tts_engine"], "minimax-tts-stream");
+        assert_eq!(v["plugin_config"]["minimax-tts-stream"]["api_key"], "K");
+        assert_eq!(v["plugin_voices"]["minimax-tts-stream"], "中文女声");
+        assert!(v["plugin_config"].get("minimax-tts").is_none(), "旧 plugin_config 应移除");
+    }
+
+    #[test]
+    fn 清理已下架插件幂等且不误伤在用的() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = root.path().join("plugins");
+        let config = root.path().join("config");
+        std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(
+            plugins.join("registry.json"),
+            r#"{"plugins":[{"id":"zeta-tts","version":"0.1.1","installed_at":"y"}],"suppressed":[]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            config.join("settings.json"),
+            r#"{"tts_engine":"zeta-tts","plugin_config":{"zeta-tts":{"api_key":"M"}}}"#,
+        )
+        .unwrap();
+
+        sweep_replaced_plugins(&plugins, &config);
+        let after1 = std::fs::read_to_string(config.join("settings.json")).unwrap();
+        sweep_replaced_plugins(&plugins, &config);
+        let after2 = std::fs::read_to_string(config.join("settings.json")).unwrap();
+        assert_eq!(after1, after2, "无旧插件时幂等空操作");
+        assert!(after2.contains("zeta-tts"));
+        // 无关插件的目录/注册表条目不得被动
+        let reg_raw = std::fs::read_to_string(plugins.join("registry.json")).unwrap();
+        assert!(reg_raw.contains("zeta-tts"));
+    }
+
+    #[test]
+    fn 清理时新位置已配值则不覆盖用户新值() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = root.path().join("plugins");
+        let config = root.path().join("config");
+        std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::create_dir_all(&config).unwrap();
+        std::fs::write(plugins.join("registry.json"), r#"{"plugins":[],"suppressed":[]}"#).unwrap();
+        std::fs::write(
+            config.join("settings.json"),
+            r#"{"tts_engine":"zeta-tts","plugin_config":{"minimax-tts":{"api_key":"OLD"},"minimax-tts-stream":{"api_key":"NEW"}}}"#,
+        )
+        .unwrap();
+
+        sweep_replaced_plugins(&plugins, &config);
+
+        let v = read_json(&config);
+        assert_eq!(v["plugin_config"]["minimax-tts-stream"]["api_key"], "NEW", "不得覆盖用户已在新面板填的值");
+        assert!(v["plugin_config"].get("minimax-tts").is_none(), "旧条目无论如何都要清走");
     }
 }
