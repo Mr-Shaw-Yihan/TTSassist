@@ -5,6 +5,7 @@ pub mod atomic;
 pub mod audio_gc;
 pub mod favorites;
 pub mod messages;
+pub mod migrate;
 pub mod paths;
 pub mod settings;
 pub mod types;

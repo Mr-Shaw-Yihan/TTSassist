@@ -171,6 +171,28 @@ pub fn run() {
                 crate::perf::drain_startup_pending();
             }
 
+            // 首启数据检测（幂等，1.9+ 每版启动都跑）：放在日志初始化之后，否则这几行进不了日志。
+            // 只记状态与日志、不弹框；界面通过 storage_report 读到后再引导用户（Task 5/6）。
+            // ⚠ 内容根与配置根仍相同时（翻默认前）根本没“搬家”这回事，必须跳过：
+            //   否则 messages.json 会被同时看成“新位置已有”与“旧位置待迁”，误判成 Conflict。
+            if paths.content_root != paths.config_root {
+                let mstate = storage::migrate::detect_state(
+                    storage::migrate::content_has_data(&paths.content_root),
+                    !storage::migrate::legacy_items(&paths.config_root).is_empty(),
+                );
+                match mstate {
+                    storage::migrate::StorageState::Migratable => {
+                        app.manage(storage::migrate::MigrationPending::new(mstate));
+                        log_info!("检测到旧位置数据待迁移（内容根尚未使用），等待用户在设置页确认");
+                    }
+                    storage::migrate::StorageState::Conflict => {
+                        app.manage(storage::migrate::MigrationPending::new(mstate));
+                        log_warn!("新旧两处都有数据，需用户在设置页选择处置（不静默二选一）");
+                    }
+                    other => log_info!("存储状态：{:?}", other),
+                }
+            }
+
             // 克隆样本通用环境变量：宿主只把「已导入样本的绝对路径」告诉插件，
             // 格式/大小/用法全部由插件自决（基座不认识任何引擎，见 AGENTS.md 基座合同）。
             // API Key 不再在此硬编码注入：改由各插件 manifest 的 config 声明，
