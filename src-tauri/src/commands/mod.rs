@@ -17,6 +17,7 @@ pub mod perf;
 pub mod plugins;
 pub mod remote;
 pub mod settings;
+pub mod storage;
 pub mod subtitle;
 pub mod tts;
 pub mod tts_stream;

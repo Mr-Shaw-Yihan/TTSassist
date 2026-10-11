@@ -29,17 +29,8 @@ impl Default for StorageState {
     }
 }
 
-/// 迁移状态持有器：供 storage_report 读出给界面（不在启动路径上弹框）
-#[derive(Debug, Clone, Default)]
-pub struct MigrationPending {
-    pub state: StorageState,
-}
-
-impl MigrationPending {
-    pub fn new(state: StorageState) -> Self {
-        Self { state }
-    }
-}
+/// 迁移状态持有器已下线：`storage_report` 直接算实时状态（见 `detect_in`），
+/// 启动时缓存一份再给界面读就会出现两处真相——用户搬完家后快照还是 Migratable。
 
 /// 判定当前处于哪种状态。
 pub fn detect_state(content_has_data: bool, legacy_present: bool) -> StorageState {
@@ -82,6 +73,20 @@ pub fn legacy_items(legacy_root: &Path) -> Vec<PathBuf> {
 
 fn dir_has_entries(p: &Path) -> bool {
     std::fs::read_dir(p).map(|mut r| r.next().is_some()).unwrap_or(false)
+}
+
+/// 按当前布局判定状态——启动日志与 `storage_report` 共用这一份逻辑，不分两头写。
+///
+/// 两根仍相同时（内容根尚未翻默认到安装位置）根本没“搬家”这回事，必须返回 Current：
+/// 否则 `messages.json` 会被同时看成“新位置已有”与“旧位置待迁”，误判成 Conflict。
+pub fn detect_in(paths: &super::paths::StoragePaths) -> StorageState {
+    if paths.content_root == paths.config_root {
+        return StorageState::Current;
+    }
+    detect_state(
+        content_has_data(&paths.content_root),
+        !legacy_items(&paths.config_root).is_empty(),
+    )
 }
 
 /// 内容根是否已有内容类数据（判“新布局已就位”用）。
@@ -192,7 +197,8 @@ fn rollback(done: &[(PathBuf, PathBuf)]) {
 /// 单项体积：目录递归求和，文件取自身字节数。
 /// 不能直接交给 `paths::dir_size`——它的契约是「目录」，喂文件路径会因 read_dir
 /// 失败返回 0，而待迁移清单里 messages.json 这类恰好是文件，UI 会少报体积。
-fn path_size(p: &Path) -> u64 {
+/// pub：`storage_report` 统计旧位置体积要给界面看。
+pub fn path_size(p: &Path) -> u64 {
     if p.is_dir() {
         super::paths::dir_size(p)
     } else {
