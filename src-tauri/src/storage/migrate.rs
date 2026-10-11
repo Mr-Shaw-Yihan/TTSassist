@@ -134,7 +134,23 @@ pub fn migrate_items_with_verify(
         return Ok(report);
     }
 
-    let done = copy_all_and_verify(content_root, &items, verify)?;
+    // 先按“新位置现状”分类，再决定拷什么。不能直接拷：自动搬迁跑在后台，期间用户
+    // 可能已经往内容根写了新消息，拿旧 `messages.json` 盖过去就是抹掉升级后的新数据。
+    let (to_copy, already, conflicts) = partition_items(&items, content_root);
+    if !conflicts.is_empty() {
+        return Err(format!(
+            "新位置已有同名且内容不同的文件，不会覆盖你升级后新写的数据，请先手工处置：{}",
+            conflicts.join("、")
+        ));
+    }
+
+    let mut done = copy_all_and_verify(content_root, &to_copy, verify)?;
+    // 上一轮已拷成功但没改名成功的项：不重拷，但仍要把原件收进备份（否则下次仍判待迁移）
+    for src in &already {
+        if let Some(name) = src.file_name() {
+            done.push((src.clone(), content_root.join(name)));
+        }
+    }
     for (src, _) in &done {
         report.bytes += path_size(src);
     }
@@ -220,6 +236,38 @@ pub fn find_backups(config_root: &Path) -> Vec<PathBuf> {
         .collect();
     out.sort();
     out
+}
+
+/// 把待迁移项按新位置现状分成三类：还要拷 / 已拷过 / 撞名且不同（冲突）。
+///
+/// 只有**固定文件名的记录类文件**（`messages.json` 等）才参与判重：它们一边可能已有
+/// 升级后新写的数据，盖过去就是丢数据。目录（`audio/` 等）不判重、直接合并拷：
+/// 里面是按消息 id 命名的文件，id 不会撞，而“中途强杀后重跑”需要把上次没拷完的补上。
+///
+/// 判身份只看字节数：与 `copy_all_and_verify` 里的校验强度一致（同大小不同内容属极小
+/// 概率），目的是既不让覆盖新数据、也不让重跑永远撞在自己留下的文件上。
+fn partition_items(items: &[PathBuf], content_root: &Path) -> (Vec<PathBuf>, Vec<PathBuf>, Vec<String>) {
+    let mut to_copy = Vec::new();
+    let mut already = Vec::new();
+    let mut conflicts = Vec::new();
+    for it in items {
+        let Some(name) = it.file_name() else { continue };
+        let dst = content_root.join(name);
+        if dst.is_file() {
+            let same = std::fs::metadata(it)
+                .ok()
+                .and_then(|a| std::fs::metadata(&dst).ok().map(|b| a.len() == b.len()))
+                .unwrap_or(false);
+            if same {
+                already.push(it.clone());
+            } else {
+                conflicts.push(name.to_string_lossy().into_owned());
+            }
+        } else {
+            to_copy.push(it.clone());
+        }
+    }
+    (to_copy, already, conflicts)
 }
 
 /// 复制 + 逐项校验的**公用段**：迁移与回退都走这里（设计 §五：“同一套复制+校验代码”）。
@@ -380,6 +428,45 @@ mod tests {
         let report = migrate_items(&legacy, &content, "20261011").unwrap();
         assert_eq!(report.moved, 0);
         assert_eq!(report.bytes, 0);
+    }
+
+    #[test]
+    fn 迁移遇新位置已有同名不同内容时整批拒绝() {
+        // 自动搬迁跑在后台，期间用户可能已经发了新消息（内容根的 messages.json 已存在且不同）。
+        // 这是唯一会**真丢数据**的情形：拿旧文件盖过去就是抹掉用户升级后写的东西。
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join("legacy");
+        let content = dir.path().join("data");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::create_dir_all(&content).unwrap();
+        std::fs::write(legacy.join("messages.json"), b"old").unwrap();
+        std::fs::write(content.join("messages.json"), b"new-longer").unwrap();
+
+        let err = migrate_items(&legacy, &content, "20261011").unwrap_err();
+        assert!(err.contains("messages.json"), "要列出撞了哪一项：{err}");
+        assert_eq!(std::fs::read(content.join("messages.json")).unwrap(), b"new-longer", "不得覆盖新数据");
+        assert!(legacy.join("messages.json").exists(), "原件不动");
+        assert!(!legacy.join(".migrated-backup-20261011").exists(), "拒绝时不该造备份目录");
+    }
+
+    #[test]
+    fn 中途强杀后重跑_相同文件不重复拷但仍入备份() {
+        // 幂等重跑是验收硬要求（设计 §五：断电后重进仍判 Migratable）。上一轮可能已把
+        // messages.json 拷过去了、但改名失败没成功——重跑时“目标已存在”不能当冲突，
+        // 否则永远搬不完。
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join("legacy");
+        let content = dir.path().join("data");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::create_dir_all(&content).unwrap();
+        std::fs::write(legacy.join("messages.json"), b"same-bytes").unwrap();
+        std::fs::write(content.join("messages.json"), b"same-bytes").unwrap();
+
+        let report = migrate_items(&legacy, &content, "20261011").unwrap();
+        assert_eq!(report.moved, 1, "已搬过的也要把原件收进备份，不然下次仍判待迁移");
+        assert!(!legacy.join("messages.json").exists());
+        assert!(report.backup.join("messages.json").exists());
+        assert_eq!(std::fs::read(content.join("messages.json")).unwrap(), b"same-bytes");
     }
 
     #[test]
