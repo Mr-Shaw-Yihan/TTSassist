@@ -19,7 +19,7 @@
 | 配置根 | `StoragePaths::config_root` | `src-tauri/src/storage/paths.rs` | `%APPDATA%\com.voiceassist.app`，只放 `settings.json`、`remote-pairing.json`、`storage.json` 指针、`.migrated-backup-*` |
 | 内容根 | `StoragePaths::content_root` | 同上 | 默认 `<exe>\data`，可被 `VA_STORAGE_DIR` / 指针 / 不可写回退改变 |
 | 插件根 | `StoragePaths::plugins_root` | 同上 | `<exe>\plugins`（沿用现有 `resolve_plugins_root()` 语义） |
-| 下游参数 | `AppState::data_dir` | `src-tauri/src/commands/mod.rs` | **语义 = 内容根**（名字暂不改，Task 8 才做机械改名），`AppState::config_dir` = 配置根 |
+| 下游参数 | `AppState::content_dir`（原 `data_dir`） | `src-tauri/src/commands/mod.rs` | **语义 = 内容根**（Task 8 Step 1 已机械改名 `data_dir`→`content_dir`，8 位提交 `88b2ba2`），`AppState::config_dir` = 配置根 |
 | 指针文件 | `config_root/storage.json` | JSON `{"content_root": "D:\\...", "migrated_from": "...", "updated_at": "..."}` | 只有用户改过位置或迁移过才存在 |
 | 归属清单 | 内容根 | — | `messages.json`、`favorites.json`、`subtitle_history.json`、`audio/`、`voice_samples/`、`logs/`、`cache/`、`downloads/`、`plugin-data/` |
 | 归属清单 | 配置根 | — | `settings.json`（含 `plugin_config`）、`remote-pairing.json`、`storage.json` |
@@ -1276,8 +1276,8 @@ git commit -m "chore(存储): 存储护栏上 CI，AGENTS.md 与 skill 增存储
 
 ### Task 8: 收尾（机械改名 + 发布前门禁与真机验收）
 
-- [ ] **Step 1（可选）**：把下游 19 个模块的 `data_dir` 形参机械改名为 `content_dir`，`config_dir` 显式化；每改完一个文件跑一次 `cargo test --lib`，全绿才继续（**纯改名，不许顺手改逻辑**）。
-- [ ] **Step 2**：全量门禁 8 道复跑：`cargo test --lib`、`cargo check --lib --tests` 零 warning、`cargo test -p mimo-tts`、`npx tsc --noEmit`、`npm run test:run`、`npm run build`、四道守卫（bom/log/base/storage）、`verify-index -SkipDist`。
+- [x] **Step 1（已完成 `88b2ba2`）**：把下游 26 个文件的 `data_dir` 标识符机械改名为 `content_dir`（`\bdata_dir\b` 词边界正则，只命中独立 token，不误伤 `plugin_data_dir`/`app_data_dir`/`ensure_data_dirs`/`VA_PLUGIN_DATA_DIR`）；纯改名不改逻辑，落盘结构体字段零改动。
+- [x] **Step 2（已完成，两轮全绿）**：全量门禁 8 道复跑。改名前一轮（`b0e962f`/`fffd47e` 后）与改名后一轮均全绿：`cargo test --lib` 214 passed、`cargo check --lib --tests --bins` 零 warning、`cargo test -p mimo-tts`（在 `plugins` 子工作区）24 passed、`npx tsc --noEmit` 0、`npm run test:run` 74 passed、`npm run build` 0、四道守卫全绿、`verify-index -SkipDist` ALL CONSISTENT。
 - [ ] **Step 3**：真机验收 5 条（设计文档 §九逐条贴结果，尤其「删一条消息仍能按引用删掉音频」与「迁移中途强杀后重跑」）。
 - [ ] **Step 4**：回写 `doc/存储布局与迁移设计.md` 状态行为「已实施」+ 本计划勾选与实施记录；`doc/归档/工作线状态.md` 更新。
 - [ ] **Step 5**：与 MiMo 线一起走发布（版本号三处同步 1.9.0、release notes、merge main / push / tag / publish.ps1 —— **每一步单独请示用户**）。
