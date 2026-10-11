@@ -37,6 +37,13 @@ pub fn audio_rel(id: &str, ext: &str) -> String { format!("{AUDIO_DIR_NAME}/{id}
 /// 记录里用的相对克隆样本路径
 pub fn samples_rel(name: &str, ext: &str) -> String { format!("{SAMPLES_DIR_NAME}/{name}.{ext}") }
 
+/// 应用标识符，同时是配置根目录名。主程序走 Tauri 的 `app_data_dir()`，
+/// 命令行急救程序没有 AppHandle、只能自己按 `%APPDATA%\<这个名>` 拼，
+/// 所以用一条单测把它钉在 tauri.conf.json 上，防止两边拼错到不同目录。
+pub const CONFIG_DIR_NAME: &str = "com.voiceassist.app";
+/// 内容根指针的文件名（字面量只存这一份，`pointer_file()` 与急救程序都用它）
+pub const POINTER_FILE_NAME: &str = "storage.json";
+
 /// 三根的持有者。由 `lib.rs` 的 `resolve_storage_paths` 在启动时构造一次，之后只读。
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoragePaths {
@@ -65,7 +72,7 @@ impl StoragePaths {
     pub fn settings_file(&self) -> PathBuf { self.config_root.join("settings.json") }
     pub fn pairing_file(&self) -> PathBuf { self.config_root.join("remote-pairing.json") }
     /// 内容根指针（用户改过位置或迁移过才存在）
-    pub fn pointer_file(&self) -> PathBuf { self.config_root.join("storage.json") }
+    pub fn pointer_file(&self) -> PathBuf { self.config_root.join(POINTER_FILE_NAME) }
     /// 迁移中间产物（原件移入、不删除，可回退）
     pub fn backup_dir(&self, stamp: &str) -> PathBuf {
         self.config_root.join(format!(".migrated-backup-{stamp}"))
@@ -124,6 +131,16 @@ pub fn decide_content_root(
         return (exe_default, false);
     }
     (fallback, true)
+}
+
+/// 由 `%APPDATA%` 拼配置根（拆成纯函数以便单测，不读环境变量）
+pub fn config_root_from(appdata: Option<PathBuf>) -> Option<PathBuf> {
+    appdata.map(|a| a.join(CONFIG_DIR_NAME))
+}
+
+/// 急救程序用的配置根解析。拿不到 `APPDATA` 时返回 None，由调用方说明原因而不是猜一个。
+pub fn config_root_from_env() -> Option<PathBuf> {
+    config_root_from(std::env::var_os("APPDATA").map(PathBuf::from))
 }
 
 /// 读指针文件；不存在 / JSON 坏 / 值为空都返回 None（= 走默认位置，不报错不崩）。
@@ -327,5 +344,26 @@ mod tests {
         assert!(read_pointer(&p).is_none(), "空值 → None，走默认位置");
         std::fs::write(&p, "{\"content_root\":\"D:\\\\VA\\\\data\"}").unwrap();
         assert_eq!(read_pointer(&p), Some(PathBuf::from("D:\\VA\\data")));
+    }
+
+    #[test]
+    fn 配置根拼接与标识符对齐配置文件() {
+        // 急救程序自己拼配置根，拼错就等于“找不到用户的备份”。
+        // 不靠人记，直接拿 tauri.conf.json 的 identifier 对账。
+        assert_eq!(
+            config_root_from(Some(PathBuf::from("C:\\Users\\x\\AppData\\Roaming"))),
+            Some(PathBuf::from("C:\\Users\\x\\AppData\\Roaming\\com.voiceassist.app"))
+        );
+        assert!(config_root_from(None).is_none(), "拿不到 APPDATA 就给 None，不猜路径");
+
+        let conf = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tauri.conf.json"))
+            .expect("读不到 tauri.conf.json");
+        let v: serde_json::Value =
+            serde_json::from_str(conf.trim_start_matches('\u{FEFF}')).expect("tauri.conf.json 不是合法 JSON");
+        assert_eq!(
+            v["identifier"].as_str(),
+            Some(CONFIG_DIR_NAME),
+            "配置根目录名与 tauri.conf.json 的 identifier 不一致，急救程序会找错地方"
+        );
     }
 }

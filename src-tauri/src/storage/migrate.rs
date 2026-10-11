@@ -129,20 +129,120 @@ pub fn migrate_items_with_verify(
 ) -> Result<MigrationReport, String> {
     let backup = legacy_root.join(format!(".migrated-backup-{stamp}"));
     let items = legacy_items(legacy_root);
-    let mut report = MigrationReport { moved: 0, bytes: 0, backup };
+    let mut report = MigrationReport { moved: 0, bytes: 0, backup: backup.clone() };
     if items.is_empty() {
         return Ok(report);
     }
 
+    let done = copy_all_and_verify(content_root, &items, verify)?;
+    for (src, _) in &done {
+        report.bytes += path_size(src);
+    }
+
+    // 走到这里才创建备份目录并把原件移进去（失败也不删原件，下次仍会看到旧项）
+    std::fs::create_dir_all(&backup).map_err(|e| format!("创建备份目录失败: {e}"))?;
+    for (src, _) in done {
+        let target = match src.file_name() {
+            Some(n) => backup.join(n),
+            None => continue,
+        };
+        match std::fs::rename(&src, &target) {
+            Ok(()) => report.moved += 1,
+            Err(e) => log_warn!("迁移原件入备份失败（数据已在新位置，原件保留）: {e}"),
+        }
+    }
+    Ok(report)
+}
+
+/// 回退结果。`restored` 是复制回目标的项数（备份原件一律保留）。
+#[derive(Debug, Default, Clone)]
+pub struct RestoreReport {
+    pub restored: usize,
+    pub bytes: u64,
+    pub backup: PathBuf,
+}
+
+/// 备份目录里可回退的条目 = 同一份内容清单。
+/// 配置类不在清单里，所以回退也不会碰 `settings.json`。
+pub fn backup_items(backup_root: &Path) -> Vec<PathBuf> {
+    legacy_items(backup_root)
+}
+
+/// 目标处已存在的同名条目。回退是“把当年搬走的放回去”，撞上同名 = 那边已有新数据，
+/// 静默覆盖等于用旧消息记下覆盖新消息记下。
+pub fn restore_conflicts(backup_root: &Path, target_root: &Path) -> Vec<String> {
+    backup_items(backup_root)
+        .iter()
+        .filter_map(|src| src.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .filter(|name| target_root.join(name).exists())
+        .collect()
+}
+
+/// 把备份项复制回目标，**备份原样保留**（设计 §五：回退错了还能再试一次）。
+/// 与 `migrate_items` 共用 `copy_all_and_verify`，不写第二份复制+校验。
+pub fn restore_items(backup_root: &Path, target_root: &Path) -> Result<RestoreReport, String> {
+    let items = backup_items(backup_root);
+    let conflicts = restore_conflicts(backup_root, target_root);
+    if !conflicts.is_empty() {
+        return Err(format!(
+            "目标位置已有同名条目，为避免覆盖请先手工处置：{}",
+            conflicts.join("、")
+        ));
+    }
+    let done = copy_all_and_verify(target_root, &items, |_| true)?;
+    let mut report = RestoreReport {
+        restored: done.len(),
+        bytes: 0,
+        backup: backup_root.to_path_buf(),
+    };
+    for (src, _) in &done {
+        report.bytes += path_size(src);
+    }
+    Ok(report)
+}
+
+/// 配置根下的迁移备份目录，按名字典序（目录名就是 `%Y%m%d`，末尾即最新）。
+/// 只认目录且必须带备份前缀：散文件与 `audio` 这类止于内容目录的项不算备份。
+pub fn find_backups(config_root: &Path) -> Vec<PathBuf> {
+    const PREFIX: &str = ".migrated-backup-";
+    let Ok(entries) = std::fs::read_dir(config_root) else {
+        return Vec::new();
+    };
+    let mut out: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_dir()
+                && p.file_name()
+                    .map(|n| n.to_string_lossy().starts_with(PREFIX))
+                    .unwrap_or(false)
+        })
+        .collect();
+    out.sort();
+    out
+}
+
+/// 复制 + 逐项校验的**公用段**：迁移与回退都走这里（设计 §五：“同一套复制+校验代码”）。
+/// 任一项失败就把本次已复制的全删掉再报错，**源侧一律不动**。
+/// 返回成功清单 `(源, 目标)`，调用方自己决定要不要把原件移走。
+/// 不接收根目录参数：`items` 里每项都是 `legacy_items` 给出的绝对路径。
+fn copy_all_and_verify(
+    dst_root: &Path,
+    items: &[PathBuf],
+    verify: impl Fn(&Path) -> bool,
+) -> Result<Vec<(PathBuf, PathBuf)>, String> {
     let mut done: Vec<(PathBuf, PathBuf)> = Vec::new();
-    for src in &items {
+    for src in items {
         let name = match src.file_name() {
             Some(n) => PathBuf::from(n),
             None => continue,
         };
-        let dst = content_root.join(&name);
+        let dst = dst_root.join(&name);
         if let Some(parent) = dst.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("创建目标目录失败: {e}"))?;
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                rollback(&done);
+                return Err(format!("创建目标目录失败: {e}"));
+            }
         }
         let copied = if src.is_dir() {
             crate::copy_dir_all(src, &dst).map_err(|e| format!("复制目录失败: {e}"))
@@ -157,25 +257,11 @@ pub fn migrate_items_with_verify(
         if !verify(&dst) {
             discard(&dst); // 校验不过的正是“当前项”，它尚未进 done，只靠 rollback 会留半成品
             rollback(&done);
-            return Err(format!("迁移校验失败，已回退：{}", dst.display()));
+            return Err(format!("复制校验失败，已回退：{}", dst.display()));
         }
-        report.bytes += path_size(src);
         done.push((src.clone(), dst));
     }
-
-    // 走到这里才创建备份目录并把原件移进去（失败也不删原件，下次仍会看到旧项）
-    std::fs::create_dir_all(&report.backup).map_err(|e| format!("创建备份目录失败: {e}"))?;
-    for (src, _) in done {
-        let target = match src.file_name() {
-            Some(n) => report.backup.join(n),
-            None => continue,
-        };
-        match std::fs::rename(&src, &target) {
-            Ok(()) => report.moved += 1,
-            Err(e) => log_warn!("迁移原件入备份失败（数据已在新位置，原件保留）: {e}"),
-        }
-    }
-    Ok(report)
+    Ok(done)
 }
 
 /// 删掉单次复制产生的目标（目录递归删，文件直接删）；删不掉也不升级为错误——
@@ -294,5 +380,64 @@ mod tests {
         let report = migrate_items(&legacy, &content, "20261011").unwrap();
         assert_eq!(report.moved, 0);
         assert_eq!(report.bytes, 0);
+    }
+
+    #[test]
+    fn 回退把备份项复制回目标且备份保留() {
+        let dir = tempfile::tempdir().unwrap();
+        let backup = dir.path().join(".migrated-backup-20261011");
+        let target = dir.path().join("cfg");
+        std::fs::create_dir_all(backup.join("audio")).unwrap();
+        std::fs::write(backup.join("messages.json"), b"[]").unwrap();
+        std::fs::write(backup.join("audio").join("m_1.wav"), b"abc").unwrap();
+        // 备份里的配置文件不在内容清单里，不该被当作可回退项（现在也不该少搬）
+        std::fs::write(backup.join("settings.json"), b"{}").unwrap();
+
+        let report = restore_items(&backup, &target).unwrap();
+
+        assert_eq!(report.restored, 2, "只搬内容类条目");
+        assert_eq!(report.bytes, 5);
+        assert!(target.join("messages.json").exists());
+        assert!(target.join("audio").join("m_1.wav").exists());
+        assert!(!target.join("settings.json").exists(), "配置不进回退清单");
+        // 设计 §五：备份保留，回退错了还能再试
+        assert!(backup.join("messages.json").exists(), "备份原件不得动");
+    }
+
+    #[test]
+    fn 回退遇同名条目整批拒绝() {
+        // 回退是“把当年搬走的放回去”，目标处已有同名文件 = 已有新数据，
+        // 静默覆盖等于用旧消息记下覆盖新消息记下
+        let dir = tempfile::tempdir().unwrap();
+        let backup = dir.path().join("backup");
+        let target = dir.path().join("cfg");
+        std::fs::create_dir_all(&backup).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(backup.join("messages.json"), b"old").unwrap();
+        std::fs::write(target.join("messages.json"), b"new").unwrap();
+
+        let err = restore_items(&backup, &target).unwrap_err();
+        assert!(err.contains("messages.json"), "报错要列出撞上哪几项：{err}");
+        assert_eq!(std::fs::read(target.join("messages.json")).unwrap(), b"new", "不得覆盖");
+    }
+
+    #[test]
+    fn 备份目录只认备份前缀且按日期排序() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".migrated-backup-20261012")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".migrated-backup-20261011")).unwrap();
+        std::fs::create_dir_all(dir.path().join("audio")).unwrap();
+        std::fs::write(dir.path().join(".migrated-backup-notastamp"), b"x").unwrap();
+
+        let found = find_backups(dir.path());
+        assert_eq!(found.len(), 2, "只应找到两个备份目录");
+        // 字典序 == 时间序（目录名就是 %Y%m%d），取最新就是取末尾。
+        // 注意用 file_name 比：PathBuf::ends_with 比的是路径成分，“20261011”不是独立成分会误判
+        let names: Vec<String> = found
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names[0], ".migrated-backup-20261011");
+        assert_eq!(names[1], ".migrated-backup-20261012");
     }
 }
