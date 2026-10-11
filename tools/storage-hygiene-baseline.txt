@@ -1,0 +1,7 @@
+src-tauri/src/storage/messages.rs|\.join\("audio"\)|1
+src-tauri/src/storage/favorites.rs|\.join\("audio"\)|1
+src-tauri/src/storage/migrate.rs|\.join\("audio"\)|13
+src-tauri/src/storage/audio_gc.rs|\.join\("audio"\)|1
+src-tauri/src/storage/mod.rs|\.join\("audio"\)|1
+src-tauri/src/commands/storage.rs|\.join\("plugin-data"\)|2
+src-tauri/src/plugins/manager.rs|\.join\("plugin-data"\)|2

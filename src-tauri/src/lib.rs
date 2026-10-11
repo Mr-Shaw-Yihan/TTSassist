@@ -34,6 +34,10 @@ use crate::storage::types::Settings;
 fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths {
     use std::path::PathBuf;
     use storage::paths::*;
+    // 存储契约要拦的是“业务代码自己向系统要数据目录”，而这里就是那个唯一解析入口本身
+    //（下游一律拿 StoragePaths，不再自己调）。注意豁免只认本行与紧邻上一行，
+    //  所以 `storageok:` 必须写在调用正上方，不能放在多行说明的第一行。
+    // storageok: 全项目唯一合法的取配置根处
     let config_root = app.path().app_data_dir().expect("无法获取配置目录");
     let exe_dir = std::env::current_exe()
         .expect("无法获取 exe 路径")

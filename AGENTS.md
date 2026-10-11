@@ -71,3 +71,24 @@
 
 测试夹具里的引擎名（`perf.rs`、`manifest.rs`、`registry.rs`、`pluginTaskStore.test.ts` 等）
 只是样例数据，不必拆；它们占位是为了“数字不变就是没新写入”。
+
+## 存储契约（数据路径只能来自 `storage::paths`）
+
+与基座合同并列的另一条硬约束。为什么需要它：全项目向系统要数据目录的代码只有一处，
+但“数据放在哪”的知识曾散在 19 个模块的 `join("audio")` 里——配置与内容分根之后，
+任何一处自己拼路径都会**静默地**把数据写错地方（而且两个根都是 `PathBuf`，编译器一个字不会报）。
+
+1. 业务代码**禁止** `app_data_dir()` / `current_exe()` 取数据路径，也禁止自己
+   `join("audio")` 之类；一律走 `storage::paths::StoragePaths` 的 getter，
+   只持有 `&Path` 时用 `audio_dir_in` / `samples_dir_in` / `downloads_dir_in`。
+2. **配置根**（%APPDATA%）只放 settings / 遥控配对 / 远程配置缓存 / 存储指针；
+   **其余一律内容根**（跟随安装位置）。消息与收藏必须和 `audio/` 同根——
+   删消息要按引用计数删音频，分家会把引用判定弄断。
+3. 记录里不得写绝对路径（`audio_path`、`clone_voice_path` 保持相对内容根）。
+4. `<插件根>` 只放代码（dll/manifest/registry）；模型与运行环境在
+   `<内容根>\plugin-data\<id>`，**卸载插件默认不得牵连它**（默认保留数据，界面必须二选一）。
+5. 执行手段：`pwsh tools/check-storage-hygiene.ps1`（已挂 consistency CI）。基线
+   `tools/storage-hygiene-baseline.txt` 每行 `路径|模式|次数`，**只许变少**（变大/变小/消失全红）；
+   行内豁免 `// storageok: <理由>` 只认**本行或紧邻上一行**——多行说明时标记必须写在调用正上方，
+   写在第一行会静默失效（实测踩过）。`storage/paths.rs` 不在扫描范围：它就是路径的唯一主人，
+   扫它只会刷掉“别处出现即红”的信号。

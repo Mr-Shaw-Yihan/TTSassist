@@ -1041,7 +1041,7 @@ target\debug\va-data-rescue.exe --config-root <cfg> --yes     # 再跑：同名�
 
 ---
 
-### Task 6: 前端「存储」分区与卸载弹窗
+### Task 6: 前端「存储」分区与卸载弹窗 —— ✅ 已完成（111f212，真机点击验收待用户）
 
 **Files:**
 - Create: `src/components/Settings/StoragePanel.tsx`
@@ -1115,9 +1115,29 @@ git add src/components/Settings/StoragePanel.tsx src/components/Settings/Setting
 git commit -m "feat(存储): 设置页新增存储分区，卸载改为显式二选一并显示引擎数据体积"
 ```
 
+**实施记录（计划有三处会直接写坏，已按实际修正）**
+1. Step 3 让卸载弹窗从 `getStorageReport().orphans` 里查体积 —— **这是错的**：`orphans` 的
+   定义就是「插件已不在注册表」，卸载当时插件还装着，永远查不到，体积会一直显示未知。
+   改为新增按需命令 `plugin_data_size(id)`（不进 `list()`：递归求和可能几万文件，
+   插件页一进就全扫会拖住主 runtime）。
+2. Step 3 写的文件是 `InstalledCard.tsx` —— 卸载确认实际在 `usePluginActions.ts`（
+   `actions.uninstall`），InstalledCard 只负渲染。改对了位置。
+3. 卸载要「保留/删除/取消」三态，而项目里的 `confirm()` 只返回 boolean —— 给
+   `ConfirmDialog` 加了通用 `choose()`（多选一，Esc/遮罩 = null），而不是复制第二个弹窗壳；
+   翻默认后的 Conflict 三选也要用同一个。
+4. `formatBytes` 从 VbCableInstallDialog 内部抽到 `utils/format`，并修两处越界（负数 →
+   `-Infinity`、TB 级 → `NaN undefined`）。
+5. 残留列表抽成 `OrphanDataSection`（渲染+删除一份），插件库与设置-存储两处各自取数、
+   都延迟到展开才扫盘（§六.2 与 §六.3 都要用，不写两遍）。
+6. `StoragePanel` 的 Conflict 态**不放**「合并」按钮：后端没有对应命令，点了没反应的
+   按钮比没有按钮更糟。已把该偏差写回设计文档 §六.3。
+
+实际门禁：`cargo test --lib` 209 passed、`tsc` 零输出、vitest **10 files / 74 tests**、
+`npm run build` 通过、三道守卫绿。Step 5 的真机点击尚未做（翻默认前一并交给用户）。
+
 ---
 
-### Task 7: 把契约变成可检查的（存储护栏 + 文档）
+### Task 7: 把契约变成可检查的（存储护栏 + 文档）—— ✅ 已完成
 
 **Files:**
 - Create: `tools/check-storage-hygiene.ps1`（含中文 → 必须带 BOM）
@@ -1189,6 +1209,21 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\tools\check-storage-hygiene.ps1
 git add tools/check-storage-hygiene.ps1 tools/storage-hygiene-baseline.txt .github/workflows/consistency.yml AGENTS.md docs/superpowers/plans/2026-10-11-storage-layout.md
 git commit -m "chore(存储): 存储护栏上 CI，AGENTS.md 与 skill 增存储契约"
 ```
+
+**Step 2 实跑结果与校准**：初稿的 `current_exe\(\)[\s\S]{0,80}join\(...\)` 是**伪需求**——
+扫描器逐行跑，跨行匹配永远不会命中；改成只抓真违规形态（`\.app_data_dir\(\)` 必须带前导点，
+所以 11 处注释/文档提及全部不误伤、只有 lib.rs 一处真调用命中；目录字面量抓 `\.join\("audio"\)` 等）。
+`LocalDataDir|app_cache_dir` 拆成两条：模式里带竖线会被护栏自己的基线格式守卫拒掉。
+`storage/paths.rs` 不入扫描（它就是路径的唯一主人，扫它只产生无意义基线，同基座护栏不扫 `plugins/`）。
+
+基线 7 条逐条核过：全部是 `#[cfg(test)]` 测脚手架里构造临时目录的字面量（含 migrate.rs 13 处），
+无一条是业务代码漏网 —— 按 Step 2 的核对要求，命令层没出现 `app_data_dir()` 即 Task 2/3b 无遗漏。
+`lib.rs` 的解析入口用 `// storageok:` 就地豁免而不是占基线额度（该注释**必须写在调用正上方**：
+豁免只认本行与紧邻上一行，写在多行说明的第一行会静默失效——实测踩过并已写进 AGENTS.md）。
+
+**反向验证（证明护栏不是摆设）**：临时放一个 `zz_guard_probe.rs` 写三处违规 → 护栏当场红、
+退出码 1；删掉后回绿、退出码 0。另：取证时不要用 `Select-Object -First` 接护栏，
+它拆管道会让 `$LASTEXITCODE` 停留在上一条命令的值上（差点把“红”读成“绿”）。
 
 ---
 
