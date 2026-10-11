@@ -452,6 +452,7 @@ pub fn run() {
             crate::commands::settings::get_settings,
             crate::commands::settings::update_setting,
             crate::commands::storage::storage_report,
+            crate::commands::storage::plugin_data_size,
             crate::commands::storage::delete_plugin_data,
             crate::commands::storage::migrate_storage_now,
             crate::commands::audio::resolve_audio_url,

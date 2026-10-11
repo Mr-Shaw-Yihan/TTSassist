@@ -8,9 +8,11 @@ import {
   installPluginZip,
   installBundledPlugin,
   downloadInstallPlugin,
+  getPluginDataSize,
 } from "../services/invoke";
 import { useSettingsStore } from "../stores/settingsStore";
-import { confirm } from "../components/common/ConfirmDialog";
+import { confirm, choose } from "../components/common/ConfirmDialog";
+import { formatBytes } from "../utils/format";
 import { toast } from "../components/common/Toast";
 import type { StoreItem } from "./usePluginInventory";
 import type { PluginInfo } from "../types";
@@ -73,19 +75,40 @@ export function usePluginActions(reload: () => Promise<void>, reloadBundled: () 
 
   const uninstall = useCallback(
     async (p: PluginInfo) => {
-      const ok = await confirm({
+      // 引擎数据（模型/运行环境）可能几 GB：先按需查体积，让用户自己决定删不删。
+      // 查失败就当不知道体积——绝不能因为“扫盘报错”把卸载按钮卡死。
+      setBusy("正在统计引擎数据…");
+      let bytes: number | null = null;
+      try {
+        bytes = await getPluginDataSize(p.id);
+      } catch {
+        bytes = null;
+      } finally {
+        setBusy(null);
+      }
+
+      const dataLine =
+        bytes && bytes > 0
+          ? `\n引擎数据约 ${formatBytes(bytes)}，保留后重装时不必重新下载。`
+          : "";
+      const picked = await choose({
         title: `卸载「${p.name}」`,
-        danger: true,
-        confirmText: "卸载",
         message:
           (p.loaded
             ? "该插件正在使用中，卸载后本次会话内仍可用，重启应用后彻底移除。"
-            : "卸载后立即生效。") + "\n\n确定要卸载吗？",
+            : "卸载后立即生效。") +
+          dataLine +
+          "\n\n要一并删除引擎数据吗？",
+        // 保留排第一：默认值必须是“不删东西”的那一边
+        actions: [
+          { label: "保留数据并卸载", value: "keep" },
+          { label: "卸载并删除数据", value: "delete", danger: true },
+        ],
       });
-      if (!ok) return;
+      if (!picked) return;
       setBusy("正在卸载…");
       try {
-        const msg = await uninstallPlugin(p.id);
+        const msg = await uninstallPlugin(p.id, picked === "delete");
         await reload();
         toast(msg);
       } catch (e) {

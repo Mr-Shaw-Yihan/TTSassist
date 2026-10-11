@@ -45,9 +45,13 @@ export async function listPlugins(): Promise<PluginInfo[]> {
   return invoke<PluginInfo[]>("list_plugins");
 }
 
-/** 卸载插件，返回提示文案（是否需重启等） */
-export async function uninstallPlugin(id: string): Promise<string> {
-  return invoke<string>("uninstall_plugin", { id });
+/**
+ * 卸载插件。`deleteData` 必须是调用方显式给的值：
+ * false = 保留引擎数据（模型/运行环境可能几 GB，重装时不必重新下载），true = 一并删除。
+ * 后端参数名是 snake_case 的 delete_data，Tauri 按驼峰→下划线映射（与 pluginId/zipPath 同口径）。
+ */
+export async function uninstallPlugin(id: string, deleteData: boolean): Promise<string> {
+  return invoke<string>("uninstall_plugin", { id, deleteData });
 }
 
 /** 拖入安装：本地插件 zip 路径，返回提示文案 */
@@ -648,4 +652,55 @@ export async function exportDiagnostics(includeHost: boolean): Promise<{ path: s
 /** main 窗口首帧回执：记录 run() 进入 → 前端首帧的 startup 耗时（后端只记第一次） */
 export async function perfStartupDone(): Promise<void> {
   return invoke<void>("perf_startup_done");
+}
+
+// ── 存储（计划 2026-10-11-storage-layout）─────────────────────
+//
+// 字段与 Rust 侧 StorageReport 逐一对应；Tauri 返回的是 serde 原名（snake_case），
+// 所以这里不得改成驼峰，否则拿到 undefined。
+
+/** 一类占用。kind 是稳定标识（records/audio/samples/logs/cache/downloads/plugin_data），label 给人看 */
+export interface StorageBucket {
+  kind: string;
+  label: string;
+  path: string;
+  bytes: number;
+}
+
+/** 残留：数据还在、插件已不在注册表 */
+export interface OrphanData {
+  id: string;
+  path: string;
+  bytes: number;
+}
+
+export interface StorageReport {
+  config_root: string;
+  content_root: string;
+  /** true = 内容根因不可写而回退，界面必须说明为什么数据没在安装目录 */
+  content_fallback: boolean;
+  buckets: StorageBucket[];
+  orphans: OrphanData[];
+  migration: "none" | "migratable" | "conflict";
+  legacy_bytes: number;
+}
+
+/** 读一次存储报告（递归求和，大目录可能要等以秒计，调用方自己转圈） */
+export async function getStorageReport(): Promise<StorageReport> {
+  return invoke<StorageReport>("storage_report");
+}
+
+/** 某个插件的重数据体积（卸载弹窗按需查；装着的插件不在 orphans 里） */
+export async function getPluginDataSize(id: string): Promise<number> {
+  return invoke<number>("plugin_data_size", { id });
+}
+
+/** 删除已卸载插件的残留引擎数据，返回释放字节数 */
+export async function deletePluginData(id: string): Promise<number> {
+  return invoke<number>("delete_plugin_data", { id });
+}
+
+/** 执行搬家（只在 migration === "migratable" 时可用），返回一句话结果 */
+export async function migrateStorageNow(): Promise<string> {
+  return invoke<string>("migrate_storage_now");
 }

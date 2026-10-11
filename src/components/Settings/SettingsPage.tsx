@@ -14,6 +14,7 @@ import { HotkeyRecorder } from "./HotkeyRecorder";
 import { MicSettings } from "./MicSettings";
 import { PluginConfigPanel } from "./PluginConfigPanel";
 import { Section } from "../common/SettingsSection";
+import { StoragePanel } from "./StoragePanel";
 import { AppUpdater } from "../common/AppUpdater";
 import { CopyableGroupId } from "../common/CopyableGroupId";
 import { TexIcon } from "../icons/TexIcon";
@@ -99,6 +100,12 @@ export function SettingsPage() {
                 ))}
             </Section>
           )}
+
+          {/* 存储：数据存在哪、各占多大、残留引擎数据清理。
+              Section 收起时不渲染 children，所以递归扫盘只在用户展开时才跑一次 */}
+          <Section title="存储">
+            <StoragePanel />
+          </Section>
 
           {/* 快捷键：浮窗呼出 / 语音输入 / 播放最近一条消息 / 开关发送到麦克风 */}
           <Section title="快捷键">

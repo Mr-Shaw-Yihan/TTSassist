@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { downloadVbCable, installVbCable, checkVbCable } from "../../services/invoke";
+import { formatBytes } from "../../utils/format";
 
 interface Props {
   onClose: () => void;
@@ -78,13 +79,7 @@ export function VbCableInstallDialog({ onClose, onInstalled }: Props) {
     }
   }, [zipPath, onInstalled]);
 
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-  };
+  // 体积可读化统一走 utils/format（存储页、卸载弹窗也用同一个，不再各写一份）
 
   const percent = progress.total > 0 ? Math.round((progress.downloaded / progress.total) * 100) : 0;
 

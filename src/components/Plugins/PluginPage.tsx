@@ -7,6 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { usePluginInventory, catOf, supportsClone, type PluginCat, type StoreItem } from "../../hooks/usePluginInventory";
 import { usePluginActions } from "../../hooks/usePluginActions";
 import { InstalledCard } from "./InstalledCard";
+import { OrphanDataDisclosure } from "./OrphanDataSection";
 import { StoreCard } from "./StoreCard";
 import { ToastHost } from "../common/Toast";
 
@@ -278,6 +279,10 @@ export function PluginPage() {
                 </section>
               ),
             )}
+
+            {/* 卸载时选择「保留」下来的引擎数据：设计 §六.2 要求它在插件库看得见。
+                默认收起，展开才扫盘，不给每次进插件页都拖一次磁盘递归求和 */}
+            <OrphanDataDisclosure />
           </>
         )}
 

@@ -23,10 +23,29 @@ export interface InfoOptions {
   confirmText?: string;
 }
 
+/** choice 的一个动作按钮 */
+export interface ChoiceOption {
+  label: string;
+  /** 选中后 resolve 出去的值（由调用方定义） */
+  value: string;
+  /** 危险动作用朱砂 */
+  danger?: boolean;
+}
+
+export interface ChoiceOptions {
+  title: string;
+  message: string;
+  /** 至少两个；点遮罩 / Esc 等于取消（resolve null），不给「默认一边」的按钮 */
+  actions: ChoiceOption[];
+}
+
+/** 三种弹窗共用的结算值：confirm 用 boolean，choice 用动作 value，取消/关闭为 false 或 null */
+type ResolveValue = boolean | string | null;
+
 interface DialogState {
-  kind: "confirm" | "info";
-  opts: ConfirmOptions | null;
-  resolve: ((v: boolean) => void) | null;
+  kind: "confirm" | "info" | "choice";
+  opts: ConfirmOptions | InfoOptions | ChoiceOptions | null;
+  resolve: ((v: ResolveValue) => void) | null;
 }
 
 const useDialogStore = create<DialogState>(() => ({ kind: "confirm", opts: null, resolve: null }));
@@ -37,7 +56,20 @@ export function confirm(opts: ConfirmOptions): Promise<boolean> {
     // 已有未决弹窗时先按取消结算，避免 promise 悬挂
     const prev = useDialogStore.getState();
     if (prev.opts && prev.resolve) prev.resolve(false);
-    useDialogStore.setState({ kind: "confirm", opts, resolve });
+    useDialogStore.setState({ kind: "confirm", opts, resolve: (v) => resolve(v === true) });
+  });
+}
+
+/** 在多个动作里选一个；Esc / 点遮罩 / 取消 = null（调用方必须处理 null 分支） */
+export function choose(opts: ChoiceOptions): Promise<string | null> {
+  return new Promise((resolve) => {
+    const prev = useDialogStore.getState();
+    if (prev.opts && prev.resolve) prev.resolve(null);
+    useDialogStore.setState({
+      kind: "choice",
+      opts,
+      resolve: (v) => resolve(typeof v === "string" ? v : null),
+    });
   });
 }
 
@@ -54,13 +86,21 @@ export function showInfo(opts: InfoOptions): Promise<void> {
   });
 }
 
-function settle(v: boolean) {
+function settle(v: ResolveValue) {
   const { resolve } = useDialogStore.getState();
   resolve?.(v);
   useDialogStore.setState({ opts: null, resolve: null });
 }
 
-/** 对话框渲染宿主：挂在页面根部即可（confirm 与 info 共用） */
+/** 按钮底色。写成字面量常量而不是拼接类名，Tailwind 扫描源码时才能看到完整 class */
+const BTN_BASE = "rounded-lg px-3 py-1.5 text-xs font-medium transition-opacity hover:opacity-90";
+const BTN_SEAL = "bg-[var(--seal)] text-[var(--paper)]";
+const BTN_AMBER = "bg-[var(--amber-500)] text-[var(--paper)]";
+const BTN_INK = "bg-[var(--ink-900)] text-[var(--paper)]";
+const BTN_CANCEL =
+  "rounded-lg border border-[var(--ink-200)] px-3 py-1.5 text-xs text-[var(--ink-500)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]";
+
+/** 对话框渲染宿主：挂在页面根部即可（confirm / info / choice 共用一个弹窗壳） */
 export function ConfirmDialogHost() {
   const kind = useDialogStore((s) => s.kind);
   const opts = useDialogStore((s) => s.opts);
@@ -84,6 +124,12 @@ export function ConfirmDialogHost() {
   }, [opts]);
 
   if (!opts) return null;
+
+  // opts 是三种弹窗的联合体，用 `in` 做结构化收窄，不用类型断言
+  const actions = "actions" in opts ? opts.actions : [];
+  const danger = "danger" in opts && opts.danger === true;
+  const primaryText =
+    ("confirmText" in opts ? opts.confirmText : undefined) ?? (kind === "info" ? "知道了" : "确定");
 
   async function copyAll() {
     try {
@@ -132,27 +178,37 @@ export function ConfirmDialogHost() {
               {copied ? "已复制 ✓" : "复制全文"}
             </button>
           )}
-          {kind === "confirm" && (
-            <button
-              onClick={() => settle(false)}
-              className="rounded-lg border border-[var(--ink-200)] px-3 py-1.5 text-xs text-[var(--ink-500)] transition-colors hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]"
-            >
-              取消
-            </button>
+          {kind === "choice" ? (
+            <>
+              {/* 多选一：「取消」永远排第一且不当默认选项，不给用户闭眼看错的机会 */}
+              <button onClick={() => settle(null)} className={BTN_CANCEL}>
+                取消
+              </button>
+              {actions.map((a) => (
+                <button
+                  key={a.value}
+                  onClick={() => settle(a.value)}
+                  className={[BTN_BASE, a.danger ? BTN_SEAL : BTN_AMBER].join(" ")}
+                >
+                  {a.label}
+                </button>
+              ))}
+            </>
+          ) : (
+            <>
+              {kind === "confirm" && (
+                <button onClick={() => settle(false)} className={BTN_CANCEL}>
+                  取消
+                </button>
+              )}
+              <button
+                onClick={() => settle(true)}
+                className={[BTN_BASE, kind === "confirm" ? (danger ? BTN_SEAL : BTN_AMBER) : BTN_INK].join(" ")}
+              >
+                {primaryText}
+              </button>
+            </>
           )}
-          <button
-            onClick={() => settle(true)}
-            className={[
-              "rounded-lg px-3 py-1.5 text-xs font-medium transition-opacity hover:opacity-90",
-              kind === "confirm"
-                ? opts.danger
-                  ? "bg-[var(--seal)] text-[var(--paper)]"
-                  : "bg-[var(--amber-500)] text-[var(--paper)]"
-                : "bg-[var(--ink-900)] text-[var(--paper)]",
-            ].join(" ")}
-          >
-            {kind === "info" ? (opts.confirmText ?? "知道了") : (opts.confirmText ?? "确定")}
-          </button>
         </div>
       </div>
     </div>

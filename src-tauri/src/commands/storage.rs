@@ -177,6 +177,24 @@ fn bucket(kind: &str, label: &str, path: &Path, bytes: u64) -> StorageBucket {
     }
 }
 
+/// 某插件的重数据体积（目录不存在给 0）。
+/// 单独提供而不放进 `PluginManager::list()`：递归求和可能扫到数万文件，
+/// 插件页一进就扫全部插件会把主 runtime 拖住（设计 §六.4：体积统计要按需跑）。
+pub fn plugin_data_bytes(paths: &StoragePaths, id: &str) -> u64 {
+    paths::dir_size(&paths.plugin_data_dir(id))
+}
+
+/// 卸载弹窗按需求体积：装着的插件**不会出现在 orphans 里**（残留的定义就是未安装），
+/// 所以这个数只能单独查。
+#[tauri::command]
+pub async fn plugin_data_size(id: String, app: AppHandle) -> Result<u64, String> {
+    check_plugin_id(&id)?;
+    let paths = app.state::<StoragePaths>().inner().clone();
+    tauri::async_runtime::spawn_blocking(move || plugin_data_bytes(&paths, &id))
+        .await
+        .map_err(|e| format!("体积扫描任务失败: {e}"))
+}
+
 /// 存储页打开时读一次：两根位置、各类占用、残留清单、能否搬家。
 #[tauri::command]
 pub async fn storage_report(app: AppHandle) -> Result<StorageReport, String> {
@@ -284,6 +302,26 @@ mod tests {
             orphan_plugin_data(&pd, &[]).unwrap(),
             vec!["real-plugin".to_string()]
         );
+    }
+
+    #[test]
+    fn 插件数据体积按目录递归求和而目录缺失给零() {
+        // 卸载弹窗要拿这个数告诉用户“能省 3.2 GB”，查不到时给 0 而不是报错，
+        // 否则扫描失败会把卸载流程卡住
+        let dir = tempfile::tempdir().unwrap();
+        let content = dir.path();
+        let d = paths::plugin_data_dir(content, "kept-plugin");
+        std::fs::create_dir_all(d.join("model")).unwrap();
+        std::fs::write(d.join("model").join("w.bin"), vec![7u8; 4096]).unwrap();
+
+        let p = StoragePaths::from_dirs(
+            content.to_path_buf(),
+            content.to_path_buf(),
+            content.join("plugins"),
+            false,
+        );
+        assert_eq!(plugin_data_bytes(&p, "kept-plugin"), 4096);
+        assert_eq!(plugin_data_bytes(&p, "nope-plugin"), 0, "没建过数据不该报错");
     }
 
     #[test]
