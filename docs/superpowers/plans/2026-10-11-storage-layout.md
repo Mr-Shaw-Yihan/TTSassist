@@ -1278,8 +1278,8 @@ git commit -m "chore(存储): 存储护栏上 CI，AGENTS.md 与 skill 增存储
 
 - [x] **Step 1（已完成 `88b2ba2`）**：把下游 26 个文件的 `data_dir` 标识符机械改名为 `content_dir`（`\bdata_dir\b` 词边界正则，只命中独立 token，不误伤 `plugin_data_dir`/`app_data_dir`/`ensure_data_dirs`/`VA_PLUGIN_DATA_DIR`）；纯改名不改逻辑，落盘结构体字段零改动。
 - [x] **Step 2（已完成，两轮全绿）**：全量门禁 8 道复跑。改名前一轮（`b0e962f`/`fffd47e` 后）与改名后一轮均全绿：`cargo test --lib` 214 passed、`cargo check --lib --tests --bins` 零 warning、`cargo test -p mimo-tts`（在 `plugins` 子工作区）24 passed、`npx tsc --noEmit` 0、`npm run test:run` 74 passed、`npm run build` 0、四道守卫全绿、`verify-index -SkipDist` ALL CONSISTENT。
-- [ ] **Step 3**：真机验收 5 条（设计文档 §九逐条贴结果，尤其「删一条消息仍能按引用删掉音频」与「迁移中途强杀后重跑」）。
-- [ ] **Step 4**：回写 `doc/存储布局与迁移设计.md` 状态行为「已实施」+ 本计划勾选与实施记录；`doc/归档/工作线状态.md` 更新。
+- [x] **Step 3（已完成）**：真机验收。#1/#2/#5 真机逐条过（#2 的“迁移提示可见”10-12 用临时 debug 钩子复验：常驻对话框待用户点“知道了”不自动消失，验完钩子已撀除、未进历史）；#3/#4 本机无只读安装/genie 大数据环境，由单测与 Task 3 覆盖（详设计文档 §九）。临时钩子不在任何提交内。
+- [x] **Step 4（已完成）**：回写 `doc/存储布局与迁移设计.md` 状态行→“已实施（代码完成 + 全量门禁绿，待 1.9.0 发布）”+ §九 逐条贴结果；`doc/归档/工作线状态.md` 同步。
 - [ ] **Step 5**：与 MiMo 线一起走发布（版本号三处同步 1.9.0、release notes、merge main / push / tag / publish.ps1 —— **每一步单独请示用户**）。
 
 ---
