@@ -43,26 +43,28 @@ pub fn detect_state(content_has_data: bool, legacy_present: bool) -> StorageStat
     }
 }
 
-/// 待迁移清单 = 内容类条目。
+/// 内容类条目清单：**迁移与回退共用同一份**（两个方向各自维护的话，改一边漏一边）。
 /// **不含** `settings.json` / `remote-pairing.json` / `storage.json`：配置留在配置根，
 /// 把它们搬走会让下一次启动读不到配置（新旧布局共用同一个配置根目录）。
+const CONTENT_FILES: [&str; 3] = ["messages.json", "favorites.json", "subtitle_history.json"];
+const CONTENT_DIRS: [&str; 5] = [
+    AUDIO_DIR_NAME,
+    SAMPLES_DIR_NAME,
+    LOGS_DIR_NAME,
+    CACHE_DIR_NAME,
+    DOWNLOADS_DIR_NAME,
+];
+
+/// 待迁移清单 = 内容类条目。
 pub fn legacy_items(legacy_root: &Path) -> Vec<PathBuf> {
-    const FILES: [&str; 3] = ["messages.json", "favorites.json", "subtitle_history.json"];
-    const DIRS: [&str; 5] = [
-        AUDIO_DIR_NAME,
-        SAMPLES_DIR_NAME,
-        LOGS_DIR_NAME,
-        CACHE_DIR_NAME,
-        DOWNLOADS_DIR_NAME,
-    ];
     let mut out = Vec::new();
-    for f in FILES {
+    for f in CONTENT_FILES {
         let p = legacy_root.join(f);
         if p.is_file() {
             out.push(p);
         }
     }
-    for d in DIRS {
+    for d in CONTENT_DIRS {
         let p = legacy_root.join(d);
         // 空目录不算“有数据”：否则一个创建失败的空 logs 会永久弹迁移提示
         if p.is_dir() && dir_has_entries(&p) {
@@ -103,18 +105,10 @@ pub fn detect_in(paths: &StoragePaths) -> StorageState {
 
 /// 内容根是否已有内容类数据（判“新布局已就位”用）。
 pub fn content_has_data(content_root: &Path) -> bool {
-    if content_root.join("messages.json").exists() {
-        return true;
-    }
-    [
-        AUDIO_DIR_NAME,
-        SAMPLES_DIR_NAME,
-        LOGS_DIR_NAME,
-        CACHE_DIR_NAME,
-        DOWNLOADS_DIR_NAME,
-    ]
-    .iter()
-    .any(|d| dir_has_entries(&content_root.join(d)))
+    content_root.join("messages.json").exists()
+        || CONTENT_DIRS
+            .iter()
+            .any(|d| dir_has_entries(&content_root.join(d)))
 }
 
 /// 迁移结果。`backup` 是原件被移进去的目录（不删任何东西，可回退）。
@@ -156,7 +150,12 @@ pub fn migrate_items_with_verify(
         ));
     }
 
-    let mut done = copy_all_and_verify(content_root, &to_copy, verify)?;
+    // 迁移是「同名平移」，源叶名即目标叶名（迁移侧不存在 `.N` 归档后缀那回事）
+    let pairs: Vec<(PathBuf, PathBuf)> = to_copy
+        .iter()
+        .filter_map(|src| src.file_name().map(|n| (src.clone(), content_root.join(n))))
+        .collect();
+    let mut done = copy_all_and_verify(&pairs, verify)?;
     // 上一轮已拷成功但没改名成功的项：不重拷，但仍要把原件收进备份（否则下次仍判待迁移）
     for src in &already {
         if let Some(name) = src.file_name() {
@@ -210,24 +209,99 @@ pub struct RestoreReport {
     pub backup: PathBuf,
 }
 
-/// 备份目录里可回退的条目 = 同一份内容清单。
+/// 一条可回退项：`src` 是备份里的实际归档路径（可能是 `messages.json.1`），
+/// `name` 是它放回目标时该用的**逻辑名**（`messages.json`）。两者必须分开——同日多次
+/// 搬迁会把后一份归档改名成 `.1`/`.2`，把归档名直接拷回用户目录就成了脏名字。
+#[derive(Debug, Clone)]
+pub struct RestoreItem {
+    pub src: PathBuf,
+    pub name: String,
+}
+
+/// 把原始叶名归到它的内容类逻辑名上；不属于内容清单（如 `settings.json`）返回 None。
+/// 允许尾随 `.<数字>` 归档后缀（`free_backup_target` 撞名时递增生成），非数字后缀一律不认。
+fn logical_name(raw: &str) -> Option<&'static str> {
+    for candidate in CONTENT_FILES.iter().chain(CONTENT_DIRS.iter()) {
+        let logical: &'static str = candidate;
+        if raw == logical {
+            return Some(logical);
+        }
+        if let Some(rest) = raw.strip_prefix(logical) {
+            if let Some(digits) = rest.strip_prefix('.') {
+                if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
+                    return Some(logical);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 归档后缀号：裸名记 0，`name.N` 记 N。后缀越大越新（`free_backup_target` 只在低位被占时递增）。
+fn backup_suffix(raw: &str, logical: &str) -> usize {
+    if raw == logical {
+        return 0;
+    }
+    // logical 全 ASCII，字节切片安全；跳过 logical 本身与那个 '.'
+    raw[logical.len() + 1..].parse().unwrap_or(0)
+}
+
+/// 备份目录里可回退的条目 = 内容清单，**同一逻辑名只取后缀最大（最新）的那一份**。
+///
+/// 为什么不能沿用 `legacy_items`（按精确名扫）：同日二次搬迁会把本轮归档改名成
+/// `messages.json.1`，裸名 `messages.json` 反而是**更旧**的一份（Windows rename 不覆盖已有项）。
+/// 按裸名回退 = 把用户早已删掉的消息塞回去——这正是 `--list` 实机跑出来的真缺陷。
 /// 配置类不在清单里，所以回退也不会碰 `settings.json`。
-pub fn backup_items(backup_root: &Path) -> Vec<PathBuf> {
-    legacy_items(backup_root)
+pub fn backup_items(backup_root: &Path) -> Vec<RestoreItem> {
+    let Ok(entries) = std::fs::read_dir(backup_root) else {
+        return Vec::new();
+    };
+    // 先按逻辑名收集「后缀最大的那份」
+    let mut best: Vec<(&'static str, usize, PathBuf)> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let raw = match path.file_name() {
+            Some(n) => n.to_string_lossy().into_owned(),
+            None => continue,
+        };
+        let Some(logical) = logical_name(&raw) else { continue };
+        // 空目录不算可回退项，与 legacy_items 口径一致
+        if path.is_dir() && !dir_has_entries(&path) {
+            continue;
+        }
+        let suffix = backup_suffix(&raw, logical);
+        match best.iter_mut().find(|b| b.0 == logical) {
+            Some(slot) => {
+                if suffix > slot.1 {
+                    *slot = (logical, suffix, path);
+                }
+            }
+            None => best.push((logical, suffix, path)),
+        }
+    }
+    // 按固定清单顺序输出（FILES 再 DIRS），保证显示与回退顺序稳定
+    let mut out = Vec::new();
+    for logical in CONTENT_FILES.iter().chain(CONTENT_DIRS.iter()) {
+        if let Some(slot) = best.iter().find(|b| &b.0 == logical) {
+            out.push(RestoreItem { src: slot.2.clone(), name: (*logical).to_string() });
+        }
+    }
+    out
 }
 
 /// 目标处已存在的同名条目。回退是“把当年搬走的放回去”，撞上同名 = 那边已有新数据，
-/// 静默覆盖等于用旧消息记下覆盖新消息记下。
+/// 静默覆盖等于用旧消息记下覆盖新消息记下。**用逻辑名比对**，不是归档名。
 pub fn restore_conflicts(backup_root: &Path, target_root: &Path) -> Vec<String> {
     backup_items(backup_root)
         .iter()
-        .filter_map(|src| src.file_name().map(|n| n.to_string_lossy().into_owned()))
-        .filter(|name| target_root.join(name).exists())
+        .filter(|item| target_root.join(&item.name).exists())
+        .map(|item| item.name.clone())
         .collect()
 }
 
 /// 把备份项复制回目标，**备份原样保留**（设计 §五：回退错了还能再试一次）。
 /// 与 `migrate_items` 共用 `copy_all_and_verify`，不写第二份复制+校验。
+/// 目标名一律用逻辑名：`messages.json.1` 这种归档名绝不能出现在用户目录里。
 pub fn restore_items(backup_root: &Path, target_root: &Path) -> Result<RestoreReport, String> {
     let items = backup_items(backup_root);
     let conflicts = restore_conflicts(backup_root, target_root);
@@ -237,7 +311,11 @@ pub fn restore_items(backup_root: &Path, target_root: &Path) -> Result<RestoreRe
             conflicts.join("、")
         ));
     }
-    let done = copy_all_and_verify(target_root, &items, |_| true)?;
+    let pairs: Vec<(PathBuf, PathBuf)> = items
+        .iter()
+        .map(|it| (it.src.clone(), target_root.join(&it.name)))
+        .collect();
+    let done = copy_all_and_verify(&pairs, |_| true)?;
     let mut report = RestoreReport {
         restored: done.len(),
         bytes: 0,
@@ -313,19 +391,14 @@ fn partition_items(items: &[PathBuf], content_root: &Path) -> (Vec<PathBuf>, Vec
 /// 复制 + 逐项校验的**公用段**：迁移与回退都走这里（设计 §五：“同一套复制+校验代码”）。
 /// 任一项失败就把本次已复制的全删掉再报错，**源侧一律不动**。
 /// 返回成功清单 `(源, 目标)`，调用方自己决定要不要把原件移走。
-/// 不接收根目录参数：`items` 里每项都是 `legacy_items` 给出的绝对路径。
+/// 收 `(源, 目标)` 对而不是「根 + 源列表」：回退的目标叶名是**逻辑名**（可能与源归档名
+/// `messages.json.1` 不同），叶名推导不能只靠 `src.file_name()`，必须由调用方显式给出目标路径。
 fn copy_all_and_verify(
-    dst_root: &Path,
-    items: &[PathBuf],
+    pairs: &[(PathBuf, PathBuf)],
     verify: impl Fn(&Path) -> bool,
 ) -> Result<Vec<(PathBuf, PathBuf)>, String> {
     let mut done: Vec<(PathBuf, PathBuf)> = Vec::new();
-    for src in items {
-        let name = match src.file_name() {
-            Some(n) => PathBuf::from(n),
-            None => continue,
-        };
-        let dst = dst_root.join(&name);
+    for (src, dst) in pairs {
         if let Some(parent) = dst.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
                 rollback(&done);
@@ -333,21 +406,21 @@ fn copy_all_and_verify(
             }
         }
         let copied = if src.is_dir() {
-            crate::copy_dir_all(src, &dst).map_err(|e| format!("复制目录失败: {e}"))
+            crate::copy_dir_all(src, dst).map_err(|e| format!("复制目录失败: {e}"))
         } else {
-            std::fs::copy(src, &dst).map(|_| ()).map_err(|e| format!("复制文件失败: {e}"))
+            std::fs::copy(src, dst).map(|_| ()).map_err(|e| format!("复制文件失败: {e}"))
         };
         if let Err(e) = copied {
-            discard(&dst); // 复制中途失败也可能留下半截目录，它还没进 done，得单独清
+            discard(dst); // 复制中途失败也可能留下半截目录，它还没进 done，得单独清
             rollback(&done);
             return Err(e);
         }
-        if !verify(&dst) {
-            discard(&dst); // 校验不过的正是“当前项”，它尚未进 done，只靠 rollback 会留半成品
+        if !verify(dst) {
+            discard(dst); // 校验不过的正是“当前项”，它尚未进 done，只靠 rollback 会留半成品
             rollback(&done);
             return Err(format!("复制校验失败，已回退：{}", dst.display()));
         }
-        done.push((src.clone(), dst));
+        done.push((src.clone(), dst.clone()));
     }
     Ok(done)
 }
@@ -526,6 +599,32 @@ mod tests {
             .collect();
         assert_eq!(extra.len(), 1, "本轮回退件应改名归档：{extra:?}");
         assert_eq!(std::fs::read(backup.join(&extra[0])).unwrap(), b"same-bytes");
+    }
+
+    #[test]
+    fn 回退取同一逻辑名的最新归档而不是裸名那份() {
+        // 同日二次搬迁会把本轮归档改名成 `messages.json.1`，裸名留下的反而是**更旧**的一份
+        //（裸名是第一次搬迁归档的，Windows rename 不覆盖已有项）。
+        // 按裸名回退 = 把用户早已删掉的消息列表塞回去，所以必须取后缀最大的那份。
+        let dir = tempfile::tempdir().unwrap();
+        let backup = dir.path().join(".migrated-backup-20261011");
+        let target = dir.path().join("cfg");
+        std::fs::create_dir_all(&backup).unwrap();
+        std::fs::write(backup.join("messages.json"), b"older-list").unwrap();
+        std::fs::write(backup.join("messages.json.1"), b"newest-list").unwrap();
+
+        let items = backup_items(&backup);
+        assert_eq!(items.len(), 1, "同一逻辑名的多份归档只能算一项");
+        assert_eq!(items[0].name, "messages.json", "回退时必须用逻辑名，不能叫 messages.json.1");
+
+        let report = restore_items(&backup, &target).unwrap();
+        assert_eq!(report.restored, 1);
+        assert_eq!(
+            std::fs::read(target.join("messages.json")).unwrap(),
+            b"newest-list",
+            "必须拿最新归档，目标处也不能出现 messages.json.1 这种名字"
+        );
+        assert!(!target.join("messages.json.1").exists());
     }
 
     #[test]

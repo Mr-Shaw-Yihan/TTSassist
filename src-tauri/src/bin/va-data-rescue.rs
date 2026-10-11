@@ -107,10 +107,19 @@ fn run(o: &Options) -> Result<(), String> {
     println!("将回退这些条目到配置根：");
     let mut total = 0u64;
     for it in &items {
-        let size = migrate::path_size(it);
+        let size = migrate::path_size(&it.src);
         total += size;
-        let name = it.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        println!("    {:>9} KB  {name}", size / 1024);
+        // 若取的是 `.N` 归档变体（同日多次搬迁），把实际归档名也告诉用户，免得他们以为拿错了
+        let archived = it
+            .src
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if archived == it.name {
+            println!("    {:>9} KB  {}", size / 1024, it.name);
+        } else {
+            println!("    {:>9} KB  {}（取自最新归档 {archived}）", size / 1024, it.name);
+        }
     }
     println!("合计 {:.1} MB", mb(total));
 
