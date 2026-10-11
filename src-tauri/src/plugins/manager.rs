@@ -117,6 +117,14 @@ impl PluginManager {
             .collect();
         let bootstrapped_loaded =
             manager.bootstrap_bundled_zips(&mut reg, &bundled_dirs);
+        // 先把旧布局的插件重数据（plugins/<id>/data）搬到独立根（<内容根>\plugin-data）。
+        // 必须跑在孤儿清理**之前**：未注册插件的旧 data 否则会跟着孤儿代码目录一起被删。
+        if let Some(data_root) = crate::plugins::loader::plugin_data_root() {
+            let moved = relocate_plugin_data(&manager.plugins_root, &data_root);
+            if moved > 0 {
+                log_info!("已迁移 {moved} 个插件的运行数据到独立目录（卸载插件不再牵连模型）");
+            }
+        }
         // 清理孤儿目录：不在注册表里的插件目录（来自"运行中卸载"的残留）
         sweep_orphan_dirs(&manager.plugins_root, &reg);
 
@@ -665,11 +673,13 @@ impl PluginManager {
             .collect()
     }
 
-    /// 卸载插件：注册表移除 + 删除目录。
+    /// 卸载插件：注册表移除 + 删除插件代码目录。
     /// dll 运行期不卸载（常驻约束）：已加载的插件本次会话内仍可用，重启后彻底消失。
     /// 若目录因 dll 被占用删不掉（Windows 特性），留给下次启动的孤儿清理。
+    /// `delete_data=false` 时**保留** `<内容根>\plugin-data\<id>`（模型/运行环境几 GB，
+    /// 重装即用）；界面必须把体积显示出来并让用户二选一，不得静默删。
     /// 返回提示文案（是否需要重启）。
-    pub fn uninstall(&self, id: &str) -> Result<String, PluginError> {
+    pub fn uninstall(&self, id: &str, delete_data: bool) -> Result<String, PluginError> {
         // id 合法性兜底（防路径穿越）
         if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
             return Err(PluginError::Unsupported(format!("非法插件 id：{id}")));
@@ -689,6 +699,23 @@ impl PluginManager {
         if dir.exists() {
             if let Err(e) = std::fs::remove_dir_all(&dir) {
                 log_warn!("插件目录删除失败（重启后自动清理）: {e}");
+            }
+        }
+
+        // 2.5 只有用户显选了“删除引擎数据”才动 plugin-data（默认保留）
+        if delete_data {
+            if let Some(root) = crate::plugins::loader::plugin_data_root() {
+                let data_dir = root.join(id);
+                if data_dir.exists() {
+                    let freed = crate::storage::paths::dir_size(&data_dir);
+                    match std::fs::remove_dir_all(&data_dir) {
+                        Ok(()) => log_info!(
+                            "已删除插件「{id}」的引擎数据（释放 {} MB）",
+                            freed / (1024 * 1024)
+                        ),
+                        Err(e) => log_warn!("引擎数据删除失败: {e}"),
+                    }
+                }
             }
         }
 
@@ -819,7 +846,52 @@ fn copy_staged_to(
     Ok(())
 }
 
-/// 清理孤儿插件目录：plugins/ 下不在注册表中的目录（运行中卸载的残留）。
+/// 把旧布局的 `plugins/<id>/data` 搬到 `<重数据根>\<id>`（幂等：目标已存在则跳过，不合并）。
+/// 返回搬运项数。失败就保留原件不删——宁可多占一份，也不能把用户的模型弄丢。
+fn relocate_plugin_data(plugins_root: &Path, data_root: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(plugins_root) else { return 0 };
+    let mut moved = 0usize;
+    for entry in entries.flatten() {
+        let src_dir = entry.path();
+        if !src_dir.is_dir() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().to_string();
+        // pending 等宿主自用子目录不是插件 id 目录，不参与
+        if name == "pending" {
+            continue;
+        }
+        let old_data = src_dir.join("data");
+        if !old_data.is_dir() {
+            continue;
+        }
+        let dst = data_root.join(&name);
+        if dst.exists() {
+            continue;
+        }
+        if std::fs::create_dir_all(data_root).is_err() {
+            continue;
+        }
+        // 同盘 rename 最快；失败（典型是跨盘）退回递归复制
+        if std::fs::rename(&old_data, &dst).is_ok() {
+            moved += 1;
+            continue;
+        }
+        if crate::copy_dir_all(&old_data, &dst).is_ok() {
+            // 复制成功后才删原件；删不掉也不影响正确性（下次仍会跳过）
+            let _ = std::fs::remove_dir_all(&old_data);
+            moved += 1;
+        } else {
+            log_warn!("插件重数据搬迁失败，保留原位: {}", old_data.display());
+            let _ = std::fs::remove_dir_all(&dst);
+        }
+    }
+    moved
+}
+
+/// 清理孤儿插件目录：**只**遍历 `plugins_root` 顶层，永不触碰 `<内容根>\plugin-data\`
+/// （那是用户可能刻意保留的模型/运行环境，只能由「存储」页显式清理）。
+/// plugins/ 下不在注册表中的目录（运行中卸载的残留）。
 /// pending 目录由安装流程管理，不清理。删除失败只记日志。
 fn sweep_orphan_dirs(plugins_root: &Path, reg: &registry::Registry) {
     let entries = match std::fs::read_dir(plugins_root) {
@@ -847,6 +919,41 @@ fn sweep_orphan_dirs(plugins_root: &Path, reg: &registry::Registry) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 重数据搬迁把旧data搬到独立根() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugins = dir.path().join("plugins");
+        let data_root = dir.path().join("data").join("plugin-data");
+        let old = plugins.join("demo-tts").join("data");
+        std::fs::create_dir_all(old.join("models")).unwrap();
+        std::fs::write(old.join("models").join("m.bin"), b"m").unwrap();
+
+        assert_eq!(relocate_plugin_data(&plugins, &data_root), 1);
+        assert!(data_root.join("demo-tts").join("models").join("m.bin").exists());
+        assert!(!old.exists(), "旧位置应被搬走");
+        // 幂等：再跑一次无事可做
+        assert_eq!(relocate_plugin_data(&plugins, &data_root), 0);
+    }
+
+    #[test]
+    fn 孤儿清理只删插件代码目录不碰plugin_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let plugins = dir.path().join("plugins");
+        let data_root = dir.path().join("data").join("plugin-data");
+        std::fs::create_dir_all(plugins.join("gone-plugin")).unwrap();
+        std::fs::create_dir_all(data_root.join("gone-plugin")).unwrap();
+        std::fs::write(data_root.join("gone-plugin").join("model.bin"), b"x").unwrap();
+
+        let reg = registry::load_registry(&plugins);
+        sweep_orphan_dirs(&plugins, &reg);
+
+        assert!(!plugins.join("gone-plugin").exists(), "孤儿代码目录应被清掉");
+        assert!(
+            data_root.join("gone-plugin").join("model.bin").exists(),
+            "插件重数据必须保留——用户可能就是特意选保留的，删了就等于重下几 GB"
+        );
+    }
 
     /// 编译测试桩插件（首次较慢，产物缓存后接近瞬时），返回 dll 路径
     fn build_test_plugin_dll() -> PathBuf {
@@ -1110,7 +1217,7 @@ mod tests {
         assert!(pm.is_installed("test-plugin"), "首轮内置引导应装上");
 
         // 用户卸载 → 记入抑制名单
-        pm.uninstall("test-plugin").unwrap();
+        pm.uninstall("test-plugin", false).unwrap();
         let after = registry::load_registry(&plugins_root);
         assert!(
             after.suppressed.iter().any(|s| s == "test-plugin"),

@@ -57,6 +57,49 @@ pub struct LoadedPlugin {
 unsafe impl Send for LoadedPlugin {}
 unsafe impl Sync for LoadedPlugin {}
 
+// ── 插件重数据目录（与插件代码分离）───────────────────
+//
+// 为什么分开：以前重数据（模型、运行环境、音色包）住在 `plugins/<id>/data`，
+// 于是“卸载/重装/孤儿清理插件代码”会顺手删掉几 GB 模型，用户只能重下
+// （实测：换个工作树跑一次，本地引擎的运行环境“像丢了”）。
+// 目标：插件代码可装卸，重数据独立存留。
+//
+// 旧行为保留：没设过根（单测、早期启动）时退回“插件目录内 data”，不拆坏任何现有行为。
+
+/// 插件重数据根（= `<内容根>\plugin-data`），启动时由宿主设一次
+static PLUGIN_DATA_ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// 设置插件重数据根（重复调用只认第一次，与 OnceLock 同语义）
+pub fn set_plugin_data_root(dir: &Path) {
+    let _ = PLUGIN_DATA_ROOT.set(dir.to_path_buf());
+}
+
+/// 当前已设置的重数据根（未设置返回 None）
+pub fn plugin_data_root() -> Option<PathBuf> {
+    PLUGIN_DATA_ROOT.get().cloned()
+}
+
+/// 纯函数：给定可选重数据根解析该插件的数据目录。
+/// 注意口径：这里的 `plugin_data_root` **已是 `<内容根>\plugin-data` 本身**
+/// （与 `storage::paths::plugin_data_dir(内容根, id)` 不同，那个收的是内容根）。
+/// 为什么单独拆出来：OnceLock 是进程级的，单测并行跑会互相污染；
+/// 把“怎么算”与“从哪拿”分开后，前者可直接单测，后者只做胶水。
+pub fn resolve_data_dir(
+    plugin_data_root: Option<&Path>,
+    plugin_dir: &Path,
+    id: &str,
+) -> PathBuf {
+    match plugin_data_root {
+        Some(root) => root.join(crate::storage::paths::plugin_dir_name(id)),
+        None => plugin_dir.join("data"),
+    }
+}
+
+/// 插件数据目录（读全局根后的便捷入口）
+pub fn plugin_data_dir_for(plugin_dir: &Path, id: &str) -> PathBuf {
+    resolve_data_dir(plugin_data_root().as_deref(), plugin_dir, id)
+}
+
 impl LoadedPlugin {
     /// 加载一个插件目录（内含 manifest.json 与 dll）
     pub fn load(plugin_dir: &Path, app_version: &str) -> Result<Arc<Self>, PluginError> {
@@ -67,7 +110,7 @@ impl LoadedPlugin {
         // 1.5 为插件准备数据目录并通过环境变量告知（本地模型类插件在此放模型/缓存）。
         // 变量名按插件 id 区分（大写、连字符转下划线），多插件互不覆盖；
         // 加载是串行进行的，此处 set_var 无并发问题。插件应在初始化时读取并缓存。
-        let data_dir = plugin_dir.join("data");
+        let data_dir = plugin_data_dir_for(plugin_dir, &manifest.id);
         if let Err(e) = std::fs::create_dir_all(&data_dir) {
             log_warn!("提示：插件「{}」数据目录创建失败: {e}", manifest.id);
         }
@@ -665,6 +708,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn 未设重数据根时退回插件目录内data保持旧行为() {
+        let pdir = Path::new("/app/plugins/demo-tts");
+        assert_eq!(resolve_data_dir(None, pdir, "demo-tts"), PathBuf::from("/app/plugins/demo-tts/data"));
+    }
+
+    #[test]
+    fn 设了重数据根后数据目录不再落在插件目录内() {
+        let root = Path::new("/data/plugin-data");
+        let pdir = Path::new("/app/plugins/demo-tts");
+        let got = resolve_data_dir(Some(root), pdir, "demo-tts");
+        assert_eq!(got, PathBuf::from("/data/plugin-data/demo-tts"));
+        // 关键不变量：卸载/重装/孤儿清理插件代码碰不到它
+        assert!(!got.starts_with(pdir));
+    }
+
+    #[test]
     fn sha256_已知值() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.bin");
@@ -847,7 +906,7 @@ impl LoadedServicePlugin {
         manifest.validate(app_version)?;
 
         // 2. 数据目录环境变量（与 TTS/ASR 插件同约定）
-        let data_dir = plugin_dir.join("data");
+        let data_dir = plugin_data_dir_for(plugin_dir, &manifest.id);
         if let Err(e) = std::fs::create_dir_all(&data_dir) {
             log_warn!("提示：插件「{}」数据目录创建失败: {e}", manifest.id);
         }
@@ -949,7 +1008,7 @@ impl LoadedFxPlugin {
         manifest.validate(app_version)?;
 
         // 2. 数据目录环境变量（与其它类型同约定；效果器通常用不到，保持一致性）
-        let data_dir = plugin_dir.join("data");
+        let data_dir = plugin_data_dir_for(plugin_dir, &manifest.id);
         if let Err(e) = std::fs::create_dir_all(&data_dir) {
             log_warn!("提示：插件「{}」数据目录创建失败: {e}", manifest.id);
         }

@@ -141,6 +141,22 @@ pub fn plugin_dir_name(id: &str) -> String {
         .collect()
 }
 
+/// 递归求目录字节数。不跟符号链接（虚拟环境里常见链接，跟进去会重复计数甚至死循环）。
+/// 只在按需场合用（卸载弹窗、存储页），别放进启动路径。
+pub fn dir_size(p: &Path) -> u64 {
+    let mut total = 0u64;
+    let Ok(entries) = std::fs::read_dir(p) else { return 0 };
+    for entry in entries.flatten() {
+        let Ok(ft) = entry.file_type() else { continue };
+        if ft.is_dir() {
+            total += dir_size(&entry.path());
+        } else if ft.is_file() {
+            total += entry.metadata().map(|m| m.len()).unwrap_or(0);
+        }
+    }
+    total
+}
+
 /// 真实可写探测：建目录后写一个临时文件再删掉（只清自己造的文件）。
 pub fn probe_writable(dir: &Path) -> bool {
     if std::fs::create_dir_all(dir).is_err() {

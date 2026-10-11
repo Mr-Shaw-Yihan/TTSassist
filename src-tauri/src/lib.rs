@@ -102,7 +102,7 @@ fn migrate_plugins_if_needed(data_dir: &std::path::Path, plugins_root: &std::pat
 }
 
 /// 递归复制目录（迁移用）
-fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+pub(crate) fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
@@ -210,9 +210,14 @@ pub fn run() {
             // 旧版插件在 `<AppData>\plugins`：那里现在仍是配置根下路径
             migrate_plugins_if_needed(&config_dir, &plugins_root);
 
+            // 插件重数据根必须在 load_all 之前设好：加载时会据此注入
+            // VA_PLUGIN_DATA_DIR_<ID>，并把旧布局的 plugins/<id>/data 搬过来
+            plugins::loader::set_plugin_data_root(&paths.plugin_data_root());
+
             // 移动端遥控已本体化：在插件加载前清理旧 lan-remote（迁移配对 token +
             // 删注册表条目/插件目录/残留内置 zip），避免其被重新加载与本体服务抢 45271
-            remote::purge_legacy_plugin(&plugins_root, &data_dir);
+            // 配对记录属配置 → 走配置根
+            remote::purge_legacy_plugin(&plugins_root, &config_dir);
 
             // 插件系统：加载已安装插件（单个插件失败只记日志，不影响主流程）；
             // 传入 AppHandle 供宿主能力桥注入（声明 requires_host_bridge 的插件）

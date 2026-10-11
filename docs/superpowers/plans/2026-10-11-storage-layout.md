@@ -575,6 +575,33 @@ git commit -m "feat(插件): 插件重数据独立到 data/plugin-data 并让卸
 
 ---
 
+### Task 3b: 调用点归属重分配（翻默认前必做完）
+
+Task 3 先完成了插件重数据分离；本步把“哪些读写走配置根、哪些走内容根”逐个改对。
+**因为现在两根仍相等，这一步全部是行为中性改动**；但 Task 4 Step 6 翻默以前必须做完，
+否则会出现“settings 写到内容根、代码去配置根读”这类静默分裂。
+
+走**配置根**（`state.config_dir` / `paths.settings_file()` / `paths.pairing_file()`）：
+
+| 文件 | 行 | 内容 |
+|---|---|---|
+| `commands/plugins.rs` | 111 / 152 / 184 / 357 / 389 | `update_setting` / `save_settings`（卸载、配置保存、环境安装回写） |
+| `commands/clone_voice.rs` | 74 / 76 / 114 / 116 | 导入与删除样本时回写 settings |
+| `commands/floating_ball.rs` | 81 / 121 / 283 | 悬浮球偏好写入 |
+| `commands/settings.rs` | 34 | 通用 `update_setting` 入口 |
+| `commands/subtitle.rs` | 383 | 字幕设置回写 |
+| `plugins/bridge.rs` | 359 | 能力桥改设置 |
+| `hotkey.rs` | 147 / 226 / 302 / 384 | 快捷键与设备设置回写 |
+| `remote/mod.rs` | 114 | 配对记录（Task 3 已改） |
+| `lib.rs` | 已改 | `migrate_legacy_engine` / `load_settings` |
+
+走**内容根**（`paths.*_dir()` / `paths.*_file()`）：`messages.json`、`favorites.json`、
+`subtitle_history.json`、`audio/`、`voice_samples/`、`logs/`、`cache/`、`downloads/`（vbcable 已改）、
+`plugin-data/<id>`（Task 3 已改）。
+
+验收：改完跑一次全量门禁（期望测试数不变，纯改参数来源），再请用户确认一遍“设置仍可读”；
+完成后才能进 Task 4 Step 6 翻默认。
+
 ### Task 4: 首启数据检测与可回退迁移
 
 **Files:**

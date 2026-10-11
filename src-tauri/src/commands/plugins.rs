@@ -78,11 +78,14 @@ pub(crate) fn pick_fallback_engine(
     Some(usable[0].id.clone())
 }
 
-/// 卸载插件：注册表移除 + 删目录 + 清理 plugin_config 条目与环境变量。
+/// 卸载插件：注册表移除 + 删插件代码目录 + 清理 plugin_config 条目与环境变量。
 /// 已加载的 dll 常驻到进程退出，返回文案告知用户是否需要重启。
+/// `delete_data` 默认 false：**保留**引擎数据（模型/运行环境可能几 GB），
+/// 界面必须显式事二选一并显示体积，不得静默删（存储契约）。
 #[tauri::command]
 pub fn uninstall_plugin(
     id: String,
+    delete_data: Option<bool>,
     plugins: State<'_, PluginManager>,
     state: State<'_, AppState>,
     app: tauri::AppHandle,
@@ -155,7 +158,9 @@ pub fn uninstall_plugin(
         }
     }
 
-    let outcome = plugins.uninstall(&id).map_err(|e| e.to_string())?;
+    let outcome = plugins
+        .uninstall(&id, delete_data.unwrap_or(false))
+        .map_err(|e| e.to_string())?;
 
     // 卸载兜底：被卸的正是当前引擎时自动切到可用引擎，避免用户下次合成撞「引擎不可用」。
     // registry 已在 uninstall 里移除该条目，list() 天然不会再选中它。
@@ -472,7 +477,8 @@ fn import_offline_resources_inner(
     let mut archive =
         zip::ZipArchive::new(file).map_err(|e| format!("资源包不是合法的 zip 文件: {e}"))?;
 
-    let dest = plugin_dir.join("data");
+    // 重数据写到独立根（没设根时退回旧的 plugin_dir/data）
+    let dest = crate::plugins::loader::plugin_data_dir_for(&plugin_dir, plugin_id);
     std::fs::create_dir_all(&dest).map_err(|e| format!("创建数据目录失败: {e}"))?;
 
     let mut found_hubert = false;
@@ -546,7 +552,8 @@ fn clean_failed_resources_inner(plugins_root: &Path, plugin_id: &str) -> Result<
     {
         return Err(format!("非法插件 id：{plugin_id}"));
     }
-    let data_dir = plugins_root.join(plugin_id).join("data");
+    let data_dir =
+        crate::plugins::loader::plugin_data_dir_for(&plugins_root.join(plugin_id), plugin_id);
     if !data_dir.exists() {
         return Ok("没有需要清除的失败资源".to_string());
     }
