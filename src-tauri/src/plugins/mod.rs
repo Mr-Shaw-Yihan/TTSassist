@@ -35,8 +35,8 @@ use thiserror::Error;
 /// 真相 `plugin_voices`；随后读设置会用默认值补回、并随遗留 Key 迁移一起写回，但它不参与
 /// 插件合成——完整启动序列的真实终态由 settings.rs 的启动序列测试钉住。
 /// 注意：默认值改 `edge-tts` 只影响全新安装与缺字段的情况，**不会把老用户悄悄换引擎**。
-pub fn migrate_legacy_engine(content_dir: &Path) {
-    let path = content_dir.join("settings.json");
+pub fn migrate_legacy_engine(config_dir: &Path) {
+    let path = config_dir.join("settings.json");
     let raw = match std::fs::read_to_string(&path) {
         Ok(s) => s,
         Err(_) => return,

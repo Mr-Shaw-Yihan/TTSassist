@@ -88,8 +88,8 @@ fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths
 
 /// 首次运行迁移：把旧 APPDATA 下的插件复制到新位置（exe 同级 plugins/）。
 /// 旧目录保留不删（安全起见）；新位置已有 registry.json 则跳过（避免覆盖）。
-fn migrate_plugins_if_needed(content_dir: &std::path::Path, plugins_root: &std::path::Path) {
-    let old_root = content_dir.join("plugins");
+fn migrate_plugins_if_needed(config_dir: &std::path::Path, plugins_root: &std::path::Path) {
+    let old_root = config_dir.join("plugins");
     let old_registry = old_root.join("registry.json");
     let new_registry = plugins_root.join("registry.json");
 
@@ -286,7 +286,9 @@ pub fn run() {
 
             // 移动端遥控（本体常驻服务）：WS 服务 + mDNS 广播。须在 HostBridge/AppState/
             // MicPlayback 就绪后启动（native_* 能力依赖三者）；RemoteCore 供 remote_session_info 读取
-            let remote_shared = remote::spawn(app.handle().clone(), content_dir.clone());
+            // ⚠ 必须传配置根：spawn 内的 dir 只用于 Pairing::load 读 remote-pairing.json（属配置），
+            // 翻默认前两根相等看不出来，传内容根会导致配对读写错根（老用户免重配失效）。
+            let remote_shared = remote::spawn(app.handle().clone(), config_dir.clone());
             app.manage(remote::RemoteCore::new(remote_shared));
 
             // 字幕监听运行态（采集/VAD/ASR 编排会话的启停与历史）

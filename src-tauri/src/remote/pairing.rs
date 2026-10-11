@@ -49,8 +49,8 @@ fn gen_token() -> String {
 
 impl Pairing {
     /// 从本体数据目录加载（有持久化记录则带出）
-    pub fn load(content_dir: &Path) -> Self {
-        let path = content_dir.join(FILE);
+    pub fn load(config_dir: &Path) -> Self {
+        let path = config_dir.join(FILE);
         let record = std::fs::read_to_string(&path)
             .ok()
             .and_then(|s| {

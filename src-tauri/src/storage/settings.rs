@@ -11,14 +11,14 @@ use super::types::Settings;
 
 const FILE: &str = "settings.json";
 
-fn path(content_dir: &Path) -> std::path::PathBuf {
-    content_dir.join(FILE)
+fn path(config_dir: &Path) -> std::path::PathBuf {
+    config_dir.join(FILE)
 }
 
 /// 读设置。文件不存在/解析失败/部分字段缺失时用默认值补齐，永不报错。
 /// 这样老版本配置文件升级时，缺的新字段会自动用默认值兜住。
-pub fn load_settings(content_dir: &Path) -> Settings {
-    let p = path(content_dir);
+pub fn load_settings(config_dir: &Path) -> Settings {
+    let p = path(config_dir);
     if !p.exists() {
         return Settings::default();
     }
@@ -99,7 +99,7 @@ pub fn load_settings(content_dir: &Path) -> Settings {
     };
     // 存量迁移：旧顶层 API Key 键搬入 plugin_config（一次性，搬完落盘删旧键）
     if migrate_legacy_plugin_keys(&mut settings) {
-        let _ = save_settings(content_dir, &settings);
+        let _ = save_settings(config_dir, &settings);
     }
     settings
 }
@@ -157,13 +157,13 @@ fn migrate_legacy_plugin_keys(s: &mut Settings) -> bool {
 }
 
 /// 整体写回设置。
-pub fn save_settings(content_dir: &Path, settings: &Settings) -> Result<()> {
-    write_json_pretty(&path(content_dir), settings)
+pub fn save_settings(config_dir: &Path, settings: &Settings) -> Result<()> {
+    write_json_pretty(&path(config_dir), settings)
 }
 
 /// 改单个键并返回完整的 settings。key 为已知的几个字段名。
-pub fn update_setting(content_dir: &Path, key: &str, value: serde_json::Value) -> Result<Settings> {
-    let mut s = load_settings(content_dir);
+pub fn update_setting(config_dir: &Path, key: &str, value: serde_json::Value) -> Result<Settings> {
+    let mut s = load_settings(config_dir);
     match key {
         // 引擎不得被写成空串（与 load_settings 同口径：空串视为不改，
         // 否则会命中插件查表分支报「引擎「」不可用」）
@@ -228,7 +228,7 @@ pub fn update_setting(content_dir: &Path, key: &str, value: serde_json::Value) -
         "fx_params" => if let Ok(map) = serde_json::from_value::<std::collections::HashMap<String, std::collections::HashMap<String, String>>>(value.clone()) { s.fx_params = map },
         _ => {} // 未知键忽略
     }
-    save_settings(content_dir, &s)?;
+    save_settings(config_dir, &s)?;
     Ok(s)
 }
 

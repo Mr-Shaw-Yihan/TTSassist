@@ -6,7 +6,7 @@
 // - mdns.rs     _ttsassist-remote._tcp 局域网发现广播
 // - web.rs      自托管网页遥控器（remote_page.html 编译进本体）
 //
-// 对外：spawn(app, content_dir) 启动服务；RemoteCore 作为 Tauri State 供 remote_session_info 读取；
+// 对外：spawn(app, config_dir) 启动服务；RemoteCore 作为 Tauri State 供 remote_session_info 读取；
 // purge_legacy_plugin 在插件加载前清理旧 lan-remote（迁移 token + 删注册表条目/目录/内置 zip）。
 // 宿主能力经 plugins::bridge 的 native_* 函数直接调用（不再走 C ABI）。
 
@@ -66,9 +66,9 @@ pub fn remote_session_info(core: tauri::State<'_, RemoteCore>) -> SessionInfo {
 /// WS 服务，另起独立线程做 mDNS 广播。返回共享态（供 manage 成 RemoteCore）。
 ///
 /// 须在 HostBridge / AppState / MicPlayback 就绪后调用（native_* 能力依赖它们）。
-pub fn spawn(app: AppHandle, content_dir: PathBuf) -> Arc<Shared> {
+pub fn spawn(app: AppHandle, config_dir: PathBuf) -> Arc<Shared> {
     // 配对记录：加载持久化（旧 token 已由 purge_legacy_plugin 迁移到本体数据目录）
-    let pairing = pairing::Pairing::load(&content_dir);
+    let pairing = pairing::Pairing::load(&config_dir);
     let shared = Arc::new(server::Shared::new(pairing, app.clone()));
 
     // 事件转发：注册到宿主能力桥，与插件共用同一套事件 JSON
@@ -106,12 +106,12 @@ pub fn spawn(app: AppHandle, content_dir: PathBuf) -> Arc<Shared> {
 /// 1. 迁移旧 token（本体记录不存在且旧插件 token.json 存在 → 老用户免重配）；
 /// 2. 从注册表移除 lan-remote 条目并删除插件目录；
 /// 3. 删除残留内置 zip（防止 bootstrap_bundled_zips 重装抢占 45271）。
-pub fn purge_legacy_plugin(plugins_root: &Path, content_dir: &Path) {
+pub fn purge_legacy_plugin(plugins_root: &Path, config_dir: &Path) {
     const LEGACY_ID: &str = "lan-remote";
     let legacy_dir = plugins_root.join(LEGACY_ID);
 
     // 1. 迁移旧 token（旧格式仅 {token}，迁为无设备名的本体记录）
-    let new_path = content_dir.join(pairing::FILE);
+    let new_path = config_dir.join(pairing::FILE);
     let old_token = legacy_dir.join("data").join("token.json");
     if !new_path.exists() && old_token.exists() {
         if let Ok(raw) = std::fs::read_to_string(&old_token) {
@@ -128,7 +128,7 @@ pub fn purge_legacy_plugin(plugins_root: &Path, content_dir: &Path) {
                         paired_at: None,
                         last_seen: None,
                     };
-                    let _ = std::fs::create_dir_all(content_dir);
+                    let _ = std::fs::create_dir_all(config_dir);
                     match crate::storage::atomic::write_json_pretty(&new_path, &record) {
                         Ok(()) => log_info!("[remote] 已迁移旧 lan-remote 配对 token（老用户免重配）"),
                         Err(e) => log_error!("[remote] 迁移旧配对 token 失败: {e}"),
