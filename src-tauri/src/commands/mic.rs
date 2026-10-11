@@ -90,7 +90,7 @@ fn setup_stream_for_device(
         let device = find_device_by_name(device_name)
             .ok_or_else(|| format!("未找到音频设备：{device_name}"))?;
         let (s, h) = rodio::OutputStream::try_from_device(&device)
-            .map_err(|e| format!("无法打开设备 {device_name}：{e}"))?;
+            .map_err(|e| describe_device_open_failure(device_name, &e.to_string()))?;
         *stream = Some((s, h));
         *cur_device = Some(device_name.to_string());
     }
@@ -181,6 +181,17 @@ pub(crate) fn find_device_by_name(name: &str) -> Option<cpal::Device> {
         .find(|d| d.name().ok().as_deref() == Some(name))
 }
 
+/// 设备打开失败的日志可读化：保留原始错误（含 Windows 错误码），仅当命中“设备被独占/占用”
+/// (AUDCLNT_E_DEVICE_IN_USE / 0x8889000A) 时追加中文解释与处置建议。纯文案，不改行为——
+/// 取证结论：该码是外部程序（远程控制/录音软件）独占设备所致，不是本体对同一设备双开。
+pub(crate) fn describe_device_open_failure(device: &str, raw_err: &str) -> String {
+    let mut msg = format!("无法打开设备 {device}：{raw_err}");
+    if raw_err.contains("0x8889000A") || raw_err.contains("AUDCLNT_E_DEVICE_IN_USE") {
+        msg.push_str(" —— 该设备正被其他程序独占（常见于远程控制/录音软件），请关闭占用者，或在声音设置的设备高级属性里取消「允许应用程序独占控制该设备」");
+    }
+    msg
+}
+
 fn write_ok(status: &Arc<Mutex<MicStatus>>, device: Option<String>, volume: f32, source: String) {
     if let Ok(mut s) = status.lock() {
         s.is_playing = true;
@@ -192,10 +203,20 @@ fn write_ok(status: &Arc<Mutex<MicStatus>>, device: Option<String>, volume: f32,
 }
 
 fn write_error(status: &Arc<Mutex<MicStatus>>, err: String) {
-    log_error!("mic 错误: {err}");
-    if let Ok(mut s) = status.lock() {
-        s.is_playing = false;
-        s.last_error = Some(err);
+    // MicStatus.last_error 兼作去重记忆：同一条错误连续出现只在第一次落日志，避免每次往
+    // 被独占的设备播放都刷屏（状态仍持续更新供前端显示）。级别取 warn：设备被占用是
+    // 外部程序所致、可自愈，不是本体故障。
+    let first_time = status
+        .lock()
+        .map(|mut s| {
+            let changed = s.last_error.as_deref() != Some(err.as_str());
+            s.is_playing = false;
+            s.last_error = Some(err.clone());
+            changed
+        })
+        .unwrap_or(true);
+    if first_time {
+        log_warn!("mic 错误: {err}");
     }
 }
 
@@ -298,4 +319,29 @@ pub fn stop_mic(state: tauri::State<'_, MicPlayback>) {
 #[tauri::command]
 pub fn get_mic_status(state: tauri::State<'_, MicPlayback>) -> MicStatus {
     state.status()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::describe_device_open_failure;
+
+    #[test]
+    fn 设备占用错误码翻译成中文处置建议() {
+        let msg = describe_device_open_failure("CABLE Input (VB-CABLE)", "Stream error: 0x8889000A");
+        assert!(msg.contains("无法打开设备 CABLE Input (VB-CABLE)"), "保留设备名：{msg}");
+        assert!(msg.contains("0x8889000A"), "必须原样保留错误码：{msg}");
+        assert!(msg.contains("独占"), "命中占用码要给中文处置建议：{msg}");
+    }
+
+    #[test]
+    fn 错误码英文名同样识别() {
+        let msg = describe_device_open_failure("d", "AUDCLNT_E_DEVICE_IN_USE");
+        assert!(msg.contains("独占"), "按符号名也应识别：{msg}");
+    }
+
+    #[test]
+    fn 其它设备错误只保留原文不加建议() {
+        let msg = describe_device_open_failure("某些设备", "boom");
+        assert_eq!(msg, "无法打开设备 某些设备：boom", "非占用错误不追加独占提示");
+    }
 }

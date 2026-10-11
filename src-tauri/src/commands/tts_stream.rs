@@ -565,7 +565,7 @@ fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
                         .ok_or_else(|| format!("未找到音频设备：{device}"))
                         .and_then(|d| {
                             rodio::OutputStream::try_from_device(&d)
-                                .map_err(|e| format!("无法打开设备 {device}：{e}"))
+                                .map_err(|e| crate::commands::mic::describe_device_open_failure(device, &e.to_string()))
                         }) {
                         Ok((stream, handle)) => match rodio::Sink::try_new(&handle) {
                             Ok(sink) => {
