@@ -68,12 +68,6 @@ pub fn load_settings(config_dir: &Path) -> Settings {
             plugin_config: v.get("plugin_config")
                 .and_then(|x| serde_json::from_value::<std::collections::HashMap<String, std::collections::HashMap<String, String>>>(x.clone()).ok())
                 .unwrap_or(default.plugin_config),
-            floating_ball_enabled: v.get("floating_ball_enabled").and_then(|x| x.as_bool()).unwrap_or(default.floating_ball_enabled),
-            floating_ball_x: v.get("floating_ball_x").and_then(|x| x.as_i64()).map(|x| x as i32).unwrap_or(default.floating_ball_x),
-            floating_ball_y: v.get("floating_ball_y").and_then(|x| x.as_i64()).map(|x| x as i32).unwrap_or(default.floating_ball_y),
-            floating_ball_size: v.get("floating_ball_size").and_then(|x| x.as_i64()).map(|x| super::types::clamp_ball_size(x as i32)).unwrap_or(default.floating_ball_size),
-            floating_ball_perf_mode: v.get("floating_ball_perf_mode").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.floating_ball_perf_mode),
-            floating_ball_skin: v.get("floating_ball_skin").and_then(|x| x.as_str()).map(String::from).unwrap_or(default.floating_ball_skin),
             diagnostics_log_enabled: v.get("diagnostics_log_enabled").and_then(|x| x.as_bool()).unwrap_or(default.diagnostics_log_enabled),
             subtitle_enabled: v.get("subtitle_enabled").and_then(|x| x.as_bool()).unwrap_or(default.subtitle_enabled),
             subtitle_always_on_top: v.get("subtitle_always_on_top").and_then(|x| x.as_bool()).unwrap_or(default.subtitle_always_on_top),
@@ -202,12 +196,6 @@ pub fn update_setting(config_dir: &Path, key: &str, value: serde_json::Value) ->
         "hotkey_play_last" => if let Some(v) = value.as_str() { s.hotkey_play_last = v.to_string() },
         "hotkey_mic_toggle" => if let Some(v) = value.as_str() { s.hotkey_mic_toggle = v.to_string() },
         "plugin_config" => if let Ok(map) = serde_json::from_value::<std::collections::HashMap<String, std::collections::HashMap<String, String>>>(value.clone()) { s.plugin_config = map },
-        "floating_ball_enabled" => if let Some(v) = value.as_bool() { s.floating_ball_enabled = v },
-        "floating_ball_x" => if let Some(v) = value.as_i64() { s.floating_ball_x = v as i32 },
-        "floating_ball_y" => if let Some(v) = value.as_i64() { s.floating_ball_y = v as i32 },
-        "floating_ball_size" => if let Some(v) = value.as_i64() { s.floating_ball_size = super::types::clamp_ball_size(v as i32) },
-        "floating_ball_perf_mode" => if let Some(v) = value.as_str() { s.floating_ball_perf_mode = v.to_string() },
-        "floating_ball_skin" => if let Some(v) = value.as_str() { s.floating_ball_skin = v.to_string() },
         "diagnostics_log_enabled" => if let Some(v) = value.as_bool() { s.diagnostics_log_enabled = v },
         // 字幕（音频监听）：与 Settings 字段一一对应，数值统一走 as_f64 兜底 int/float。
         "subtitle_enabled" => if let Some(v) = value.as_bool() { s.subtitle_enabled = v },

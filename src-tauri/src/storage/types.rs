@@ -126,23 +126,6 @@ pub struct Settings {
     /// 宿主按插件 manifest 的 config 声明注入环境变量。
     #[serde(default)]
     pub plugin_config: HashMap<String, HashMap<String, String>>,
-    /// 悬浮球开关（不依赖全局快捷键的常驻启动方式，游戏内可用）
-    #[serde(default)]
-    pub floating_ball_enabled: bool,
-    /// 悬浮球窗口位置（屏幕物理像素；-1 = 从未设置，启动时放主显示器右下角）
-    #[serde(default = "default_ball_pos")]
-    pub floating_ball_x: i32,
-    #[serde(default = "default_ball_pos")]
-    pub floating_ball_y: i32,
-    /// 悬浮球直径（逻辑像素），安全范围 FLOATING_BALL_MIN..=FLOATING_BALL_MAX
-    #[serde(default = "default_ball_size")]
-    pub floating_ball_size: i32,
-    /// 悬浮球性能策略：standard（指针跟随+波纹+全帧率）/ performance（关跟随波纹、30fps 封顶）
-    #[serde(default = "default_perf_mode")]
-    pub floating_ball_perf_mode: String,
-    /// 悬浮球皮肤：ink（墨黑）/ white（素白）
-    #[serde(default = "default_ball_skin")]
-    pub floating_ball_skin: String,
     /// 诊断日志（支持模式）：开启后运行日志同时写入 app_data_dir/logs/app.log，便于反馈问题。默认关。
     #[serde(default)]
     pub diagnostics_log_enabled: bool,
@@ -232,12 +215,6 @@ impl Default for Settings {
             hotkey_play_last: String::new(),
             hotkey_mic_toggle: String::new(),
             plugin_config: HashMap::new(),
-            floating_ball_enabled: false,
-            floating_ball_x: default_ball_pos(),
-            floating_ball_y: default_ball_pos(),
-            floating_ball_size: default_ball_size(),
-            floating_ball_perf_mode: default_perf_mode(),
-            floating_ball_skin: default_ball_skin(),
             diagnostics_log_enabled: false,
             subtitle_enabled: false,
             subtitle_always_on_top: true,
@@ -279,40 +256,6 @@ fn default_asr_language() -> String {
 
 fn default_asr_result_mode() -> String {
     "text".to_string()
-}
-
-fn default_ball_pos() -> i32 {
-    -1
-}
-
-/// 悬浮球直径安全范围（逻辑像素）：太小难点中，太大挡游戏画面
-pub const FLOATING_BALL_MIN: i32 = 40;
-pub const FLOATING_BALL_MAX: i32 = 96;
-
-/// 三个固定档位（与前端设置页三段控件一致）：小 / 标准（初始）/ 大
-pub const FLOATING_BALL_TIERS: [i32; 3] = [44, 56, 72];
-
-fn default_ball_size() -> i32 {
-    56
-}
-
-fn default_perf_mode() -> String {
-    "standard".to_string()
-}
-
-fn default_ball_skin() -> String {
-    "ink".to_string()
-}
-
-/// 把任意直径归一到最近的固定档位（先钳进安全范围）。
-/// 前端只暴露三档，这里兼容存量滑块时代的任意值，保证前后端渲染尺寸一致。
-pub fn clamp_ball_size(v: i32) -> i32 {
-    let clamped = v.clamp(FLOATING_BALL_MIN, FLOATING_BALL_MAX);
-    FLOATING_BALL_TIERS
-        .iter()
-        .copied()
-        .min_by_key(|t| (t - clamped).abs())
-        .unwrap_or(default_ball_size())
 }
 
 fn default_true() -> bool {
