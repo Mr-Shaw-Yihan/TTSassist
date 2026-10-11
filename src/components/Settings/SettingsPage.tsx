@@ -1,5 +1,5 @@
 // 设置页面（主界面侧边栏"设置"项的右侧内容区）：分类收纳（手风琴）。
-// 分类：虚拟麦克风 / 插件服务（service 型插件配置） / 快捷键 / 悬浮球 / 外观 / 关于。
+// 分类：虚拟麦克风 / 插件服务（service 型插件配置） / 快捷键 / 外观 / 关于。
 // 注：TTS「语音合成」与 ASR「语音输入」已析出至顶层「语音」中心页（VoiceCenterPage），此处不再承载引擎/音色配置。
 
 import { useState, useEffect } from "react";
@@ -8,7 +8,6 @@ import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "../../stores/updateStore";
 import { listPlugins, setHotkey, setVoiceInputHotkey, setPlayLastHotkey, setMicToggleHotkey, exportDiagnostics } from "../../services/invoke";
-import { resetFloatingBallPos } from "../../services/invoke";
 import type { PluginInfo } from "../../types";
 import { HotkeyRecorder } from "./HotkeyRecorder";
 import { MicSettings } from "./MicSettings";
@@ -137,133 +136,6 @@ export function SettingsPage() {
                 clearable
                 hint="按下切换「语音是否发送到虚拟麦克风」开关，无需鼠标操作。"
               />
-            </div>
-          </Section>
-
-          {/* 悬浮球：显隐由主窗标题栏 logo 接管；本栏管理大小/位置/（皮肤预留） */}
-          <Section title="悬浮球">
-            <div className="space-y-4">
-              <p className="text-[11px] leading-relaxed text-[var(--ink-300)]">
-                常驻置顶的角色球，适合快捷键无法触发的游戏。显隐点主窗标题栏左侧小球 logo 切换：
-                放出唤醒常驻、收回播放退场动画归位 logo。单击球展开输入浮窗，拖拽移动，右键开菜单。
-              </p>
-
-              {/* 球体大小：三档固定大小（固定档位比滑块更不易出 bug）。
-                  标准 56 = 初始档位；小 44 / 大 72 为缩小、放大档，均在后端 40~96 安全范围内 */}
-              <div>
-                <div className="text-[11px] text-[var(--ink-300)]">球体大小</div>
-                <div className="mt-1.5 grid grid-cols-3 gap-1 rounded-xl bg-[var(--ink-100)]/60 p-1">
-                  {([
-                    { label: "小", size: 44 },
-                    { label: "标准", size: 56 },
-                    { label: "大", size: 72 },
-                  ] as const).map((tier) => {
-                    const cur = settings?.floating_ball_size ?? 56;
-                    const active = cur === tier.size;
-                    return (
-                      <button
-                        key={tier.label}
-                        type="button"
-                        onClick={() => { void patch("floating_ball_size", tier.size).catch(() => {}); }}
-                        aria-pressed={active}
-                        className={[
-                          "rounded-lg py-1.5 text-xs transition-colors",
-                          active
-                            ? "bg-[var(--paper-card)] font-semibold text-[var(--ink-900)] shadow-sm"
-                            : "text-[var(--ink-400)] hover:text-[var(--ink-700)]",
-                        ].join(" ")}
-                      >
-                        {tier.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* 性能策略：标准（跟随+波纹+全帧率）/ 性能（关跟随波纹、30fps 封顶） */}
-              <div>
-                <div className="text-[11px] text-[var(--ink-300)]">性能策略</div>
-                <div className="mt-1.5 grid grid-cols-2 gap-1 rounded-xl bg-[var(--ink-100)]/60 p-1">
-                  {([
-                    { id: "standard", label: "标准模式" },
-                    { id: "performance", label: "性能模式" },
-                  ] as const).map((m) => {
-                    const active = (settings?.floating_ball_perf_mode ?? "standard") === m.id;
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => { void patch("floating_ball_perf_mode", m.id).catch(() => {}); }}
-                        aria-pressed={active}
-                        className={[
-                          "rounded-lg py-1.5 text-xs transition-colors",
-                          active
-                            ? "bg-[var(--paper-card)] font-semibold text-[var(--ink-900)] shadow-sm"
-                            : "text-[var(--ink-400)] hover:text-[var(--ink-700)]",
-                        ].join(" ")}
-                      >
-                        {m.label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="mt-1 text-[10px] leading-relaxed text-[var(--ink-300)]">
-                  标准模式：指针跟随 + 音频波纹 + 全帧率；性能模式：关闭指针跟随与波纹、动画 30fps 封顶，游戏内或低配机器推荐。
-                </p>
-              </div>
-
-              {/* 还原位置：球意外出屏/找不到时的恢复入口 */}
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-xs font-medium text-[var(--ink-700)]">还原悬浮球位置</div>
-                  <p className="mt-0.5 text-[11px] text-[var(--ink-300)]">球被拖出屏幕或找不到时，点击重置到屏幕中央。</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void resetFloatingBallPos().catch((e) => toast(`还原位置失败：${e}`, "err"));
-                  }}
-                  className="shrink-0 rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-1.5 text-xs text-[var(--ink-700)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)]"
-                >
-                  还原
-                </button>
-              </div>
-
-              {/* 角色皮肤：内置墨黑 / 素白两款 */}
-              <div>
-                <div className="text-[11px] text-[var(--ink-300)]">角色皮肤</div>
-                <div className="mt-1.5 grid grid-cols-2 gap-1 rounded-xl bg-[var(--ink-100)]/60 p-1">
-                  {([
-                    { id: "ink", label: "墨黑" },
-                    { id: "white", label: "素白" },
-                  ] as const).map((s) => {
-                    const active = (settings?.floating_ball_skin ?? "ink") === s.id;
-                    return (
-                      <button
-                        key={s.id}
-                        type="button"
-                        onClick={() => { void patch("floating_ball_skin", s.id).catch(() => {}); }}
-                        aria-pressed={active}
-                        className={[
-                          "flex items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs transition-colors",
-                          active
-                            ? "bg-[var(--paper-card)] font-semibold text-[var(--ink-900)] shadow-sm"
-                            : "text-[var(--ink-400)] hover:text-[var(--ink-700)]",
-                        ].join(" ")}
-                      >
-                        <span
-                          aria-hidden
-                          className={[
-                            "h-3 w-3 rounded-full",
-                            s.id === "ink" ? "bg-[#0a0a0a]" : "bg-[#f7f4ec] ring-1 ring-[var(--ink-200)]",
-                          ].join(" ")}
-                        />
-                        {s.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
             </div>
           </Section>
 

@@ -1,4 +1,4 @@
-// 主界面：消息列表 + 悬浮球音量控件 + 输入框 + 设置
+// 主界面：消息列表 + 音量控件 + 输入框 + 设置
 // 大纲 4.1-4.6 端到端打通 MVP。
 
 import { useEffect, useState, useRef, useCallback } from "react";
@@ -12,8 +12,6 @@ import { TexDefs, TexIcon } from "./components/icons/TexIcon";
 import { FavoriteList } from "./components/Favorites/FavoriteList";
 import { SettingsPage } from "./components/Settings/SettingsPage";
 import { QuickInput } from "./components/QuickInput/QuickInput";
-import { FloatingBall } from "./components/FloatingBall/FloatingBall";
-import { BallLogo } from "./components/FloatingBall/BallLogo";
 import { PluginPage } from "./components/Plugins/PluginPage";
 import { VoiceCenterPage } from "./components/Voice/VoiceCenterPage";
 import { SubtitlePage } from "./components/Subtitle/SubtitlePage";
@@ -62,9 +60,6 @@ function App() {
   const win = getCurrentWindow();
   if (win.label === "quick_input") {
     return <QuickInput />;
-  }
-  if (win.label === "floating_ball") {
-    return <FloatingBall />;
   }
   if (win.label === "subtitle_window") {
     return <SubtitleWindow />;
@@ -424,7 +419,7 @@ function App() {
   const micDevice = settings?.mic_output_device ?? "";
   const micVolume = settings?.mic_playback_volume ?? 1.0;
 
-  // 麦克风发送状态 → 悬浮球角色徽标事件（va:mic:on/off，右上角绿色小球）
+  // 麦克风发送状态广播（va:mic:on/off）
   const micOn = micEnabled && !!micDevice.trim();
   useEffect(() => {
     void emit(micOn ? "va:mic:on" : "va:mic:off").catch(() => {});
@@ -562,8 +557,6 @@ function App() {
         {/* deep：文字/logo 上的双击与拖拽也算拖拽区（bare 模式只响应直接点击，
             双击落在「电子声带」文字上时不触发最大化切换——时好时坏的根因） */}
         <div data-tauri-drag-region="deep" className="flex min-w-0 flex-1 items-center gap-2">
-          {/* 悬浮球 logo（休眠态占位）：点击放出/收回悬浮球 */}
-          <BallLogo />
           <span className="font-display text-sm text-[var(--ink-900)] tracking-tight">电子声带</span>
           <span className="text-[9px] text-[var(--ink-300)] tracking-[0.3em] uppercase">TTSassist</span>
         </div>

@@ -73,17 +73,6 @@ export interface Settings {
   hotkey_mic_toggle: string;
   /** 插件配置（通用机制）：插件 id → 字段 key → 值 */
   plugin_config: Record<string, Record<string, string>>;
-  /** 悬浮球开关（不依赖快捷键的常驻启动方式） */
-  floating_ball_enabled: boolean;
-  /** 悬浮球位置（屏幕物理像素；-1 = 未设置，用默认右下角） */
-  floating_ball_x: number;
-  floating_ball_y: number;
-  /** 悬浮球直径（逻辑像素），三档固定：44 / 56（初始）/ 72 */
-  floating_ball_size: number;
-  /** 悬浮球性能策略：standard / performance */
-  floating_ball_perf_mode: string;
-  /** 悬浮球皮肤：ink（墨黑）/ white（素白） */
-  floating_ball_skin: string;
   /** 诊断日志（支持模式）：开启后运行日志额外落本地文件，便于反馈问题。默认关 */
   diagnostics_log_enabled: boolean;
   // ── 字幕（音频监听）设置 ──
