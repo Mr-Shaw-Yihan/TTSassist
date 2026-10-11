@@ -51,7 +51,7 @@ pub fn import_clone_voice(
         return Err("样本仅支持 mp3 / wav / m4a / flac / ogg 格式".into());
     }
 
-    let target_dir = data_dir.join("voice_samples");
+    let target_dir = crate::storage::paths::samples_dir_in(data_dir);
     std::fs::create_dir_all(&target_dir).map_err(|e| format!("创建样本目录失败: {e}"))?;
 
     // 若已存在旧样本，先移除文件
@@ -66,7 +66,7 @@ pub fn import_clone_voice(
         }
     }
 
-    let rel_path = format!("voice_samples/clone.{ext}");
+    let rel_path = crate::storage::paths::samples_rel("clone", &ext);
     let dest = data_dir.join(&rel_path);
     std::fs::copy(src, &dest).map_err(|e| format!("复制样本失败: {e}"))?;
     // 文件一落地就告知插件：复制成功而后续设置写入失败时，磁盘上已经有样本，

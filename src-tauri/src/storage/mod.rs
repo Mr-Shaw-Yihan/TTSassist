@@ -14,12 +14,14 @@ pub use atomic::StorageError;
 use std::path::Path;
 use atomic::Result;
 
-/// 确保数据目录和 audio 子目录存在（不存在则创建）。
+/// 确保内容根与其下的内容类子目录存在（不存在则创建，幂等）。
+/// 子目录名字只来自 `paths`（存储契约：路径不得在业务代码里拼字面量）。
 /// 通常在应用启动时调用一次。
 /// 注意：阶段 22 起 plugins 目录不再在此创建（位于 exe 同级，由 PluginManager 管理）。
 pub fn ensure_data_dirs(data_dir: &Path) -> Result<()> {
     std::fs::create_dir_all(data_dir)?;
-    std::fs::create_dir_all(data_dir.join("audio"))?;
+    std::fs::create_dir_all(paths::audio_dir_in(data_dir))?;
+    std::fs::create_dir_all(paths::samples_dir_in(data_dir))?;
     Ok(())
 }
 

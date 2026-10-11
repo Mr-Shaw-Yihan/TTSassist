@@ -16,6 +16,27 @@
 
 use std::path::{Path, PathBuf};
 
+/// 内容根下的子目录名：**字面量只存在这一份**。
+/// 记录里存的就是这些名字开头的相对路径（存储契约：不得写绝对路径），
+/// 所以它们既是磁盘布局也是数据格式——改名字等于改数据格式，必须配合迁移。
+pub const AUDIO_DIR_NAME: &str = "audio";
+pub const SAMPLES_DIR_NAME: &str = "voice_samples";
+pub const DOWNLOADS_DIR_NAME: &str = "downloads";
+pub const CACHE_DIR_NAME: &str = "cache";
+pub const LOGS_DIR_NAME: &str = "logs";
+pub const PLUGIN_DATA_DIR_NAME: &str = "plugin-data";
+
+/// 由内容根取子目录（业务代码只拿到 `&Path` 时用它们，不要自己 join 字面量）
+pub fn audio_dir_in(content_root: &Path) -> PathBuf { content_root.join(AUDIO_DIR_NAME) }
+pub fn samples_dir_in(content_root: &Path) -> PathBuf { content_root.join(SAMPLES_DIR_NAME) }
+pub fn downloads_dir_in(content_root: &Path) -> PathBuf { content_root.join(DOWNLOADS_DIR_NAME) }
+
+/// 记录里用的相对音频路径（存储契约：只存相对内容根的路径）
+pub fn audio_rel(id: &str, ext: &str) -> String { format!("{AUDIO_DIR_NAME}/{id}.{ext}") }
+
+/// 记录里用的相对克隆样本路径
+pub fn samples_rel(name: &str, ext: &str) -> String { format!("{SAMPLES_DIR_NAME}/{name}.{ext}") }
+
 /// 三根的持有者。由 `lib.rs` 的 `resolve_storage_paths` 在启动时构造一次，之后只读。
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoragePaths {
@@ -56,12 +77,12 @@ impl StoragePaths {
     pub fn subtitle_history_file(&self) -> PathBuf {
         self.content_root.join("subtitle_history.json")
     }
-    pub fn audio_dir(&self) -> PathBuf { self.content_root.join("audio") }
-    pub fn samples_dir(&self) -> PathBuf { self.content_root.join("voice_samples") }
-    pub fn logs_dir(&self) -> PathBuf { self.content_root.join("logs") }
-    pub fn cache_dir(&self) -> PathBuf { self.content_root.join("cache") }
-    pub fn downloads_dir(&self) -> PathBuf { self.content_root.join("downloads") }
-    pub fn plugin_data_root(&self) -> PathBuf { self.content_root.join("plugin-data") }
+    pub fn audio_dir(&self) -> PathBuf { audio_dir_in(&self.content_root) }
+    pub fn samples_dir(&self) -> PathBuf { samples_dir_in(&self.content_root) }
+    pub fn logs_dir(&self) -> PathBuf { self.content_root.join(LOGS_DIR_NAME) }
+    pub fn cache_dir(&self) -> PathBuf { self.content_root.join(CACHE_DIR_NAME) }
+    pub fn downloads_dir(&self) -> PathBuf { downloads_dir_in(&self.content_root) }
+    pub fn plugin_data_root(&self) -> PathBuf { self.content_root.join(PLUGIN_DATA_DIR_NAME) }
     pub fn plugin_data_dir(&self, id: &str) -> PathBuf { plugin_data_dir(&self.content_root, id) }
 
     /// 建齐布局所需目录（幂等，启动时调用一次）
@@ -130,7 +151,9 @@ pub fn pointer_json(content_root: &Path, migrated_from: Option<&str>) -> String 
 /// 为何单独提供自由函数：loader / 命令层拿到的常常是 `&Path` 而不是 `StoragePaths`，
 /// 没有这个入口它们就会回去 join("data") —— 那正是本模块要禁止的事。
 pub fn plugin_data_dir(content_root: &Path, id: &str) -> PathBuf {
-    content_root.join("plugin-data").join(plugin_dir_name(id))
+    content_root
+        .join(PLUGIN_DATA_DIR_NAME)
+        .join(plugin_dir_name(id))
 }
 
 /// 插件目录名安全化：与 manifest.id 的 `a-zA-Z0-9-_` 规则同口径，其余字符换 `_`。
@@ -279,6 +302,18 @@ mod tests {
         ] {
             assert!(d.is_dir(), "缺少目录 {}", d.display());
         }
+    }
+
+    #[test]
+    fn 相对路径格式与子目录名单一来源() {
+        // 这两个格式就是写进 messages.json / settings.json 的值，
+        // 改它们等于改数据格式（必须配合迁移），所以用测钉住
+        assert_eq!(audio_rel("m_1", "mp3"), "audio/m_1.mp3");
+        assert_eq!(samples_rel("clone", "wav"), "voice_samples/clone.wav");
+        assert_eq!(
+            audio_dir_in(Path::new("D:\\app\\data")),
+            PathBuf::from("D:\\app\\data\\audio")
+        );
     }
 
     #[test]

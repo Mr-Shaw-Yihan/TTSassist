@@ -96,7 +96,7 @@ pub fn import_favorite(
 
     // 生成收藏 id 与目标文件名
     let id = gen_id("f");
-    let rel_path = format!("audio/{id}.{ext}");
+    let rel_path = crate::storage::paths::audio_rel(&id, &ext);
     let dest = data_dir.join(&rel_path);
 
     // 确保目录存在

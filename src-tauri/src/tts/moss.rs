@@ -110,7 +110,7 @@ impl MossEngine {
 
         // 4. 存为 mp3
         let id = gen_id("m");
-        let rel_path = format!("audio/{id}.mp3");
+        let rel_path = crate::storage::paths::audio_rel(&id, "mp3");
         let abs_path = self.data_dir.join(&rel_path);
         if let Some(parent) = abs_path.parent() {
             std::fs::create_dir_all(parent)

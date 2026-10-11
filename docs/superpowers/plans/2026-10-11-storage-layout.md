@@ -594,7 +594,21 @@ git commit -m "feat(插件): 插件重数据独立到 data/plugin-data 并让卸
 `settings::(update_setting|save_settings|load_settings)` 的目录参数必须是 `config_dir`（或测试里的临时目录），
 命中 `data_dir` 即红。这是本次唯一能防“静默分裂”的机械化手段（两个根都是 PathBuf，编译器帮不了）。
 
-### Task 3c: 内容类字面量收口（Task 7 护栏上线前做完）
+### Task 3c: 内容类字面量收口（Task 7 护栏上线前做完）—— ✅ 已完成
+
+实跑结果：**业务代码里已零字面量**。新增 `paths` 里的单一来源：六个子目录名常量
+（`AUDIO_DIR_NAME` 等）+ `audio_dir_in` / `samples_dir_in` / `downloads_dir_in`（只持有 `&Path` 时用）
++ `audio_rel(id, ext)` / `samples_rel(name, ext)`（记录里相对路径的格式）。
+已改接：`clone_voice.rs`（样本目录 + 相对路径）、`favorite.rs`、`moss.rs`、
+`tts_stream.rs`（建目录 + `stream_paths_for` 改用常量）、`vbcable.rs`、`storage::ensure_data_dirs`
+（顺带把 `voice_samples` 也建上，幂等无害）。新用 1 例单测钉住“相对路径格式 = 数据格式”
+（改它等于改 `messages.json` 里的值，必须配迁移）。测试：193 passed / 零 warning。
+
+审计后残留的 `join("audio")` 全部在 **`#[cfg(test)]` 测脚手架**里（构造临时目录用）：
+`audio_gc.rs:61-63`、`favorites.rs:111-112`、`messages.rs:100-101/214`、`manager.rs:927/943`、
+`loader.rs:693`、`storage/mod.rs:39`。这些是合法用法，但 PowerShell 护栏区分不了
+`#[cfg(test)]` 内外 —— **Task 7 的处置：把这七条当固定条目登进基线**（数量恒定、只许变少），
+不靠改测试风格去迁就工具。
 
 业务代码里仍有零散的 `join("audio")` / `join("voice_samples")` 等字面量（tts_stream.rs、moss.rs、
 audio_gc.rs、clone_voice.rs、messages/favorites 内部），它们现在走 `state.data_dir`（=内容根）是对的，

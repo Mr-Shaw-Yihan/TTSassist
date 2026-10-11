@@ -230,7 +230,7 @@ pub async fn generate_tts_stream_impl(
     // （旧实现文件名用 fid、消息另取一个 id，同一段音频会有两个名字）。
     let msg_id = gen_id("m");
     let (wav_rel, tmp_name) = stream_paths_for(&msg_id);
-    std::fs::create_dir_all(data_dir.join("audio"))
+    std::fs::create_dir_all(crate::storage::paths::audio_dir_in(&data_dir))
         .map_err(|e| format!("创建音频目录失败: {e}"))?;
     let tmp_pcm = data_dir.join(&tmp_name);
 
@@ -671,7 +671,11 @@ fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
 /// 单一来源：“出声前就发给界面的占位消息”与“播完落库的正式消息”必须指向同一个
 /// audio_path，否则前端无法原地替换（会变成两条一模一样的消息）。
 fn stream_paths_for(msg_id: &str) -> (String, String) {
-    (format!("audio/{msg_id}.wav"), format!("audio/{msg_id}.pcm.tmp"))
+    use crate::storage::paths::AUDIO_DIR_NAME;
+    (
+        format!("{AUDIO_DIR_NAME}/{msg_id}.wav"),
+        format!("{AUDIO_DIR_NAME}/{msg_id}.pcm.tmp"),
+    )
 }
 
 /// 这一块要不要喂给播放设备：静播后、或设备根本没开成时丢弃。
