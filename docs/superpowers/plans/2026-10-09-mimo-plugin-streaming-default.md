@@ -4578,7 +4578,10 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\plugins\scripts\test-mimo-stream
 
 **D. 本次新增的观感修复与代价（必须当场看）**
 
-- 悬浮球：流式播放时**随播报波纹**（Task 9 补的 `va:play:start`）。
+> ⚠ **悬浮球已全面移除（P2.5，并入 1.9.0）**：本段中与球相关的验收项**作废**——“悬浮球随播报波纹”、“停后波纹消失”、“开局回执超时…悬浮球不得持续波纹”、遥控验收口径②“悬浮球起波纹”。
+> **保留**：遥控 `playback_changed` + `state_json.playing_path`（口径①）、停止链真静音、“先出声后结束”TTFB、已知代价三条。
+
+- 悬浮球：流式播放时**随播报波纹**（Task 9 补的 `va:play:start`）。〔球已移除→本项作废〕
 - 手机遥控：发字后遥控端收到 `playback_changed` 推送、`state_json` 里的 `playing_path`
   变成 `audio/{fid}.wav`（Task 9 已把 `playback:started` 载荷改成字符串）。
   ⚠ **验收项口径修正（Task 9 审查留下的）**：遥控页 `remote-app/remote_page.html:466` 的播放态
