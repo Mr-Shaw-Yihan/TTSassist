@@ -210,6 +210,12 @@ function App() {
     if (f?.id) useChatStore.getState().fail(f.id, f.reason);
   }, []);
 
+  // 跨窗口发送失败广播（浮窗发送、连接前失败后端不发 tts:failed）：主界面据此补一条失败气泡。
+  // remoteFailed 内部按文本去重，与上面 tts:failed（中途失败）不会双份。
+  useTauriListen<{ content: string; reason: string }>("tts:send-failed", (p) => {
+    if (p?.content) useChatStore.getState().remoteFailed(p.content, p.reason || "");
+  }, []);
+
   // 宿主流式开播该条 → 把对应气泡标为「播放中」（修 bug④：状态同步，点它=停不双播）。
   // va:hostplay:* 是宿主专用频道（只由 tts_stream 发出），前端只消费不发送，
   // 避免与本地播放自 emit 的 va:play:* 相互干扰。

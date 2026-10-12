@@ -128,54 +128,52 @@ export function MessageBubble({ message, playingPath, streaming = false, failed 
           {failed ? (
             /* 失败态：合成没出声/未落库。保留这条文本 + 重试入口（用户选择：失败不静默消失）。 */
             <>
-              <span className="flex items-center gap-1 text-[var(--seal)]">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--seal)]" />
+              <span className="inline-flex items-center gap-1 text-[var(--seal)]">
+                <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--seal)]" />
                 合成失败{errorText ? `：${errorText}` : ""}
               </span>
               <button
                 onClick={() => onRetry?.(message)}
                 title="按原文重新合成"
-                className="rounded-md px-1.5 py-0.5 text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)] transition-colors"
+                className="inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)] transition-colors"
               >
-                ↻ 重试
-              </button>
-            </>
-          ) : streaming ? (
-            /* 占位态：后端已拿到会话并开始推流，所以用户已经听到声音了。
-               这一位必须现在就给出来，否则整条流跑完前无处可点。 */
-            <>
-              <span className="flex items-center gap-1 text-[var(--ink-500)]">
-                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--amber-500)]" />
-                合成中
-              </span>
-              <button
-                onClick={onMute}
-                title="只静音：合成仍会继续完成，消息与音频照常保存"
-                className="rounded-md px-1.5 py-0.5 text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)] transition-colors"
-              >
-                ⏸ 静播
+                <span aria-hidden>↻</span>
+                <span>重试</span>
               </button>
             </>
           ) : (
-          <button
-            onClick={handlePlay}
-            className={[
-              "flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors",
-              isPlaying
-                ? "text-[var(--amber-600)] is-playing font-medium"
-                : "text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
-            ].join(" ")}
-          >
-            {isPlaying ? (
-              <>
-                <TexIcon name="play" size={13} /> 播放中
-              </>
-            ) : (
-              <>
-                <TexIcon name="play" size={13} /> 播放
-              </>
-            )}
-          </button>
+            <>
+              {streaming && (
+                /* 占位态：后端已拿到会话并开始推流，用户已听到声音。合成中作为小标签。
+                   旧的独立「⏸ 静播」按钮已并入下方统一播放控件（合成中且宿主在播=点它静音），
+                   避免与「播放/播放中」两个控件语义重叠。 */
+                <span className="inline-flex items-center gap-1 text-[var(--ink-500)]">
+                  <span className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--amber-500)]" />
+                  合成中
+                </span>
+              )}
+              <button
+                onClick={streaming ? () => onMute?.() : () => void handlePlay()}
+                disabled={streaming && !isPlaying}
+                title={streaming && isPlaying ? "只静音：合成仍会继续完成，消息与音频照常保存" : undefined}
+                className={[
+                  "inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 transition-colors disabled:opacity-50 disabled:cursor-default",
+                  isPlaying
+                    ? "text-[var(--amber-600)] is-playing font-medium"
+                    : "text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
+                ].join(" ")}
+              >
+                {isPlaying ? (
+                  <>
+                    <TexIcon name="play" size={13} /> 播放中
+                  </>
+                ) : (
+                  <>
+                    <TexIcon name="play" size={13} /> 播放
+                  </>
+                )}
+              </button>
+            </>
           )}
           <span className="tabular-nums">{formatTime(message.created_at)}</span>
         </div>

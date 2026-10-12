@@ -143,4 +143,30 @@ describe("chatStore 非阻塞发送状态机", () => {
     expect(s.failedIds).toEqual([]);
     expect(s.streamingIds).toEqual([]);
   });
+
+  it("remoteFailed：跨窗口失败（无占位）补一条失败气泡并记原因", () => {
+    useChatStore.getState().remoteFailed("浮窗发的文字", "连接失败");
+    const s = useChatStore.getState();
+    expect(s.messages).toHaveLength(1);
+    expect(s.messages[0].content).toBe("浮窗发的文字");
+    expect(s.messages[0].audio_path).toBe("");
+    expect(s.failedIds).toHaveLength(1);
+    expect(s.reasons[s.failedIds[0]]).toBe("连接失败");
+  });
+
+  it("remoteFailed：同文本已有合成中占位时去重，不补第二条", () => {
+    const st = useChatStore.getState();
+    st.adoptStreaming(notice({ id: "m_real", content: "同一句" })); // 跨窗口流式占位（合成中）
+    st.remoteFailed("同一句", "中途失败");
+    const s = useChatStore.getState();
+    expect(s.messages.filter((m) => m.content === "同一句")).toHaveLength(1);
+  });
+
+  it("remoteFailed：同文本已有失败气泡时去重", () => {
+    const st = useChatStore.getState();
+    st.remoteFailed("重复失败", "err1");
+    st.remoteFailed("重复失败", "err2");
+    const s = useChatStore.getState();
+    expect(s.messages.filter((m) => m.content === "重复失败")).toHaveLength(1);
+  });
 });

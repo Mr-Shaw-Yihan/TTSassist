@@ -188,7 +188,15 @@ export function QuickInput() {
         setStatus((cur) => (cur.kind === "success" ? { kind: "idle" } : cur));
       }, 1200);
     } catch (e) {
-      setStatus({ kind: "error", message: String(e) });
+      const reason = String(e);
+      setStatus({ kind: "error", message: reason });
+      // 广播给主界面生成失败气泡：连接前失败（无 key/离线）后端不发 tts:failed，靠这里补。
+      // 主界面 remoteFailed 按文本去重，中途失败已有占位时不会双份。
+      void emit("tts:send-failed", { content: t, reason }).catch(() => {});
+      // 报错 6s 后自动隐回空闲，不长期挤占输入区
+      setTimeout(() => {
+        setStatus((cur) => (cur.kind === "error" ? { kind: "idle" } : cur));
+      }, 6000);
     } finally {
       setSending(false);
     }
@@ -297,8 +305,8 @@ export function QuickInput() {
         </button>
       </div>
 
-      {/* 状态条（三态反馈，常驻占位避免跳动，内容按需显示） */}
-      <div className="px-3 pb-2.5">
+      {/* 状态条（三态反馈）：固定高度预留位，避免报错时撑高挤小上方 flex-1 输入框 */}
+      <div className="min-h-9 px-3 pb-2">
         {viPhase === "recording" && (
           <div className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[11px] text-red-600 animate-fade">
             <span className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-red-500" />
@@ -328,7 +336,7 @@ export function QuickInput() {
           </div>
         )}
         {viPhase === "idle" && !viError && status.kind === "error" && (
-          <div className="rounded-lg border border-[var(--seal)]/30 bg-[var(--seal)]/10 px-3 py-1.5 text-[11px] leading-snug text-[var(--seal)] animate-fade">
+          <div className="truncate rounded-lg border border-[var(--seal)]/30 bg-[var(--seal)]/10 px-3 py-1.5 text-[11px] text-[var(--seal)] animate-fade" title={status.message}>
             ✗ 合成失败：{status.message}
           </div>
         )}

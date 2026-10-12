@@ -50,6 +50,8 @@ interface ChatState {
   settle: (tempId: string, message: Message) => void;
   /** 合成失败：把已存在的气泡转失败态并记原因；无对应气泡则忽略（不凭空补游离气泡） */
   fail: (id: string, reason: string) => void;
+  /** 跨窗口失败（如浮窗发送、连接前失败后端不发 tts:failed）：按文本去重后补一条失败气泡 */
+  remoteFailed: (content: string, reason: string) => void;
   /** 重试前清掉失败占位 */
   clearFailed: (id: string) => void;
   /** 删除某条消息（连同合成/失败标记一起清掉） */
@@ -149,6 +151,26 @@ export const useChatStore = create<ChatState>((set) => ({
         messages: r.list,
         streamingIds: r.streamingIds,
         failedIds: r.failedIds,
+        reasons: { ...s.reasons, [id]: reason },
+      };
+    }),
+
+  remoteFailed: (content, reason) =>
+    set((s) => {
+      // 去重：同文本已有“合成中/失败”占位（本窗发送、或中途失败已转失败）就不再补游离气泡
+      const dup = s.messages.some(
+        (m) =>
+          m.content === content &&
+          (s.streamingIds.includes(m.id) || s.failedIds.includes(m.id)),
+      );
+      if (dup) return {};
+      const id = `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      return {
+        messages: [
+          ...s.messages,
+          { id, content, audio_path: "", created_at: new Date().toISOString() },
+        ],
+        failedIds: [...s.failedIds, id],
         reasons: { ...s.reasons, [id]: reason },
       };
     }),
