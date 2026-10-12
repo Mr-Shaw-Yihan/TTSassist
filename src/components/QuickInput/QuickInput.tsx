@@ -8,7 +8,7 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
-import { currentMonitor, cursorPosition, getCurrentWindow, LogicalSize, PhysicalPosition } from "@tauri-apps/api/window";
+import { cursorPosition, getCurrentWindow, LogicalSize, PhysicalPosition } from "@tauri-apps/api/window";
 import { getAudioUrl, getSettings, generateTTS } from "../../services/invoke";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useTauriListen } from "../../hooks/useTauriListen";
@@ -37,6 +37,7 @@ export function QuickInput() {
   // typing = 键盘路由已建立（驱动 placeholder 文案）。
   const [typing, setTyping] = useState(false);
   const inpRef = useRef<HTMLTextAreaElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const setSettings = useSettingsStore((s) => s.setSettings);
 
   // 语音输入全局快捷键会话（按住说话）：浮窗是游戏内主场景，必须支持。
@@ -113,18 +114,27 @@ export function QuickInput() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // 浮窗高度按主显示器逻辑高分档（1080p→150 / 2K→173 / 4K→200 封顶），
-  // 逻辑像素自动跟随系统缩放，跨分辨率观感一致；配置里的 170 仅为创建时的初始值
+  // 浮窗高度跟随内容：输入框固定两行、按钮紧跟其下；出现报错/录音/合成状态时
+  // 整窗加高、消失时缩回——靠 ResizeObserver 观测卡片实际高度后 setSize，
+  // 而不是挤小输入框腾地方（旧版按分辨率定高已废弃）。
   useEffect(() => {
-    void (async () => {
-      try {
-        const m = await currentMonitor();
-        if (!m) return;
-        const logicalH = m.size.height / m.scaleFactor;
-        const h = Math.min(200, Math.max(150, Math.round(logicalH * 0.115)));
-        await getCurrentWindow().setSize(new LogicalSize(360, h));
-      } catch { /* 取显示器失败保持初始尺寸 */ }
-    })();
+    const el = rootRef.current;
+    if (!el) return;
+    let raf = 0;
+    const fit = () => {
+      const h = el.offsetHeight;
+      if (h > 0) void getCurrentWindow().setSize(new LogicalSize(360, Math.min(340, Math.max(120, Math.ceil(h))))).catch(() => {});
+    };
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(fit);
+    });
+    ro.observe(el);
+    fit();
+    return () => {
+      ro.disconnect();
+      cancelAnimationFrame(raf);
+    };
   }, []);
   // 挂载时聚焦一次；后端呼出浮窗（toggle）时广播 quick-input:shown → 再次聚焦，
   // 使呼出后无需点击即可直接打字（键盘路由已由后端 focus_webview_child 建立）
@@ -235,7 +245,8 @@ export function QuickInput() {
 
   return (
     <div
-      className="flex h-screen flex-col overflow-hidden rounded-2xl bg-[var(--paper)] text-[var(--ink-900)] shadow-[0_20px_60px_rgba(26,24,22,0.25)]"
+      ref={rootRef}
+      className="flex flex-col overflow-hidden rounded-2xl bg-[var(--paper)] text-[var(--ink-900)] shadow-[0_20px_60px_rgba(26,24,22,0.25)]"
     >
       {/* 纹理图标符号库：浮窗是独立 WebView，必须自带（主窗挂的 TexDefs 跨窗口不可见） */}
       <TexDefs />
@@ -263,11 +274,11 @@ export function QuickInput() {
         </button>
       </div>
 
-      {/* 无边框输入区（撑满窗口剩余空间，合成期间仍可打字） */}
-      <div className="flex min-h-0 flex-1 px-3.5 pt-2.5">
+      {/* 输入区：固定两行高（不再 flex-1 撑满）；超出两行时内部滚动 */}
+      <div className="px-3.5 pt-2.5">
         <textarea
           ref={inpRef}
-          className="h-full w-full resize-none border-none bg-transparent text-sm leading-relaxed text-[var(--ink-900)] outline-none placeholder:text-[var(--ink-300)]"
+          className="h-[46px] w-full resize-none border-none bg-transparent text-sm leading-relaxed text-[var(--ink-900)] outline-none placeholder:text-[var(--ink-300)]"
           placeholder={typing ? "输入文字，回车发送…" : "点击输入框开始输入…"}
           value={text}
           onPointerDown={takeKeyboardFocus}
@@ -305,8 +316,8 @@ export function QuickInput() {
         </button>
       </div>
 
-      {/* 状态条（三态反馈）：固定高度预留位，避免报错时撑高挤小上方 flex-1 输入框 */}
-      <div className="min-h-9 px-3 pb-2">
+      {/* 状态条（三态反馈）：自然高度，出现时靠上方 ResizeObserver 加高整窗，不再预留固定白 */}
+      <div className="px-3 pb-2.5">
         {viPhase === "recording" && (
           <div className="flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-[11px] text-red-600 animate-fade">
             <span className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-red-500" />
