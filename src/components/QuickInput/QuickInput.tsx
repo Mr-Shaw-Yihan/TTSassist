@@ -203,10 +203,7 @@ export function QuickInput() {
       // 广播给主界面生成失败气泡：连接前失败（无 key/离线）后端不发 tts:failed，靠这里补。
       // 主界面 remoteFailed 按文本去重，中途失败已有占位时不会双份。
       void emit("tts:send-failed", { content: t, reason }).catch(() => {});
-      // 报错 6s 后自动隐回空闲，不长期挤占输入区
-      setTimeout(() => {
-        setStatus((cur) => (cur.kind === "error" ? { kind: "idle" } : cur));
-      }, 6000);
+      // 报错不自愈隐去：一直留着，直到下一次发送把状态覆盖（成功→成功提示淡走、再失败→换新报错）。
     } finally {
       setSending(false);
     }
