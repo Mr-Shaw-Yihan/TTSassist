@@ -144,35 +144,37 @@ export function MessageBubble({ message, playingPath, streaming = false, failed 
           ) : (
             <>
               {streaming && (
-                /* 占位态：后端已拿到会话并开始推流，用户已听到声音。合成中作为小标签。
-                   旧的独立「⏸ 静播」按钮已并入下方统一播放控件（合成中且宿主在播=点它静音），
-                   避免与「播放/播放中」两个控件语义重叠。 */
+                /* 合成中（后端已建会话开始推流，用户已听到声音）。旧的独立「⏸ 静播」按钮已彻底移除：
+                   合成中且宿主在播时直接用下方统一的「播放中」（点=静音）；没在播则只显示“合成中”，
+                   不再放一个永远点不动的置灰「播放」。 */
                 <span className="inline-flex items-center gap-1 text-[var(--ink-500)]">
                   <span className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-[var(--amber-500)]" />
                   合成中
                 </span>
               )}
-              <button
-                onClick={streaming ? () => onMute?.() : () => void handlePlay()}
-                disabled={streaming && !isPlaying}
-                title={streaming && isPlaying ? "只静音：合成仍会继续完成，消息与音频照常保存" : undefined}
-                className={[
-                  "inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 transition-colors disabled:opacity-50 disabled:cursor-default",
-                  isPlaying
-                    ? "text-[var(--amber-600)] is-playing font-medium"
-                    : "text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
-                ].join(" ")}
-              >
-                {isPlaying ? (
-                  <>
-                    <TexIcon name="play" size={13} /> 播放中
-                  </>
-                ) : (
-                  <>
-                    <TexIcon name="play" size={13} /> 播放
-                  </>
-                )}
-              </button>
+              {/* 合成中且未播时不渲染播放控件（无音可放、无播可停）；其余情况走统一的 播放/播放中 */}
+              {!(streaming && !isPlaying) && (
+                <button
+                  onClick={streaming ? () => onMute?.() : () => void handlePlay()}
+                  title={streaming && isPlaying ? "只静音：合成仍会继续完成，消息与音频照常保存" : undefined}
+                  className={[
+                    "inline-flex items-center gap-1 whitespace-nowrap rounded-md px-1.5 py-0.5 transition-colors",
+                    isPlaying
+                      ? "text-[var(--amber-600)] is-playing font-medium"
+                      : "text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)]",
+                  ].join(" ")}
+                >
+                  {isPlaying ? (
+                    <>
+                      <TexIcon name="play" size={13} /> 播放中
+                    </>
+                  ) : (
+                    <>
+                      <TexIcon name="play" size={13} /> 播放
+                    </>
+                  )}
+                </button>
+              )}
             </>
           )}
           <span className="tabular-nums">{formatTime(message.created_at)}</span>
