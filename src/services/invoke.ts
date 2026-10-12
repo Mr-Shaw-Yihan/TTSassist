@@ -38,6 +38,14 @@ export async function ttsStreamMute(): Promise<void> {
   return invoke<void>("tts_stream_mute");
 }
 
+/**
+ * 中止当前流式合成（若在跑）：会话停止 + 丢产物，不落库。
+ * 用于“连点两次打断改发”：停掉上一条后立刻重发最新一条。
+ */
+export async function ttsStreamStop(): Promise<void> {
+  return invoke<void>("tts_stream_stop");
+}
+
 // ── 插件 ─────────────────────────────────────────
 
 /** 列出已安装插件（含加载状态、失败原因、音色表） */

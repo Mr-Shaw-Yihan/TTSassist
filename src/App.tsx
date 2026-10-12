@@ -41,6 +41,7 @@ import {
   perfStartupDone,
   takeStorageNotice,
   ttsStreamMute,
+  ttsStreamStop,
 } from "./services/invoke";
 import type { Message, Favorite, PluginSetupProgress } from "./types";
 
@@ -514,12 +515,18 @@ function App() {
   // 非阻塞发送（QQ 式）：点发送立即抢插一条 temp 占位、清输入框、滚到最新，
   // generateTTS 在后台跑——成功用真实消息 settle 替换占位，失败转「失败」气泡保留可重试。
   // 不 `await` 卡调用方：InputBox 拿到的是立即返回的 void，输入框始终可用。
+  // 本窗同一时刻只跟踪一条在飞发送（宿主单流）；打断时用它标记已取消，
+  // 使被中断那条的回 rejection 走「摘占位」而非「失败」（用户主动停不算失败）。
+  const activeSendRef = useRef<{ tempId: string; cancelled: boolean } | null>(null);
+
   function handleSend(raw: string) {
     const text = raw.trim();
     if (!text) return;
     // 本地 temp id：阻塞引擎没有后端 early 事件，靠它做到「发送即进气泡」；
     // 流式引擎的 tts:streaming 会按同一文本把这条 temp 原地升级成真实 id。
     const tempId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const send = { tempId, cancelled: false };
+    activeSendRef.current = send;
     useChatStore
       .getState()
       .beginPlaceholder({ id: tempId, content: text, audio_path: "", created_at: new Date().toISOString() });
@@ -529,15 +536,22 @@ function App() {
       try {
         const { message, hostPlayed } = await generateTTS(text);
         useChatStore.getState().settle(tempId, message);
+        if (activeSendRef.current === send) activeSendRef.current = null;
         // 宿主已流式播放（扬声器）则不再整段自动播放，避免双播
         if (hostPlayed) return;
         // 自动播放延迟 0.4 秒（避免刚生成时卡音）
         setTimeout(() => void playAudio(message.audio_path), 400);
       } catch (e) {
-        // 合成失败：把这条 temp 转「失败」态（保留气泡 + 重试），不再弹框打断输入。
-        // 流式中途失败时 temp 已被 tts:streaming 升级为真实 id，tts:failed 事件会把那条
-        // 转失败；此处 fail(tempId) 因 temp 行已不存在而无空作用（store 里 fail 只对已存行生效）。
-        useChatStore.getState().fail(tempId, String(e));
+        if (send.cancelled) {
+          // 用户主动打断：宁缺毋残，摘掉这条占位（不转失败）
+          useChatStore.getState().removeMessage(tempId);
+        } else {
+          // 合成失败：把这条 temp 转「失败」态（保留气泡 + 重试），不再弹框打断输入。
+          // 流式中途失败时 temp 已被 tts:streaming 升级为真实 id，tts:failed 事件会把那条
+          // 转失败；此处 fail(tempId) 因 temp 行已不存在而无空作用（store 里 fail 只对已存行生效）。
+          useChatStore.getState().fail(tempId, String(e));
+        }
+        if (activeSendRef.current === send) activeSendRef.current = null;
       }
     })();
   }
@@ -545,6 +559,22 @@ function App() {
   // 失败气泡重试：先摘掉失败占位，再按原文重发（另起一条 temp）。
   function handleRetry(id: string, text: string) {
     useChatStore.getState().clearFailed(id);
+    handleSend(text);
+  }
+
+  // 连点两次打断改发：标记当前在飞发送为已取消、摘掉其占位，
+  // 停掉后端流（tts_stream_stop），然后立即重发新文本。
+  async function interruptAndSend(text: string) {
+    const cur = activeSendRef.current;
+    if (cur) {
+      cur.cancelled = true;
+      useChatStore.getState().removeMessage(cur.tempId);
+    }
+    try {
+      await ttsStreamStop();
+    } catch {
+      /* 无流在跑 / 停止失败不阻断改发 */
+    }
     handleSend(text);
   }
 
@@ -757,6 +787,8 @@ function App() {
               <footer style={{ height: composerH }} className="shrink-0 bg-[var(--paper-card)]">
                 <InputBox
                   onSend={handleSend}
+                  busy={streamingIds.length > 0}
+                  onInterruptThenSend={(t) => void interruptAndSend(t)}
                   onOpenSettings={() => setTab("settings")}
                 />
               </footer>

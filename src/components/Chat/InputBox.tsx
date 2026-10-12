@@ -2,7 +2,7 @@
 // 高度由外层分隔条拖拽控制（App.tsx），本组件 flex 填满。快捷键语音输入固定直接发送（识别完即合成），
 // 「说话」按钮按 settings.asr_result_mode 分流（转文字 / 直接发送）。
 
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { VoiceInputButton } from "./VoiceInputButton";
 import { VolumeMeter } from "./VolumeMeter";
@@ -11,21 +11,57 @@ import { MicToggle } from "./MicToggle";
 import { useVoiceInputStore } from "../../stores/voiceInputStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useDraftStore } from "../../stores/draftStore";
+import { toast } from "../common/Toast";
+import { decideSendClick } from "../../utils/sendAction";
 
 interface Props {
   /** 非阻塞发送：立即返回 void（合成在后台跑，状态进气泡），不锁输入框 */
   onSend: (text: string) => void;
+  /** 是否有合成在飞（驱动发送键置灰 + 连点打断状态机） */
+  busy: boolean;
+  /** 置灰期间第二次点：打断当前合成并改发此文本 */
+  onInterruptThenSend: (text: string) => void;
   /** 麦克风未配置设备时点击开关的引导跳转（去设置页） */
   onOpenSettings: () => void;
 }
 
-export function InputBox({ onSend, onOpenSettings }: Props) {
+export function InputBox({ onSend, busy, onInterruptThenSend, onOpenSettings }: Props) {
   // 草稿放在 store 而不是局部 state：App.tsx 切标签页是条件渲染，本组件会被卸载，
   // 局部 state 归零 → 用户表现为“切个页面刚输入的文字就没了”。setter 兼容函数式更新，
   // 所以下面 setText((prev) => …) 的写法无需改动。
   const text = useDraftStore((s) => s.draft);
   const setText = useDraftStore((s) => s.setDraft);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  // “已武装”：busy 时第一次置灰点击只 arm + 轻提示，3 秒内再点=打断改发。
+  const [armed, setArmed] = useState(false);
+  const armTimerRef = useRef<number | null>(null);
+
+  function clearArm() {
+    if (armTimerRef.current !== null) {
+      window.clearTimeout(armTimerRef.current);
+      armTimerRef.current = null;
+    }
+    setArmed(false);
+  }
+  function armThenTimeout() {
+    setArmed(true);
+    if (armTimerRef.current !== null) window.clearTimeout(armTimerRef.current);
+    armTimerRef.current = window.setTimeout(() => {
+      armTimerRef.current = null;
+      setArmed(false);
+    }, 3000);
+  }
+  // 合成结束（busy 转假）时自动解除武装，避免下一次发送莫名“一点就打断”
+  useEffect(() => {
+    if (!busy) clearArm();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy]);
+  // 卸载时清定时器
+  useEffect(() => {
+    return () => {
+      if (armTimerRef.current !== null) window.clearTimeout(armTimerRef.current);
+    };
+  }, []);
 
   // 快捷键语音输入会话状态（仅状态条展示；识别结果固定直接发送）
   const phase = useVoiceInputStore((s) => s.phase);
@@ -73,10 +109,25 @@ export function InputBox({ onSend, onOpenSettings }: Props) {
   }, [error, setVi]);
 
   // 发送：非阻塞。handleSend 立即返回，合成失败不再弹框（改由失败气泡重试），
-  // 输入框马上清空并继续可用。
-  function send() {
+  // 输入框马上清空并继续可用。busy 时走“置灰但仍可点 + 连点两次打断”状态机。
+  function handleClick() {
     const t = text.trim();
-    if (!t) return;
+    const action = decideSendClick({ busy, armed, hasText: !!t });
+    if (action === "noop") return;
+    if (action === "arm") {
+      armThenTimeout();
+      void toast("合成进行中，再点一次将打断当前并改发");
+      return;
+    }
+    if (action === "interrupt") {
+      clearArm();
+      onInterruptThenSend(t);
+      setText("");
+      inputRef.current?.focus();
+      return;
+    }
+    // send
+    clearArm();
     onSend(t);
     setText("");
     inputRef.current?.focus();
@@ -124,7 +175,7 @@ export function InputBox({ onSend, onOpenSettings }: Props) {
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              void send();
+              handleClick();
             }
           }}
         />
@@ -144,11 +195,15 @@ export function InputBox({ onSend, onOpenSettings }: Props) {
           }}
         />
         <button
-          className="btn-tex rounded-xl px-4 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed active:scale-[0.97]"
+          className={[
+            "btn-tex rounded-xl px-4 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed active:scale-[0.97]",
+            busy ? "opacity-60" : "",
+          ].join(" ")}
           disabled={!text.trim()}
-          onClick={() => send()}
+          title={busy ? "合成进行中：再点一次打断当前并改发" : "发送"}
+          onClick={handleClick}
         >
-          发送
+          {busy && armed ? "打断重发" : "发送"}
         </button>
       </div>
     </div>
