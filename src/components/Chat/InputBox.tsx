@@ -2,19 +2,19 @@
 // 高度由外层分隔条拖拽控制（App.tsx），本组件 flex 填满。快捷键语音输入固定直接发送（识别完即合成），
 // 「说话」按钮按 settings.asr_result_mode 分流（转文字 / 直接发送）。
 
-import { useState, useRef, useEffect } from "react";
+import { useRef, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { VoiceInputButton } from "./VoiceInputButton";
 import { VolumeMeter } from "./VolumeMeter";
 import { VolumePopover } from "./VolumePopover";
 import { MicToggle } from "./MicToggle";
 import { useVoiceInputStore } from "../../stores/voiceInputStore";
-import { showInfo } from "../common/ConfirmDialog";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useDraftStore } from "../../stores/draftStore";
 
 interface Props {
-  onSend: (text: string) => Promise<void>;
+  /** 非阻塞发送：立即返回 void（合成在后台跑，状态进气泡），不锁输入框 */
+  onSend: (text: string) => void;
   /** 麦克风未配置设备时点击开关的引导跳转（去设置页） */
   onOpenSettings: () => void;
 }
@@ -25,7 +25,6 @@ export function InputBox({ onSend, onOpenSettings }: Props) {
   // 所以下面 setText((prev) => …) 的写法无需改动。
   const text = useDraftStore((s) => s.draft);
   const setText = useDraftStore((s) => s.setDraft);
-  const [sending, setSending] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   // 快捷键语音输入会话状态（仅状态条展示；识别结果固定直接发送）
@@ -73,19 +72,14 @@ export function InputBox({ onSend, onOpenSettings }: Props) {
     return () => clearTimeout(t);
   }, [error, setVi]);
 
-  async function send() {
+  // 发送：非阻塞。handleSend 立即返回，合成失败不再弹框（改由失败气泡重试），
+  // 输入框马上清空并继续可用。
+  function send() {
     const t = text.trim();
-    if (!t || sending) return;
-    setSending(true);
-    try {
-      await onSend(t);
-      setText("");
-      inputRef.current?.focus();
-    } catch (e) {
-      void showInfo({ title: "发送失败", message: String(e) }); // 可复制全文（含 Key 获取地址）
-    } finally {
-      setSending(false);
-    }
+    if (!t) return;
+    onSend(t);
+    setText("");
+    inputRef.current?.focus();
   }
 
   return (
@@ -126,7 +120,6 @@ export function InputBox({ onSend, onOpenSettings }: Props) {
           placeholder="输入要朗读的文字，回车发送…"
           value={text}
           autoFocus
-          disabled={sending}
           onChange={(e) => setText(e.currentTarget.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
@@ -152,10 +145,10 @@ export function InputBox({ onSend, onOpenSettings }: Props) {
         />
         <button
           className="btn-tex rounded-xl px-4 py-2 text-sm font-medium transition-all disabled:cursor-not-allowed active:scale-[0.97]"
-          disabled={!text.trim() || sending}
-          onClick={() => void send()}
+          disabled={!text.trim()}
+          onClick={() => send()}
         >
-          {sending ? "…" : "发送"}
+          发送
         </button>
       </div>
     </div>

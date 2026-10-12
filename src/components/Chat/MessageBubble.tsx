@@ -15,22 +15,30 @@ interface Props {
   playingPath: string | null;
   /** 占位阶段：流式合成尚未跑完，wav 还没写完（不可重播/收藏，可静播） */
   streaming?: boolean;
+  /** 失败态：合成失败，保留气泡供重试（无音频不可重播/收藏/打开位置） */
+  failed?: boolean;
+  /** 失败原因（展示在失败气泡上） */
+  errorText?: string;
   /** 静播（只静音，合成与落库继续） */
   onMute?: () => void;
   onDeleted: (id: string) => void;
   onFavorited: () => void;
   onPlay: (audioPath: string) => void;
+  /** 失败重试：按原文重发（App 侧先摘失败占位再走一次发送） */
+  onRetry?: (message: Message) => void;
 }
 
-export function MessageBubble({ message, playingPath, streaming = false, onMute, onDeleted, onFavorited, onPlay }: Props) {
+export function MessageBubble({ message, playingPath, streaming = false, failed = false, errorText, onMute, onDeleted, onFavorited, onPlay, onRetry }: Props) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const isPlaying = playingPath === message.audio_path;
+  // 仅已落库（有音频且非占位/失败）才允许收藏与打开位置
+  const canFavorite = !streaming && !failed && !!message.audio_path;
 
   // 播放：onPlay 由 App 提供（playAudioWithMic 已含“开关开启时发麦克风”），
   // 此处不再自行发麦，避免双份。
   function handlePlay() {
-    if (streaming) return; // 占位阶段 wav 未写完，没有可整段重播的音频
+    if (streaming || failed) return; // 占位/失败阶段 wav 不存在，没有可整段重播的音频
     onPlay(message.audio_path);
   }
 
@@ -74,6 +82,12 @@ export function MessageBubble({ message, playingPath, streaming = false, onMute,
 
   async function handleDelete() {
     setMenu(null);
+    // temp 占位 / 失败气泡从未落库（audio_path 为空），后端没有这条 → 直接本地移除；
+    // 否则会出现「删不掉失败气泡」（deleteMessage 返回 false，onDeleted 不触发）。
+    if (!message.audio_path) {
+      onDeleted(message.id);
+      return;
+    }
     const ok = await deleteMessage(message.id);
     if (ok) onDeleted(message.id);
   }
@@ -111,7 +125,22 @@ export function MessageBubble({ message, playingPath, streaming = false, onMute,
       >
         <div className="whitespace-pre-wrap break-words leading-[1.65]">{message.content}</div>
         <div className="mt-1.5 flex items-center gap-2 text-[11px] text-[var(--ink-300)]">
-          {streaming ? (
+          {failed ? (
+            /* 失败态：合成没出声/未落库。保留这条文本 + 重试入口（用户选择：失败不静默消失）。 */
+            <>
+              <span className="flex items-center gap-1 text-[var(--seal)]">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--seal)]" />
+                合成失败{errorText ? `：${errorText}` : ""}
+              </span>
+              <button
+                onClick={() => onRetry?.(message)}
+                title="按原文重新合成"
+                className="rounded-md px-1.5 py-0.5 text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-700)] transition-colors"
+              >
+                ↻ 重试
+              </button>
+            </>
+          ) : streaming ? (
             /* 占位态：后端已拿到会话并开始推流，所以用户已经听到声音了。
                这一位必须现在就给出来，否则整条流跑完前无处可点。 */
             <>
@@ -159,18 +188,22 @@ export function MessageBubble({ message, playingPath, streaming = false, onMute,
             className="fixed z-[9999] min-w-[160px] rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] py-1 text-sm text-[var(--ink-700)] shadow-[0_8px_24px_rgba(26,24,22,0.18)] animate-fade overflow-hidden"
             style={{ left: menu.x, top: menu.y }}
           >
-              <button
-                onClick={handleFavorite}
-                className="block w-full px-4 py-2 text-left hover:bg-[var(--amber-200)]/40 hover:text-[var(--ink-900)] transition-colors"
-              >
-                收藏到签笺
-              </button>
-              <button
-                onClick={handleReveal}
-                className="block w-full px-4 py-2 text-left hover:bg-[var(--amber-200)]/40 hover:text-[var(--ink-900)] transition-colors"
-              >
-                在文件夹中显示
-              </button>
+              {canFavorite && (
+                <>
+                  <button
+                    onClick={handleFavorite}
+                    className="block w-full px-4 py-2 text-left hover:bg-[var(--amber-200)]/40 hover:text-[var(--ink-900)] transition-colors"
+                  >
+                    收藏到签笺
+                  </button>
+                  <button
+                    onClick={handleReveal}
+                    className="block w-full px-4 py-2 text-left hover:bg-[var(--amber-200)]/40 hover:text-[var(--ink-900)] transition-colors"
+                  >
+                    在文件夹中显示
+                  </button>
+                </>
+              )}
               <button
                 onClick={handleDelete}
                 className="block w-full px-4 py-2 text-left text-[var(--seal)] hover:bg-[var(--seal)]/10 transition-colors border-t border-[var(--ink-200)]"

@@ -26,12 +26,8 @@ import { ToastHost, toast } from "./components/common/Toast";
 import { ConfirmDialogHost, showInfo } from "./components/common/ConfirmDialog";
 import { playMicOnChime, playMicOffChime } from "./utils/chime";
 import { computeComposerHeight, COMPOSER_DEF, COMPOSER_MIN, COMPOSER_MAX_RATIO } from "./utils/composerResize";
-import {
-  withStreamingPlaceholder,
-  settleStreaming,
-  dropStreaming,
-  type StreamingNotice,
-} from "./utils/streamPlaceholder";
+import { type StreamingNotice } from "./utils/streamPlaceholder";
+import { useChatStore } from "./stores/chatStore";
 import {
   generateTTS,
   listMessages,
@@ -65,9 +61,13 @@ function App() {
     return <SubtitleWindow />;
   }
 
-  const [messages, setMessages] = useState<Message[]>([]);
-  // 消息分页：是否还有更早的 / 翻页加载中（防重入）
-  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  // 消息列表 + 合成态收敛到 chatStore（跨 temp 占位 / tts:streaming / tts:failed 三源）
+  const messages = useChatStore((s) => s.messages);
+  const streamingIds = useChatStore((s) => s.streamingIds);
+  const failedIds = useChatStore((s) => s.failedIds);
+  const reasons = useChatStore((s) => s.reasons);
+  const hasMoreMessages = useChatStore((s) => s.hasMore);
+  // 消息分页：翻页加载中（防重入）
   const loadingOlderRef = useRef(false);
   // 首屏消息是否已加载完成（初始定位滚底的触发器）
   const [initialLoaded, setInitialLoaded] = useState(false);
@@ -76,11 +76,6 @@ function App() {
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [tab, setTab] = useState<Tab>("messages");
   const [playingPath, setPlayingPath] = useState<string | null>(null);
-  // 正在流式合成中的消息 id：界面上是占位气泡（可静播，暂不可重播/收藏，
-  // 因为 wav 还没写完）
-  const [streamingIds, setStreamingIds] = useState<string[]>([]);
-  // 本次发送对应的占位 id（失败时按它摘掉占位；宿主同一时刻只跑一条流，不会串）
-  const streamingNoticeRef = useRef<string | null>(null);
   const settings = useSettingsStore((s) => s.settings);
   const setSettings = useSettingsStore((s) => s.setSettings);
   const patch = useSettingsStore((s) => s.patch);
@@ -137,8 +132,7 @@ function App() {
       }
       try {
         const page = await listMessages(MESSAGE_PAGE_SIZE);
-        setMessages(page.messages);
-        setHasMoreMessages(page.has_more);
+        useChatStore.getState().load(page.messages, page.has_more);
         // 不在此处直接滚底：DOM 尚未提交新消息，滚的是旧高度；
         // 置位后由下方初始定位 effect 在提交后可靠滚底
         setInitialLoaded(true);
@@ -201,30 +195,23 @@ function App() {
   }, []);
 
   // 流式「已开始合成」通知：后端在会话建立、即将出声那一刻就发，而正式消息要等
-  // 整条流跑完才落库（几秒到几十秒）。先入列占位消息，用户才能「看到并在需要时点上静播」。
+  // 整条流跑完才落库（几秒到几十秒）。若本窗已抢插 temp 占位则原地升级为真实 id，
+  // 否则（跨窗口发送）直接追加占位气泡——用户才能「看到并在需要时点上静播」。
   useTauriListen<StreamingNotice>("tts:streaming", (n) => {
-    if (!n?.id) return;
-    streamingNoticeRef.current = n.id;
-    setMessages((prev) => withStreamingPlaceholder(prev, n));
-    setStreamingIds((prev) => (prev.includes(n.id) ? prev : [...prev, n.id]));
+    if (n?.id) useChatStore.getState().adoptStreaming(n);
+  }, []);
+
+  // 合成失败（流式中途失败，含跨窗口发送）：把那条占位气泡转「失败」态，保留可重试。
+  useTauriListen<{ id: string; reason: string }>("tts:failed", (f) => {
+    if (f?.id) useChatStore.getState().fail(f.id, f.reason);
   }, []);
 
   /** 重取最新一页并合并：保留已加载且不在新窗口里的更早消息 */
   const reloadLatestMessages = useCallback(async () => {
     try {
       const page = await listMessages(MESSAGE_PAGE_SIZE);
-      setHasMoreMessages(page.has_more);
-      // 跨窗口生成的流式消息（浮窗/语音直接发送/遥控）不经过本窗的 handleSend，
-      // 它靠这条事件完成“占位→正式”的收尾：已落库的 id 从 streaming 集合里摘掉，
-      // 否则气泡会永远停在「合成中 / 静播」态。
-      setStreamingIds((prev) =>
-        prev.filter((id) => !page.messages.some((m) => m.id === id)),
-      );
-      setMessages((prev) => {
-        const inWindow = new Set(page.messages.map((m) => m.id));
-        const older = prev.filter((m) => !inWindow.has(m.id));
-        return [...older, ...page.messages];
-      });
+      // 合并最新一页：已落库 id 从合成中摘除，本地 temp/失败占位保留在末尾（见 chatStore）
+      useChatStore.getState().mergeLatest(page.messages, page.has_more);
     } catch { /* 刷新失败静默，下次事件再试 */ }
   }, []);
 
@@ -237,9 +224,9 @@ function App() {
     const distFromBottom = el.scrollHeight - el.scrollTop;
     try {
       const page = await listMessages(MESSAGE_PAGE_SIZE, firstId);
-      setHasMoreMessages(page.has_more);
+      useChatStore.getState().setHasMore(page.has_more);
       if (page.messages.length > 0) {
-        setMessages((prev) => [...page.messages, ...prev]);
+        useChatStore.getState().prependOlder(page.messages);
         requestAnimationFrame(() => {
           const node = listRef.current;
           if (node) node.scrollTop = node.scrollHeight - distFromBottom;
@@ -453,8 +440,14 @@ function App() {
     messagesRef.current = messages;
   }, [messages]);
   useTauriListen("playback:play-last", () => {
-    const last = messagesRef.current[messagesRef.current.length - 1];
-    if (last) void playAudioWithMic(last.audio_path);
+    // 从末尾往前找第一条真正已落库（有音频）的消息：跳过 temp 占位/失败气泡
+    const arr = messagesRef.current;
+    for (let i = arr.length - 1; i >= 0; i--) {
+      if (arr[i].audio_path) {
+        void playAudioWithMic(arr[i].audio_path);
+        break;
+      }
+    }
   }, [playAudioWithMic]);
 
   // 通用播放控制（宿主能力桥发出，供桥接插件等外部触发方使用）：
@@ -518,29 +511,41 @@ function App() {
     return () => { unlisten?.(); };
   }, [reloadLatestMessages, reloadFavorites]);
 
-  async function handleSend(text: string) {
-    try {
-      const { message: msg, hostPlayed } = await generateTTS(text);
-      // 占位气泡已在则按 id 原地替换（不重复、不跳位）；事件丢失时直接追加
-      setMessages((prev) => settleStreaming(prev, msg));
-      setStreamingIds((prev) => prev.filter((id) => id !== msg.id));
-      if (streamingNoticeRef.current === msg.id) streamingNoticeRef.current = null;
-      // 新消息滚到底（用户正在向上翻阅时不打断，可用定位按钮回底部）
-      if (atBottom) scrollToBottom();
-      // 宿主已流式播放（扬声器）则不再整段自动播放，避免双播
-      if (hostPlayed) return;
-      // 自动播放延迟 0.4 秒（避免刚生成时卡音）
-      setTimeout(() => playAudio(msg.audio_path), 400);
-    } catch (e) {
-      // 合成中途失败：摘掉本条占位（宁缺毋残）；抛给 InputBox 走已有的 showInfo
-      const stale = streamingNoticeRef.current;
-      if (stale) {
-        setMessages((prev) => dropStreaming(prev, stale));
-        setStreamingIds((prev) => prev.filter((id) => id !== stale));
-        streamingNoticeRef.current = null;
+  // 非阻塞发送（QQ 式）：点发送立即抢插一条 temp 占位、清输入框、滚到最新，
+  // generateTTS 在后台跑——成功用真实消息 settle 替换占位，失败转「失败」气泡保留可重试。
+  // 不 `await` 卡调用方：InputBox 拿到的是立即返回的 void，输入框始终可用。
+  function handleSend(raw: string) {
+    const text = raw.trim();
+    if (!text) return;
+    // 本地 temp id：阻塞引擎没有后端 early 事件，靠它做到「发送即进气泡」；
+    // 流式引擎的 tts:streaming 会按同一文本把这条 temp 原地升级成真实 id。
+    const tempId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    useChatStore
+      .getState()
+      .beginPlaceholder({ id: tempId, content: text, audio_path: "", created_at: new Date().toISOString() });
+    // 发送即定位最新（发送动作视为“要看这条”，不再受 atBottom 限制）
+    scrollToBottom();
+    void (async () => {
+      try {
+        const { message, hostPlayed } = await generateTTS(text);
+        useChatStore.getState().settle(tempId, message);
+        // 宿主已流式播放（扬声器）则不再整段自动播放，避免双播
+        if (hostPlayed) return;
+        // 自动播放延迟 0.4 秒（避免刚生成时卡音）
+        setTimeout(() => void playAudio(message.audio_path), 400);
+      } catch (e) {
+        // 合成失败：把这条 temp 转「失败」态（保留气泡 + 重试），不再弹框打断输入。
+        // 流式中途失败时 temp 已被 tts:streaming 升级为真实 id，tts:failed 事件会把那条
+        // 转失败；此处 fail(tempId) 因 temp 行已不存在而无空作用（store 里 fail 只对已存行生效）。
+        useChatStore.getState().fail(tempId, String(e));
       }
-      throw e;
-    }
+    })();
+  }
+
+  // 失败气泡重试：先摘掉失败占位，再按原文重发（另起一条 temp）。
+  function handleRetry(id: string, text: string) {
+    useChatStore.getState().clearFailed(id);
+    handleSend(text);
   }
 
   return (
@@ -647,10 +652,13 @@ function App() {
                     message={m}
                     playingPath={playingPath}
                     streaming={streamingIds.includes(m.id)}
+                    failed={failedIds.includes(m.id)}
+                    errorText={reasons[m.id]}
                     onMute={() => void ttsStreamMute().catch(() => {})}
-                    onDeleted={(id) => setMessages((prev) => prev.filter((x) => x.id !== id))}
+                    onDeleted={(id) => useChatStore.getState().removeMessage(id)}
                     onFavorited={() => { /* 已通过 favorite:changed 事件刷新 */ }}
                     onPlay={() => playAudioWithMic(m.audio_path)}
+                    onRetry={(msg) => handleRetry(msg.id, msg.content)}
                   />
                 ))
               )}
