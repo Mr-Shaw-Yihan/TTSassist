@@ -87,12 +87,21 @@ fn setup_stream_for_device(
     if need_new {
         *stream = None;
         *cur_device = None;
+        log_info!("[mic-取证] MicPlayback 线程尝试打开设备：{device_name}");
         let device = find_device_by_name(device_name)
             .ok_or_else(|| format!("未找到音频设备：{device_name}"))?;
-        let (s, h) = rodio::OutputStream::try_from_device(&device)
-            .map_err(|e| describe_device_open_failure(device_name, &e.to_string()))?;
-        *stream = Some((s, h));
-        *cur_device = Some(device_name.to_string());
+        match rodio::OutputStream::try_from_device(&device) {
+            Ok((s, h)) => {
+                log_info!("[mic-取证] 设备打开成功：{device_name}");
+                *stream = Some((s, h));
+                *cur_device = Some(device_name.to_string());
+            }
+            Err(e) => {
+                let msg = describe_device_open_failure(device_name, &e.to_string());
+                log_warn!("[mic-取证] 设备打开失败：{msg}");
+                return Err(msg);
+            }
+        }
     }
     Ok(())
 }

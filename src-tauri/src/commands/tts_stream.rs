@@ -236,6 +236,9 @@ pub async fn generate_tts_stream_impl(
 
     let (ack_tx, ack_rx) = channel();
     let has_mic_target = mic_send_enabled && !mic_device.is_empty();
+    log_info!(
+        "[mic-取证] 流式发送：mic_send_enabled={mic_send_enabled} device=「{mic_device}」 发往麦克风={has_mic_target}"
+    );
     let mic_target = if has_mic_target {
         Some((mic_device, mic_volume.clamp(0.0, 1.0)))
     } else {
@@ -572,6 +575,7 @@ fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
                                 sink.set_volume(*volume);
                                 sinks.push(DeviceSink { _stream: stream, sink });
                                 mic_ok = true;
+                                log_info!("[mic-取证] 流式已开播到虚拟麦克风");
                             }
                             Err(e) => log_warn!("流式播放：创建虚拟麦克风 Sink 失败: {e}"),
                         },

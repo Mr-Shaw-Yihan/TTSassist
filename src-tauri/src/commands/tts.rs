@@ -123,7 +123,13 @@ pub async fn generate_tts_impl(app: &AppHandle, text: &str) -> Result<Message, S
     // 5. 全局开关开启且配置了麦克风设备 → 同时发到虚拟麦克风（扬声器播放由前端负责）
     if mic_send_enabled && !mic_device.is_empty() {
         let abs = content_dir.join(&result.audio_path);
+        log_info!("[mic-取证] 阻塞发送→发往虚拟麦克风：device=「{mic_device}」");
         mic.play(abs, mic_device, mic_volume);
+    } else {
+        log_info!(
+            "[mic-取证] 阻塞发送未发往麦克风：mic_send_enabled={mic_send_enabled} device_empty={}",
+            mic_device.is_empty()
+        );
     }
 
     Ok(result)
