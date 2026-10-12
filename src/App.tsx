@@ -27,6 +27,7 @@ import { ConfirmDialogHost, showInfo } from "./components/common/ConfirmDialog";
 import { playMicOnChime, playMicOffChime } from "./utils/chime";
 import { computeComposerHeight, COMPOSER_DEF, COMPOSER_MIN, COMPOSER_MAX_RATIO } from "./utils/composerResize";
 import { type StreamingNotice } from "./utils/streamPlaceholder";
+import { resolvePlayAction } from "./utils/playAction";
 import { useChatStore } from "./stores/chatStore";
 import {
   generateTTS,
@@ -101,6 +102,8 @@ function App() {
   // 全局唯一播放元素（互斥播放）
   const playingRef = useRef<HTMLAudioElement | null>(null);
   const playingPathRef = useRef<string | null>(null);
+  // 当前高亮的播放态由谁主导：前端本地 <audio> 还是宿主流式（互斥，防宿主 stop 误清本地播放）
+  const playSourceRef = useRef<"local" | "host" | null>(null);
 
   const reloadFavorites = useCallback(async () => {
     try {
@@ -205,6 +208,25 @@ function App() {
   // 合成失败（流式中途失败，含跨窗口发送）：把那条占位气泡转「失败」态，保留可重试。
   useTauriListen<{ id: string; reason: string }>("tts:failed", (f) => {
     if (f?.id) useChatStore.getState().fail(f.id, f.reason);
+  }, []);
+
+  // 宿主流式开播该条 → 把对应气泡标为「播放中」（修 bug④：状态同步，点它=停不双播）。
+  // va:hostplay:* 是宿主专用频道（只由 tts_stream 发出），前端只消费不发送，
+  // 避免与本地播放自 emit 的 va:play:* 相互干扰。
+  useTauriListen<string>("va:hostplay:start", (p) => {
+    if (typeof p === "string" && p) {
+      playingPathRef.current = p;
+      playSourceRef.current = "host";
+      setPlayingPath(p);
+    }
+  }, []);
+  useTauriListen<string>("va:hostplay:stop", (p) => {
+    // 仅当高亮仍由宿主主导且路径匹配才清，避免误清刚接管的本地播放
+    if (playSourceRef.current === "host" && (!p || playingPathRef.current === p)) {
+      playingPathRef.current = null;
+      playSourceRef.current = null;
+      setPlayingPath(null);
+    }
   }, []);
 
   /** 重取最新一页并合并：保留已加载且不在新窗口里的更早消息 */
@@ -333,7 +355,7 @@ function App() {
     }
   }, [volume, playbackRate]);
 
-  // 停止当前播放（扬声器 + 虚拟麦克风）：手动再点停止与后端 playback:stop 事件共用。
+  // 停止当前播放（扬声器 + 虚拟麦克风 + 宿主流式）：手动再点停止与后端 playback:stop 事件共用。
   // playback:stop 是通用播放控制（宿主能力桥 stop_playback 发出，非遥控特供）。
   const stopPlayback = useCallback(() => {
     const cur = playingRef.current;
@@ -342,7 +364,10 @@ function App() {
     }
     playingRef.current = null;
     playingPathRef.current = null;
+    playSourceRef.current = null;
     setPlayingPath(null);
+    // 宿主流式可能正在播同一段（不经前端 <audio>）：一并静它，否则“点了没停”
+    void ttsStreamMute().catch(() => {});
     // 虚拟麦克风侧可能正在播同一条，同步停止（未在播时无副作用）
     stopMic().catch(() => {});
     void emit("va:play:stop").catch(() => {});
@@ -355,7 +380,10 @@ function App() {
   // 供能力桥订阅方（如手机遥控）感知，与 playback:play-last 同族命名）。
   const playAudio = useCallback(async (relPath: string): Promise<boolean> => {
     const cur = playingRef.current;
-    if (playingPathRef.current === relPath && cur && !cur.paused) {
+    const localPlaying = !!cur && !cur.paused && playingPathRef.current === relPath;
+    const hostPlaying = playSourceRef.current === "host" && playingPathRef.current === relPath;
+    if (resolvePlayAction({ playingPath: playingPathRef.current, target: relPath, localPlaying, hostPlaying }) === "stop") {
+      // 该条正在播（本地或宿主）：再点=停止（stopPlayback 会同时静宿主）
       stopPlayback();
       return false;
     }
@@ -372,6 +400,7 @@ function App() {
     a.addEventListener("ended", () => {
       if (playingPathRef.current === relPath) {
         playingPathRef.current = null;
+        playSourceRef.current = null;
         setPlayingPath(null);
       }
       void emit("va:play:stop").catch(() => {});
@@ -382,6 +411,7 @@ function App() {
     const bail = () => {
       if (playingPathRef.current !== relPath) return; // 已被别的音频接管，别去动它的状态
       playingPathRef.current = null;
+      playSourceRef.current = null;
       setPlayingPath(null);
       void emit("va:play:stop").catch(() => {});
       void toast("无法播放这条音频：文件缺失或不可访问", "err");
@@ -396,6 +426,7 @@ function App() {
     void emit("playback:started", relPath).catch(() => {});
     playingRef.current = a;
     playingPathRef.current = relPath;
+    playSourceRef.current = "local";
     setPlayingPath(relPath);
     return true;
   }, [volume, playbackRate, stopPlayback]);

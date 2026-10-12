@@ -550,16 +550,20 @@ struct PlaySession {
     app: AppHandle,
     /// 开局时宿主是否发过 `va:play:start`（决定收尾要不要发对应的那一套 stop）
     announced: bool,
+    /// 本次宿主流式播放的归档相对路径（供 `va:hostplay:*` 前端同步气泡播放态）
+    wav_rel: String,
 }
 
 /// 宿主播完/中断时的播放态收尾：只补发开局时发过 start 的那一套。
 /// 前端整段播放路径自己会发一套，两边不发两套是 `announced` 标志存在的全部意义。
+/// `va:hostplay:stop` 是宿主专用频道（前端只消费不发送），带上 wav_rel 供气泡精确清除高亮。
 fn announce_play_stop(s: &PlaySession) {
     if !s.announced {
         return;
     }
     let _ = s.app.emit("va:play:stop", ());
     let _ = s.app.emit("playback:stopped", ());
+    let _ = s.app.emit("va:hostplay:stop", s.wav_rel.clone());
 }
 
 fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
@@ -616,6 +620,8 @@ fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
                     // 后续若要做「边播边取/进度显示」需改成播完再发或带时长
                     let _ = app.emit("va:play:start", ());
                     let _ = app.emit("playback:started", wav_rel.clone());
+                    // 宿主专用：前端据此把那条气泡标为「播放中」，修 bug④（点它=停不双播）
+                    let _ = app.emit("va:hostplay:start", wav_rel.clone());
                 }
                 if !sinks.is_empty() {
                     active = Some(PlaySession {
@@ -626,6 +632,7 @@ fn player_thread(rx: std::sync::mpsc::Receiver<PlayerCmd>) {
                         muted: false,
                         app,
                         announced,
+                        wav_rel,
                     });
                 }
             }
