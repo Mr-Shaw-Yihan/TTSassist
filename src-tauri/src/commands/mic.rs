@@ -307,14 +307,36 @@ fn is_vb_cable(name: &str) -> bool {
     lower.contains("cable") || lower.contains("vb-audio") || lower.contains("vb audio")
 }
 
-/// 检出的第一根 VB-CABLE 输出设备名（只供启动热启用）。
-/// 故意不看 `mic_output_device`——热启要自己认准 cable，不受用户在各处选的设备的影响。
+/// 由渲染端名推导其配对的采集端名（VB-CABLE：“…Input…”↔“…Output…”，“…In …”↔“…Out …”）。
+/// 纯函数、供单测。拿不准就原样返回（不会误判成另一根）。
+fn pair_capture_name(render: &str) -> String {
+    if render.contains("Input") {
+        return render.replace("Input", "Output");
+    }
+    if render.contains("In ") {
+        return render.replace("In ", "Out ");
+    }
+    render.to_string()
+}
+
+/// 供启动热启回退用（用户未选设备时）：在检出的 VB-CABLE 渲染设别里，
+/// 优先选「有配对采集端（CABLE Output）存在」的那根——避开像“CABLE In 16ch”这种没装全、
+/// 对方根本读不到的渲染设别。都不满足才退到第一根 cable。
 pub fn find_virtual_cable_output_device() -> Option<String> {
     let host = cpal::default_host();
-    host.output_devices()
-        .ok()?
-        .find(|d| d.name().ok().map(|n| is_vb_cable(&n)).unwrap_or(false))
-        .and_then(|d| d.name().ok())
+    let renders: Vec<String> = host.output_devices().ok()?
+        .filter_map(|d| d.name().ok())
+        .filter(|n| is_vb_cable(n))
+        .collect();
+    let captures: Vec<String> = host
+        .input_devices()
+        .map(|it| it.filter_map(|d| d.name().ok()).filter(|n| is_vb_cable(n)).collect())
+        .unwrap_or_default();
+    renders
+        .iter()
+        .find(|r| captures.iter().any(|c| c == &pair_capture_name(r)))
+        .cloned()
+        .or_else(|| renders.into_iter().next())
 }
 
 // ── Tauri 命令 ──
@@ -363,6 +385,7 @@ pub fn get_mic_status(state: tauri::State<'_, MicPlayback>) -> MicStatus {
 #[cfg(test)]
 mod tests {
     use super::describe_device_open_failure;
+    use super::pair_capture_name;
 
     #[test]
     fn 设备占用错误码翻译成中文处置建议() {
@@ -382,5 +405,15 @@ mod tests {
     fn 其它设备错误只保留原文不加建议() {
         let msg = describe_device_open_failure("某些设备", "boom");
         assert_eq!(msg, "无法打开设备 某些设备：boom", "非占用错误不追加独占提示");
+    }
+
+    #[test]
+    fn 渲染端推导配对采集端名() {
+        // 标准那根：CABLE Input → CABLE Output（该采集端存在，才会被选中）
+        assert_eq!(pair_capture_name("CABLE Input (VB-Audio Virtual Cable)"), "CABLE Output (VB-Audio Virtual Cable)");
+        // 16ch 那根：CABLE In 16ch → CABLE Out 16ch（机器上不存在此采集端，因此不被选）
+        assert_eq!(pair_capture_name("CABLE In 16ch (VB-Audio Virtual Cable)"), "CABLE Out 16ch (VB-Audio Virtual Cable)");
+        // 都不匹配时原样返回，不会误判成另一根
+        assert_eq!(pair_capture_name("随便一个设备"), "随便一个设备");
     }
 }

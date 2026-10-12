@@ -253,11 +253,19 @@ pub fn run() {
             // 流式 TTS 播放线程（插件 WS 逐块 PCM → 边收边播）
             app.manage(crate::commands::tts_stream::StreamPlayer::spawn());
 
-            // 启动即"热启动"虚拟麦克风：自动检出 VB-CABLE 那根设备，播一小段内置音频把 Windows 冷音频端点
-            // 提前激活（与设置里手动“测试”同一播放路径）。只认 cable、不看 mic_output_device（发送走哪台仍由用户定）。
-            // 仅当开了发麦且检到 cable 时热一次，用户无感。根治“冷启动首发语音进不了麦、对方听不见”。
+            // 启动即"热启动"虚拟麦克风：播一小段内置音频把 Windows 冷音频端点提前激活
+            //（与手动“测试”同一播放路径），根治“冷启动首发语音进不了麦、对方听不见”。
+            // 热启目标 = 发送实际会走的那根（mic_output_device），保证“暖的就是发的”，
+            // 不再出现暖一根、发另一根的分叉（真机踩到：发送选了没有采集端的 16ch cable）。
+            // 用户还没选设备时，回退自动认那根“有配对 CABLE Output 采集端”的渲染设备。
             if settings.mic_send_enabled {
-                if let Some(dev) = crate::commands::mic::find_virtual_cable_output_device() {
+                let chosen = settings.mic_output_device.trim();
+                let dev = if !chosen.is_empty() {
+                    Some(chosen.to_string())
+                } else {
+                    crate::commands::mic::find_virtual_cable_output_device()
+                };
+                if let Some(dev) = dev {
                     let vol = settings.mic_playback_volume;
                     app.state::<crate::commands::mic::MicPlayback>().warm(dev, vol);
                 }
