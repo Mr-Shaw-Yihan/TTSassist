@@ -61,3 +61,60 @@ export function isStreamingPlaceholder(
 ): boolean {
   return streamingIds.includes(message.id);
 }
+
+// ── 非阻塞发送：阻塞引擎占位 / 失败态 / reconcile（供 App 的三份列表状态用）──
+
+/** 集合幂等增删（streamingIds / failedIds 用），不改入参。 */
+export function withId(ids: string[], id: string): string[] {
+  return ids.includes(id) ? ids : [...ids, id];
+}
+export function withoutId(ids: string[], id: string): string[] {
+  return ids.includes(id) ? ids.filter((x) => x !== id) : ids;
+}
+
+/** 某条是否已失败（渲染失败气泡 + 重试按钮）。 */
+export function isFailed(failedIds: string[], message: Message): boolean {
+  return failedIds.includes(message.id);
+}
+
+/** 发送即抢先插一条占位气泡（阻塞引擎没有后端 early 事件，前端用本地 tempId 先占位）。同 id 幂等。 */
+export function appendPlaceholder(list: Message[], message: Message): Message[] {
+  return list.some((m) => m.id === message.id) ? list : [...list, message];
+}
+
+/** 阻塞引擎：后端真实消息 id 与前端 tempId 不同，按位置把 temp 占位换成正式消息；
+ *  找不到 temp 占位时退化为 settleStreaming 语义（按 id 替换/追加），绝不丢消息。 */
+export function replacePlaceholder(list: Message[], tempId: string, message: Message): Message[] {
+  const idx = list.findIndex((m) => m.id === tempId);
+  if (idx < 0) return settleStreaming(list, message);
+  const next = list.slice();
+  next[idx] = message;
+  return next;
+}
+
+/** 合成失败：把该 id 从 streaming 移到 failed；列表里若还没有这一行（阻塞且未抢先占位的意外情况）
+ *  则补插一条占位行，保证“失败气泡保留可重试”。reason 文本由调用方另存。 */
+export function markFailed(
+  list: Message[],
+  streamingIds: string[],
+  failedIds: string[],
+  entry: { id: string; content: string; created_at: string },
+): { list: Message[]; streamingIds: string[]; failedIds: string[] } {
+  const nextList = list.some((m) => m.id === entry.id)
+    ? list
+    : [...list, { ...entry, audio_path: "" }];
+  return {
+    list: nextList,
+    streamingIds: withoutId(streamingIds, entry.id),
+    failedIds: withId(failedIds, entry.id),
+  };
+}
+
+/** 重试前清掉失败占位（同文本重发会另起一条 temp）。 */
+export function clearFailed(
+  list: Message[],
+  failedIds: string[],
+  id: string,
+): { list: Message[]; failedIds: string[] } {
+  return { list: dropStreaming(list, id), failedIds: withoutId(failedIds, id) };
+}
