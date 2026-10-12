@@ -253,6 +253,16 @@ pub fn run() {
             // 流式 TTS 播放线程（插件 WS 逐块 PCM → 边收边播）
             app.manage(crate::commands::tts_stream::StreamPlayer::spawn());
 
+            // 启动即"热启动"虚拟麦克风：自动检出 VB-CABLE 那根设备，播一小段内置音频把 Windows 冷音频端点
+            // 提前激活（与设置里手动“测试”同一播放路径）。只认 cable、不看 mic_output_device（发送走哪台仍由用户定）。
+            // 仅当开了发麦且检到 cable 时热一次，用户无感。根治“冷启动首发语音进不了麦、对方听不见”。
+            if settings.mic_send_enabled {
+                if let Some(dev) = crate::commands::mic::find_virtual_cable_output_device() {
+                    let vol = settings.mic_playback_volume;
+                    app.state::<crate::commands::mic::MicPlayback>().warm(dev, vol);
+                }
+            }
+
             // 插件代码根跟随安装位置（阶段 22 口径），由 paths 统一给出
             let plugins_root = paths.plugins_root.clone();
             // 旧版插件在 `<AppData>\plugins`：那里现在仍是配置根下路径

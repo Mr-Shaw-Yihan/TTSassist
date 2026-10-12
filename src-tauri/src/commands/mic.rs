@@ -17,6 +17,15 @@ use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait};
 
+/// 虚拟麦克风“热启动”音频：打包进二进制的内置 PCM wav（单声道 32k/16bit）。
+/// 用途：应用启动、以及“设置-虚拟麦克风测试”都播它，把 Windows 冷音频端点提前激活，
+/// 根治“软件首发的语音进不了虚拟麦克风、对方听不见”（音频端点冷启动首开偶发不出声）。
+/// 播完 MicPlayback 线程会持有该设备的 OutputStream（复用），端点不再回到冷态。
+const MIC_WARM_BYTES: &[u8] = include_bytes!("../../assets/mic_warm.wav");
+/// 播放提速系数。rodio 的 `.speed()` 是重采样，提速必升调；不变调的加速需时间伸缩(相位声码器)，
+/// 为一段启动提示音不值当。故用原音(=1.0)。将来若要变调加速，把此值调 >1 即可。
+const MIC_WARM_SPEED: f32 = 1.0;
+
 /// 发往音频线程的命令
 enum MicCommand {
     Play { path: PathBuf, device_name: String, volume: f32 },
@@ -65,6 +74,12 @@ impl MicPlayback {
     }
 
     pub fn play_tone(&self, device_name: String, volume: f32) {
+        let _ = self.cmd_tx.send(MicCommand::PlayTone { device_name, volume });
+    }
+
+    /// 启动热启动：向已配置的虚拟麦克风播一小段内置音频激活端点（与手动测试同一路径）。
+    pub fn warm(&self, device_name: String, volume: f32) {
+        log_info!("[mic-取证] 启动热启动虚拟麦克风：device=「{device_name}」");
         let _ = self.cmd_tx.send(MicCommand::PlayTone { device_name, volume });
     }
 
@@ -145,14 +160,19 @@ fn audio_thread_loop(rx: Receiver<MicCommand>, status: Arc<Mutex<MicStatus>>) {
                         if let Some((_, handle)) = &stream {
                             match rodio::Sink::try_new(handle) {
                                 Ok(new_sink) => {
-                                    use rodio::source::{SineWave, Source};
-                                    let tone = SineWave::new(440.0)
-                                        .take_duration(Duration::from_millis(1200))
-                                        .amplify(0.3);
-                                    new_sink.append(tone);
-                                    new_sink.set_volume(volume.clamp(0.0, 1.0));
-                                    sink = Some(new_sink);
-                                    write_ok(&status, cur_device.clone(), volume, "测试音（440Hz）".into());
+                                    use std::io::Cursor;
+                                    use rodio::Source;
+                                    match rodio::Decoder::new(Cursor::new(MIC_WARM_BYTES))
+                                        .map(|d| d.speed(MIC_WARM_SPEED))
+                                    {
+                                        Ok(src) => {
+                                            new_sink.append(src);
+                                            new_sink.set_volume(volume.clamp(0.0, 1.0));
+                                            sink = Some(new_sink);
+                                            write_ok(&status, cur_device.clone(), volume, "虚拟麦克风热启动".into());
+                                        }
+                                        Err(e) => write_error(&status, format!("内置热启动音频解码失败：{e}")),
+                                    }
                                 }
                                 Err(e) => write_error(&status, format!("创建播放器失败：{e}")),
                             }
@@ -285,6 +305,16 @@ pub fn list_input_devices() -> Vec<AudioDevice> {
 fn is_vb_cable(name: &str) -> bool {
     let lower = name.to_lowercase();
     lower.contains("cable") || lower.contains("vb-audio") || lower.contains("vb audio")
+}
+
+/// 检出的第一根 VB-CABLE 输出设备名（只供启动热启用）。
+/// 故意不看 `mic_output_device`——热启要自己认准 cable，不受用户在各处选的设备的影响。
+pub fn find_virtual_cable_output_device() -> Option<String> {
+    let host = cpal::default_host();
+    host.output_devices()
+        .ok()?
+        .find(|d| d.name().ok().map(|n| is_vb_cable(&n)).unwrap_or(false))
+        .and_then(|d| d.name().ok())
 }
 
 // ── Tauri 命令 ──
