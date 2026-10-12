@@ -58,6 +58,22 @@ pub struct StreamingNotice {
     pub created_at: String,
 }
 
+/// 合成失败通知事件名：对已 early 发过 `tts:streaming`（界面已有占位气泡）但中途失败的 id，
+/// 补发此事件，前端据此把那条气泡转“失败”态（可重试），不再默默消失。
+pub const EVENT_TTS_FAILED: &str = "tts:failed";
+
+/// `tts:failed` 载荷。id 与 `tts:streaming` 一致；reason 为简短中文原因。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TtsFailed {
+    pub id: String,
+    pub reason: String,
+}
+
+/// 流式会话在 tts:streaming 之后失败时广播失败（携带当时那个 id）。
+fn announce_stream_failed(app: &AppHandle, id: &str, reason: &str) {
+    let _ = app.emit(EVENT_TTS_FAILED, TtsFailed { id: id.to_string(), reason: reason.to_string() });
+}
+
 // ── 活跃会话登记（tts_stream_stop 的中止目标）──────────────
 
 struct ActiveStream {
@@ -339,22 +355,28 @@ pub async fn generate_tts_stream_impl(
         Ok(joined) => match joined {
             Ok(stats) => stats,
             Err(e) => {
+                announce_stream_failed(&app, &msg_id, &e);
                 cleanup_failed_stream(&app, &plugin, &session, &tmp_pcm);
                 return Err(e);
             }
         },
         Err(e) => {
+            let reason = format!("流式拉块任务中断: {e}");
+            announce_stream_failed(&app, &msg_id, &reason);
             cleanup_failed_stream(&app, &plugin, &session, &tmp_pcm);
-            return Err(format!("流式拉块任务中断: {e}"));
+            return Err(reason);
         }
     };
     if stats.chunks == 0 || stats.pcm_bytes == 0 {
+        let reason = "流式合成未返回音频".to_string();
+        announce_stream_failed(&app, &msg_id, &reason);
         cleanup_failed_stream(&app, &plugin, &session, &tmp_pcm);
-        return Err("流式合成未返回音频".into());
+        return Err(reason);
     }
 
     // 5. PCM → WAV 归档（历史记录可整段重播）
     if let Err(e) = finalize_wav(&tmp_pcm, &content_dir.join(&wav_rel), sample_rate, channels) {
+        announce_stream_failed(&app, &msg_id, &e);
         cleanup_failed_stream(&app, &plugin, &session, &tmp_pcm);
         return Err(e);
     }
