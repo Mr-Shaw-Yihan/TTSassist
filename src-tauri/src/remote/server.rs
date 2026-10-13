@@ -516,8 +516,11 @@ async fn handle_message(
             let _ = shared
                 .app
                 .emit("tts:send-started", serde_json::json!({ "content": text }));
-            // allowlog: 仅记文本字符数与结果，合成内容不进日志
-            log_info!("[remote] 收到 synthesize：len={}", text.chars().count());
+            log_info!(
+                // allowlog: 仅记文本字符数（len），合成内容不进日志
+                "[remote] 收到 synthesize：len={}",
+                text.chars().count()
+            );
             let out2 = out.clone();
             let app = shared.app.clone();
             tokio::spawn(async move {
