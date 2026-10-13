@@ -198,6 +198,12 @@ function App() {
     await reloadLatestMessages();
   }, []);
 
+  // 遥控/跨窗发送到达：后端收到遥控 synthesize 即广播本事件，PC 即时按内容画“合成中”占位。
+  // 成功经 message:changed→mergeLatest 收掉同内容占位；失败经 tts:send-failed 转失败态。
+  useTauriListen<{ content: string }>("tts:send-started", (p) => {
+    if (p?.content) useChatStore.getState().remotePending(p.content);
+  }, []);
+
   // 流式「已开始合成」通知：后端在会话建立、即将出声那一刻就发，而正式消息要等
   // 整条流跑完才落库（几秒到几十秒）。若本窗已抢插 temp 占位则原地升级为真实 id，
   // 否则（跨窗口发送）直接追加占位气泡——用户才能「看到并在需要时点上静播」。
