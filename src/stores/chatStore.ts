@@ -50,7 +50,9 @@ interface ChatState {
   settle: (tempId: string, message: Message) => void;
   /** 合成失败：把已存在的气泡转失败态并记原因；无对应气泡则忽略（不凭空补游离气泡） */
   fail: (id: string, reason: string) => void;
-  /** 跨窗口失败（如浮窗发送、连接前失败后端不发 tts:failed）：按文本去重后补一条失败气泡 */
+  /** 遥控/跨窗发送到达：按内容追加一条“合成中”占位（同内容已有则去重跳过） */
+  remotePending: (content: string) => void;
+  /** 跨窗口失败（如浮窗/遥控发送、连接前失败后端不发 tts:failed）：优先把同内容占位转失败，无占位才补一条 */
   remoteFailed: (content: string, reason: string) => void;
   /** 重试前清掉失败占位 */
   clearFailed: (id: string) => void;
@@ -80,21 +82,41 @@ export const useChatStore = create<ChatState>((set) => ({
   mergeLatest: (list, hasMore) =>
     set((s) => {
       const inWindow = new Set(list.map((m) => m.id));
+      // 本次并入的真实（已落库）消息内容集合——用于收掉“同内容的合成中占位”。
+      // 非流式引擎没有 tts:streaming 把占位升级成真实 id，只能靠内容把 temp 收敛掉，避免双气泡。
+      const settledContents = new Set(
+        list.filter((m) => m.audio_path !== "").map((m) => m.content),
+      );
+      const collapsedTempIds = new Set(
+        s.messages
+          .filter(
+            (m) =>
+              s.streamingIds.includes(m.id) &&
+              m.audio_path === "" &&
+              settledContents.has(m.content),
+          )
+          .map((m) => m.id),
+      );
       // 本地未落库的占位：temp（audio_path 空）、合成中、失败——一律保留在末尾，
       // 不能被“更早消息在前 + 窗口在后”的合并挤到顶部。已在本次窗口里的 id 不算本地
       // （它已落库，交给 list 那一份，避免同一条被窗口与 locals 各加一次而重复）。
+      // 例外：被真实消息按内容取代的合成中占位（collapsedTempIds）要丢弃，不再保留。
       const isLocal = (m: Message) =>
         m.audio_path === "" || s.streamingIds.includes(m.id) || s.failedIds.includes(m.id);
-      const locals = s.messages.filter((m) => isLocal(m) && !inWindow.has(m.id));
+      const locals = s.messages.filter(
+        (m) => isLocal(m) && !inWindow.has(m.id) && !collapsedTempIds.has(m.id),
+      );
       const localIds = new Set(locals.map((m) => m.id));
       // 已落库的 id 从合成中摘除（跨窗口流式收尾）
       const settled = new Set(list.map((m) => m.id));
       const older = s.messages.filter(
-        (m) => !inWindow.has(m.id) && !localIds.has(m.id),
+        (m) => !inWindow.has(m.id) && !localIds.has(m.id) && !collapsedTempIds.has(m.id),
       );
       return {
         messages: [...older, ...list, ...locals],
-        streamingIds: s.streamingIds.filter((id) => !settled.has(id)),
+        streamingIds: s.streamingIds.filter(
+          (id) => !settled.has(id) && !collapsedTempIds.has(id),
+        ),
         hasMore,
       };
     }),
@@ -155,12 +177,14 @@ export const useChatStore = create<ChatState>((set) => ({
       };
     }),
 
-  remoteFailed: (content, reason) =>
+  remotePending: (content) =>
     set((s) => {
-      // 去重：同文本已有“合成中/失败”占位（本窗发送、或中途失败已转失败）就不再补游离气泡
+      const c = content.trim();
+      if (!c) return {};
+      // 去重：同内容已有“合成中/失败”占位（本窗发送、或已收到 send-started）就不再追加
       const dup = s.messages.some(
         (m) =>
-          m.content === content &&
+          m.content === c &&
           (s.streamingIds.includes(m.id) || s.failedIds.includes(m.id)),
       );
       if (dup) return {};
@@ -168,10 +192,38 @@ export const useChatStore = create<ChatState>((set) => ({
       return {
         messages: [
           ...s.messages,
-          { id, content, audio_path: "", created_at: new Date().toISOString() },
+          { id, content: c, audio_path: "", created_at: new Date().toISOString() },
         ],
-        failedIds: [...s.failedIds, id],
-        reasons: { ...s.reasons, [id]: reason },
+        streamingIds: withId(s.streamingIds, id),
+      };
+    }),
+
+  remoteFailed: (content, reason) =>
+    set((s) => {
+      const c = content.trim();
+      // 1) 命中同内容的“合成中”占位 → 原地转失败（不新增、保持位置）
+      const idx = s.messages.findIndex(
+        (m) => m.content === c && s.streamingIds.includes(m.id),
+      );
+      if (idx >= 0) {
+        const id = s.messages[idx].id;
+        return {
+          streamingIds: withoutId(s.streamingIds, id),
+          failedIds: withId(s.failedIds, id),
+          reasons: { ...s.reasons, [id]: reason || "" },
+        };
+      }
+      // 2) 同内容已是失败态 → 不重复补
+      if (s.messages.some((m) => m.content === c && s.failedIds.includes(m.id))) return {};
+      // 3) 无占位（极少：send-started 丢失）→ 补一条失败气泡
+      const id = `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      return {
+        messages: [
+          ...s.messages,
+          { id, content: c, audio_path: "", created_at: new Date().toISOString() },
+        ],
+        failedIds: withId(s.failedIds, id),
+        reasons: { ...s.reasons, [id]: reason || "" },
       };
     }),
 

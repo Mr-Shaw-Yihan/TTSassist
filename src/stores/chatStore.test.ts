@@ -169,4 +169,46 @@ describe("chatStore 非阻塞发送状态机", () => {
     const s = useChatStore.getState();
     expect(s.messages.filter((m) => m.content === "重复失败")).toHaveLength(1);
   });
+
+  it("remotePending：无同内容占位时追加一条合成中气泡", () => {
+    useChatStore.getState().remotePending("手机发的文字");
+    const s = useChatStore.getState();
+    expect(s.messages).toHaveLength(1);
+    expect(s.messages[0].content).toBe("手机发的文字");
+    expect(s.messages[0].audio_path).toBe("");
+    expect(s.streamingIds).toContain(s.messages[0].id);
+  });
+
+  it("remotePending：同内容已有占位时去重不重复追加", () => {
+    const st = useChatStore.getState();
+    st.remotePending("重复文字");
+    st.remotePending("重复文字");
+    expect(useChatStore.getState().messages).toHaveLength(1);
+  });
+
+  it("remoteFailed：把同内容的合成中占位原地转失败气泡并记原因", () => {
+    const st = useChatStore.getState();
+    st.remotePending("会失败的话");
+    const tempId = useChatStore.getState().messages[0].id;
+    st.remoteFailed("会失败的话", "音色未下载");
+    const s = useChatStore.getState();
+    expect(s.messages).toHaveLength(1);
+    expect(s.streamingIds).not.toContain(tempId);
+    expect(s.failedIds).toContain(tempId);
+    expect(s.reasons[tempId]).toBe("音色未下载");
+  });
+
+  it("mergeLatest：并入非流式真实消息时收掉同内容的合成中占位（不双气泡）", () => {
+    const st = useChatStore.getState();
+    st.remotePending("非流式成功"); // 造一条合成中占位（temp id）
+    const tempId = useChatStore.getState().messages[0].id;
+    st.mergeLatest(
+      [msg({ id: "m_real", content: "非流式成功", audio_path: "audio/m_real.wav" })],
+      false,
+    );
+    const s = useChatStore.getState();
+    expect(s.messages.map((m) => m.id)).toContain("m_real");
+    expect(s.messages.map((m) => m.id)).not.toContain(tempId);
+    expect(s.streamingIds).not.toContain(tempId);
+  });
 });
