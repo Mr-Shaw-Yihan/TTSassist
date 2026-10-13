@@ -153,6 +153,14 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 常驻错误提示：不自动定时隐去，直到下一次发送覆盖。
+  void showToastPersistent(String text) {
+    toast = text;
+    _toastTimer?.cancel();
+    _toastTimer = null;
+    notifyListeners();
+  }
+
   // ── UI 动作 ──
 
   /// 收藏卡片：播放中再点 = 停止（§4.2）
@@ -171,11 +179,16 @@ class AppState extends ChangeNotifier {
   Future<void> sendText(String text) async {
     final t = text.trim();
     if (t.isEmpty) return;
+    // 新发送先清掉上一条提示（含常驻错误），体现“持续到下次发送覆盖”
+    _toastTimer?.cancel();
+    _toastTimer = null;
+    toast = null;
+    notifyListeners();
     try {
       final ack = await session.client.synthesize(t);
-      if (!ack.ok) showToast(ack.err ?? '合成失败');
+      if (!ack.ok) showToastPersistent(ack.err ?? '合成失败');
     } catch (e) {
-      showToast('$e');
+      showToastPersistent('$e');
     }
   }
 

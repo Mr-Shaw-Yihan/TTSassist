@@ -51,7 +51,7 @@ class _RootPageState extends State<RootPage> {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: _app,
-        builder: (_, _) => Stack(
+        builder: (context, _) => Stack(
           children: [
             _app.connected
                 ? MainPage(app: _app, key: const ValueKey('main'))
@@ -60,7 +60,8 @@ class _RootPageState extends State<RootPage> {
               Positioned(
                 left: 24,
                 right: 24,
-                bottom: 120,
+                // 弹到输入法之上：底部偏移叠加键盘高度，免得错误提示被输入法遮住
+                bottom: 120 + MediaQuery.viewInsetsOf(context).bottom,
                 child: Center(
                   child: Container(
                     padding: const EdgeInsets.symmetric(
