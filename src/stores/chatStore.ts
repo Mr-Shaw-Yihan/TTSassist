@@ -112,8 +112,14 @@ export const useChatStore = create<ChatState>((set) => ({
       const older = s.messages.filter(
         (m) => !inWindow.has(m.id) && !localIds.has(m.id) && !collapsedTempIds.has(m.id),
       );
+      // 按发送时间（created_at）稳定排序：后端 now_iso 是 Local(+08:00)、前端占位是 UTC(Z)，
+      // 字符串不能直接字典序比，用 Date.parse 归一到 epoch。失败气泡因此回到真实发送顺序，
+      // 不再被“本地占位一律追加到末尾”钉到底部（Array.sort 稳定，同刻保持原序）。
+      const merged = [...older, ...list, ...locals].sort(
+        (a, b) => Date.parse(a.created_at) - Date.parse(b.created_at),
+      );
       return {
-        messages: [...older, ...list, ...locals],
+        messages: merged,
         streamingIds: s.streamingIds.filter(
           (id) => !settled.has(id) && !collapsedTempIds.has(id),
         ),

@@ -124,6 +124,27 @@ describe("chatStore 非阻塞发送状态机", () => {
     expect(s.streamingIds).toContain("tmp1");
   });
 
+  it("mergeLatest：失败气泡按发送顺序排在更新的成功消息之上（不再钉到底部）", () => {
+    useChatStore.setState({
+      messages: [{ id: "f1", content: "早先失败", audio_path: "", created_at: "2026-10-13T09:00:00Z" }],
+      streamingIds: [],
+      failedIds: ["f1"],
+      reasons: { f1: "err" },
+      hasMore: true,
+    });
+    // 之后落库一条更晚（created_at 更新）的成功消息
+    useChatStore
+      .getState()
+      .mergeLatest(
+        [{ id: "r2", content: "后发成功", audio_path: "audio/r2.wav", created_at: "2026-10-13T09:30:00Z" }],
+        false,
+      );
+    const s = useChatStore.getState();
+    // 失败气泡发送更早 → 应排在成功消息之上（前面），不被钉到最底
+    expect(s.messages.map((m) => m.id)).toEqual(["f1", "r2"]);
+    expect(s.failedIds).toContain("f1");
+  });
+
   it("mergeLatest：已落库的 id 从合成中摘除（跨窗口流式收尾）", () => {
     const st = useChatStore.getState();
     st.adoptStreaming(notice({ id: "m_real" }));
