@@ -511,6 +511,13 @@ async fn handle_message(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
+            // 遥控发送 = 后端替 PC 走一遍标准发送生命周期：收到即按内容广播占位事件，
+            // 让 PC 各窗口“输入即出气泡”，成功经 message:changed 收敛、失败经 send-failed 转态。
+            let _ = shared
+                .app
+                .emit("tts:send-started", serde_json::json!({ "content": text }));
+            // allowlog: 仅记文本字符数与结果，合成内容不进日志
+            log_info!("[remote] 收到 synthesize：len={}", text.chars().count());
             let out2 = out.clone();
             let app = shared.app.clone();
             tokio::spawn(async move {
@@ -520,6 +527,17 @@ async fn handle_message(
                     Ok(()) => (true, String::new()),
                     Err(e) => (false, e),
                 };
+                // 边界可观测性：遥控发送成功/失败都落一行，免得“手机发了但后端无声”无从定位
+                if ok {
+                    log_info!("[remote] synthesize 完成");
+                } else {
+                    log_warn!("[remote] synthesize 失败：{err}");
+                    // 失败广播给 PC → chatStore.remoteFailed 把同内容占位转失败气泡（可重试）
+                    let _ = app.emit(
+                        "tts:send-failed",
+                        serde_json::json!({ "content": text, "reason": err }),
+                    );
+                }
                 if let Some(a) = ack(ref_id.as_deref(), ok, &err) {
                     let _ = out2.send(a);
                 }
