@@ -79,27 +79,6 @@ pub fn migrate_legacy_engine(config_dir: &Path) {
         changed = true;
     }
 
-    // 3) 内置 moss → moss-tts 插件：tts_engine 改指；非空 moss_api_key→plugin_config["moss-tts"].api_key、
-    //    非空 moss_voice_id→plugin_voices["moss-tts"]（已有不覆盖、空则不写、无默认音色——MOSS 音色为自由串）。
-    if obj.get("tts_engine").and_then(|x| x.as_str()) == Some("moss") {
-        obj.insert("tts_engine".into(), serde_json::Value::String("moss-tts".into()));
-        let key = obj.get("moss_api_key").and_then(|x| x.as_str()).map(|s| s.to_string());
-        obj.remove("moss_api_key");
-        if let Some(k) = key {
-            if !k.is_empty() {
-                set_plugin_config_if_absent(obj, "moss-tts", "api_key", &k);
-            }
-        }
-        let voice = obj.get("moss_voice_id").and_then(|x| x.as_str()).map(|s| s.to_string());
-        obj.remove("moss_voice_id");
-        if let Some(vd) = voice {
-            if !vd.is_empty() {
-                set_plugin_voice_if_absent(obj, "moss-tts", vd);
-            }
-        }
-        changed = true;
-    }
-
     if !changed {
         return;
     }
@@ -120,28 +99,6 @@ fn set_plugin_voice_if_absent(
     if let Some(map) = pv.as_object_mut() {
         map.entry(plugin_id.to_string())
             .or_insert(serde_json::Value::String(voice));
-    }
-}
-
-/// 写入 `plugin_config[plugin_id][key]`：已有值则保留（不覆盖用户在新面板里的填写）。
-/// 用于把内置引擎遗留在 settings 根部的配置（如 MOSS 的 api_key）搬进通用插件配置。
-fn set_plugin_config_if_absent(
-    obj: &mut serde_json::Map<String, serde_json::Value>,
-    plugin_id: &str,
-    key: &str,
-    value: &str,
-) {
-    let pc = obj
-        .entry("plugin_config")
-        .or_insert_with(|| serde_json::json!({}));
-    if let Some(map) = pc.as_object_mut() {
-        let entry = map
-            .entry(plugin_id.to_string())
-            .or_insert_with(|| serde_json::json!({}));
-        if let Some(em) = entry.as_object_mut() {
-            em.entry(key.to_string())
-                .or_insert_with(|| serde_json::Value::String(value.to_string()));
-        }
     }
 }
 
@@ -404,58 +361,6 @@ mod tests {
 
         let v = read_json(dir.path());
         assert_eq!(v["plugin_voices"]["mimo-tts"], "mimo_default");
-    }
-
-    #[test]
-    fn 迁移_moss引擎改插件id并搬key音色() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("settings.json"),
-            r#"{"tts_engine":"moss","moss_api_key":"K1","moss_voice_id":"V1"}"#,
-        )
-        .unwrap();
-
-        migrate_legacy_engine(dir.path());
-
-        let v = read_json(dir.path());
-        assert_eq!(v["tts_engine"], "moss-tts");
-        assert_eq!(v["plugin_config"]["moss-tts"]["api_key"], "K1", "旧 moss_api_key 应搬进插件配置");
-        assert_eq!(v["plugin_voices"]["moss-tts"], "V1", "旧 moss_voice_id 应搬进插件音色表");
-        assert!(v.get("moss_api_key").is_none(), "旧字段应被清除");
-        assert!(v.get("moss_voice_id").is_none(), "旧字段应被清除");
-    }
-
-    #[test]
-    fn 迁移_moss已有插件配置则不覆盖() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("settings.json"),
-            r#"{"tts_engine":"moss","moss_api_key":"K1","moss_voice_id":"V1","plugin_config":{"moss-tts":{"api_key":"KNEW"}},"plugin_voices":{"moss-tts":"VNEW"}}"#,
-        )
-        .unwrap();
-
-        migrate_legacy_engine(dir.path());
-
-        let v = read_json(dir.path());
-        assert_eq!(v["plugin_config"]["moss-tts"]["api_key"], "KNEW", "用户新填的插件配置不被旧字段覆盖");
-        assert_eq!(v["plugin_voices"]["moss-tts"], "VNEW", "用户新选的插件音色不被旧字段覆盖");
-    }
-
-    #[test]
-    fn 迁移_moss空key音色不写入() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::write(
-            dir.path().join("settings.json"),
-            r#"{"tts_engine":"moss","moss_api_key":"","moss_voice_id":""}"#,
-        )
-        .unwrap();
-
-        migrate_legacy_engine(dir.path());
-
-        let v = read_json(dir.path());
-        assert_eq!(v["tts_engine"], "moss-tts", "引擎仍应改指");
-        assert!(v["plugin_config"]["moss-tts"]["api_key"].is_null(), "空 key 不写入（避免空串占位）");
-        assert!(v["plugin_voices"]["moss-tts"].is_null(), "空音色不写入");
     }
 
     #[test]
