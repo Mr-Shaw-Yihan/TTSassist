@@ -41,7 +41,7 @@ class _PairPageState extends State<PairPage> {
       case ConnPhase.connected:
         return '已连接';
       case ConnPhase.disconnected:
-        return '未连接 · 选择发现的 PC 或手动输入';
+        return '未连接 · 正在搜索可连接的电脑';
     }
   }
 
@@ -205,8 +205,52 @@ class _PairPageState extends State<PairPage> {
                           ),
                         ),
                       ],
-                      // 手动区：无设备直接展示；有设备点开折叠后展示
-                      if (!hasDevice || _manualOpen) ...[
+                      // 搜索态：让用户「看得见正在探测」，而非一上来就摊开手动 IP
+                      if (!hasDevice) ...[
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: RT.gold),
+                            ),
+                            const SizedBox(width: 12),
+                            const Expanded(
+                              child: Text('正在搜索可连接的电脑…',
+                                  style:
+                                      TextStyle(fontSize: 14, color: RT.ink)),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        const Text(
+                          '请确认手机与电脑连接同一 Wi-Fi，且电脑上「电子声带」已打开',
+                          style: TextStyle(
+                              fontSize: 11, color: RT.sub, height: 1.5),
+                        ),
+                        const SizedBox(height: 14),
+                        // 手动入口：默认折叠，点开才摊开 IP 输入（保持页面聚焦）
+                        PressScale(
+                          onTap: () =>
+                              setState(() => _manualOpen = !_manualOpen),
+                          child: GlassCard(
+                            radius: 16,
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            child: Text(
+                              _manualOpen ? '收起手动输入' : '手动输入地址',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                  fontSize: 13,
+                                  letterSpacing: 1,
+                                  color: RT.gold),
+                            ),
+                          ),
+                        ),
+                      ],
+                      // 手动区：点开才展示（有设备/无设备两种情形用同一个 _manualOpen）
+                      if (_manualOpen) ...[
                         const SizedBox(height: 16),
                         Row(
                           children: [
