@@ -69,6 +69,16 @@
       "checksum": "5c344b74599a00b1820d8dcd38b83fcd30860695dd0b1a2de1647bdef160853d",
       "description": "MiniMax 云端语音合成（国际版），需 API Key，50+ 音色、40 种语言，支持音色克隆与音色管理",
       "plugin_type": "tts_engine"
+    },
+    {
+      "id": "moss-tts",
+      "name": "MOSS TTS（Mossland）",
+      "version": "0.1.0",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/moss-tts-0.1.0.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/moss-tts-0.1.0.zip",
+      "checksum": "9a23adfc5c16776568e561550ebc1e3c651329a8485078150649a612400b020c",
+      "description": "Mossland MOSS 云端语音合成（非流式，整段 MP3）：需 API Key；不自带音色，请到 Mossland 音色库复制 voice_id 后保存在「我的音色」里选用",
+      "plugin_type": "tts_engine"
     }
   ]
 }
