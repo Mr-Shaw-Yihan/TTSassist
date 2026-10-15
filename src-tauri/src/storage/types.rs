@@ -35,12 +35,12 @@ pub struct Favorite {
     pub hotkey: Option<String>,
 }
 
-/// Moss-TTS 音色条目
+/// 遗留结构：该引擎已插件化，本结构仅供启动迁移读取，下一版本删
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MossVoice {
     /// 音色名称（展示用）
     pub name: String,
-    /// 音色 id（Mossland 控制台获取）
+    /// 音色 id（服务商控制台获取）
     pub voice_id: String,
 }
 
@@ -77,7 +77,10 @@ pub struct Settings {
     pub clone_voice_path: String,
     /// 界面皮肤："light"（安墨，默认） / "dark"（夜窗）
     pub theme: String,
-    /// Moss-TTS API Key（Authorization: Bearer <key>）
+    /// 遗留字段（该引擎已插件化）：仅作 `plugins::migrate_legacy_engine` 的迁移读取源，
+    /// 前端不采集、不展示，下一版本删。**本版不能删**：`save_settings` 是整结构序列化，
+    /// 字段一消失，老用户下次任意设置写入就会把 Key 从 settings.json 抹掉（降级即丢）。
+    #[serde(default)]
     pub moss_api_key: String,
     /// 仅作 plugin_config 迁移读取源（见 storage/settings.rs 迁移块），两个版本后删除。
     /// 前端不采集、不展示。
@@ -90,9 +93,11 @@ pub struct Settings {
     /// MiniMax 国际版本地记录的克隆音色 id（克隆音色首次合成前 get_voice 查不到，本地保证下拉可用）
     #[serde(default)]
     pub minimax_global_cloned_voices: Vec<String>,
-    /// Moss-TTS 当前选中音色 id（需在 moss 控制台创建后填入）
+    /// 遗留字段（同上）：迁移到 `plugin_voices` 后不再使用
+    #[serde(default)]
     pub moss_voice_id: String,
-    /// Moss-TTS 音色库（用户手动维护，默认含"曼波"）
+    /// 遗留字段（同上）：迁移到 `plugin_custom_voices`（通用「我的音色」）后不再使用
+    #[serde(default)]
     pub moss_voices: Vec<MossVoice>,
     /// 虚拟麦克风输出设备名（如 "CABLE Input (VB-Audio Virtual Cable)"，空=未配置）
     pub mic_output_device: String,

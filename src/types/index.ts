@@ -19,12 +19,6 @@ export interface Favorite {
   hotkey: string | null;
 }
 
-/** Moss-TTS 音色条目 */
-export interface MossVoice {
-  name: string;
-  voice_id: string;
-}
-
 /** 云端插件「我的音色」条目（用户保存的音色 ID + 展示名，如 Fish Audio 克隆模型 reference_id） */
 export interface CustomVoiceItem {
   id: string;
@@ -43,14 +37,8 @@ export interface Settings {
   clone_voice_path: string;
   /** 皮肤：light（安墨）/ dark（夜窗） */
   theme: string;
-  /** Moss-TTS API Key */
-  moss_api_key: string;
   /** MiniMax 国际版本地记录的克隆音色 id 列表 */
   minimax_global_cloned_voices?: string[];
-  /** Moss-TTS 当前选中音色 id */
-  moss_voice_id: string;
-  /** Moss-TTS 音色库（用户手动维护） */
-  moss_voices: MossVoice[];
   /** 虚拟麦克风输出设备名（空=未配置） */
   mic_output_device: string;
   /** 全局开关：发送的语音是否同时发到虚拟麦克风 */

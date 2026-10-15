@@ -1,4 +1,4 @@
-// 语音中心 · TTS 合成面板：默认引擎选择 + 逐引擎配置（内置 MOSS / 插件引擎）。
+// 语音中心 · TTS 合成面板：默认引擎选择 + 逐引擎配置（引擎一律是插件，基座不认引擎身份）。
 // 从设置页「语音合成」区整体析出，行为保持一致；MiniMax 国际克隆/管理交由 MinimaxVoicePanel 承担。
 // 引擎以 EngineCard 同构呈现；本地引擎环境未就绪时仍走页内确认卡（在线下载 / 导入离线资源包），与原实现一致。
 
@@ -11,9 +11,8 @@ import {
   promptEngineWarmup,
   importResourcePackFlow,
 } from "../../services/invoke";
-import type { PluginInfo, MossVoice } from "../../types";
-import { resolveSelectedValue } from "../../utils/selectValue";
-import { Field, SubPanel, SecretInput } from "../common/SettingsSection";
+import type { PluginInfo } from "../../types";
+import { Field, SubPanel } from "../common/SettingsSection";
 import { CustomVoicePanel } from "./CustomVoicePanel";
 import { EngineCard } from "./EngineCard";
 import { MinimaxVoicePanel } from "./MinimaxVoicePanel";
@@ -27,13 +26,6 @@ import { toast } from "../common/Toast";
 export function VoiceSynthPanel() {
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
-
-  // MOSS 音色库管理
-  const [addName, setAddName] = useState("");
-  const [addId, setAddId] = useState("");
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editId, setEditId] = useState("");
 
   // 已加载插件（引擎下拉动态项 + 插件音色来源）
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
@@ -55,21 +47,9 @@ export function VoiceSynthPanel() {
   // 正在预加载的音色（切换已装音色时的瞬时指示）
   const [preloadingVoice, setPreloadingVoice] = useState<string | null>(null);
 
-  const mossVoices = settings?.moss_voices ?? [];
   // 没拿到设置前用空串，不拿任何引擎名兜底：默认引擎是宿主的职责
   //（Settings::default 已给出），前端再兜一层只会多一处基座里的引擎身份字面量
   const engineId = settings?.tts_engine ?? "";
-  // 当前生效音色：存储值为空或是已删除的脏 id 时回落到库里第一项。
-  // 实测缺陷：库里只有一个音色时，`value=""` 在选项里没匹配项，React 把 selectedIndex
-  // 置成 -1，用户点那唯一一项不触发 change——“选了却像没选”，合成侧报未配置音色 id；
-  // 加到两个音色后改选另一项才能生效。兜底函数本身不认识引擎（见 utils/selectValue.ts）。
-  const curVoiceId = resolveSelectedValue(settings?.moss_voice_id, mossVoices.map((v) => v.voice_id)); // baseok: 内置云端引擎尚未插件化，它的音色字段只能在基座里读写
-  // 生效值与存储值不一致时补写一次，保证下拉显示的与后端读到的是同一个值；
-  // 补写后两者相等、守卫不通过，不会死循环。依赖数组只列中性变量，避免多一处引擎命中。
-  useEffect(() => {
-    // baseok: 同上——补写的是尚未插件化的内置引擎字段
-    if (curVoiceId && settings?.moss_voice_id !== curVoiceId) void patch("moss_voice_id", curVoiceId);
-  }, [curVoiceId, settings, patch]);
 
   /** 取插件音色的干净展示名（去掉"· 待下载"后缀） */
   function voiceLabel(plugin: PluginInfo, voiceId: string): string {
@@ -169,46 +149,6 @@ export function VoiceSynthPanel() {
     }
   }
 
-  // MOSS 音色库 CRUD
-  async function saveVoiceList(list: MossVoice[]) {
-    await patch("moss_voices", list);
-  }
-  async function addVoice() {
-    const name = addName.trim();
-    const id = addId.trim();
-    if (!name || !id) return;
-    await saveVoiceList([...mossVoices, { name, voice_id: id }]);
-    setAddName("");
-    setAddId("");
-  }
-  async function removeVoice(voiceId: string) {
-    const list = mossVoices.filter((v) => v.voice_id !== voiceId);
-    await saveVoiceList(list);
-    if (settings?.moss_voice_id === voiceId) {
-      await patch("moss_voice_id", list[0]?.voice_id ?? "");
-    }
-    if (editingId === voiceId) setEditingId(null);
-  }
-  function startEdit(v: MossVoice) {
-    setEditingId(v.voice_id);
-    setEditName(v.name);
-    setEditId(v.voice_id);
-  }
-  async function saveEdit() {
-    if (editingId === null) return;
-    const name = editName.trim();
-    const id = editId.trim();
-    if (!name || !id) return;
-    const list = mossVoices.map((v) =>
-      v.voice_id === editingId ? { name, voice_id: id } : v,
-    );
-    await saveVoiceList(list);
-    if (settings?.moss_voice_id === editingId && id !== editingId) {
-      await patch("moss_voice_id", id);
-    }
-    setEditingId(null);
-  }
-
   return (
     <div className="space-y-3">
       {/* 默认引擎选择 */}
@@ -218,7 +158,6 @@ export function VoiceSynthPanel() {
           onChange={(e) => handleEngineChange(e.target.value)}
           className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
         >
-          <option value="moss">Moss-TTS（Mossland）</option>
           {plugins
             .filter((p) => p.loaded && p.plugin_type === "tts_engine")
             .map((p) => (
@@ -227,115 +166,8 @@ export function VoiceSynthPanel() {
         </select>
       </Field>
 
-      {/* ── MOSS 内置引擎 ── */}
-      {engineId === "moss" && (
-        <EngineCard kind="tts" name="Moss-TTS（Mossland）" category="remote">
-          <SubPanel
-            title="API 密钥"
-            desc="填入 Mossland 控制台 API Key 用于云端合成。"
-            right={
-              <a
-                href="https://platform.mosi.cn/app/api-keys"
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-lg border border-[var(--ink-200)] px-2 py-1 text-[11px] text-[var(--ink-700)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)]"
-              >
-                获取 API Key ↗
-              </a>
-            }
-          >
-            <SecretInput
-              value={settings?.moss_api_key ?? ""}
-              onCommit={(v) => patch("moss_api_key", v.trim())}
-              placeholder="sk-..."
-            />
-          </SubPanel>
-
-          <SubPanel title="音色管理" desc="选择当前使用音色，或维护你的音色库。">
-            <select
-              value={curVoiceId}
-              onChange={(e) => patch("moss_voice_id", e.target.value)}
-              className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)]"
-            >
-              {mossVoices.length === 0 && <option value="">（暂无音色，请先在下方添加）</option>}
-              {mossVoices.map((v) => (
-                <option key={v.voice_id} value={v.voice_id}>{v.name}</option>
-              ))}
-            </select>
-            <div className="mt-2.5 space-y-1.5">
-              {mossVoices.map((v) => (
-                editingId === v.voice_id ? (
-                  <div key={v.voice_id} className="space-y-1.5 rounded-xl border border-[var(--amber-500)] bg-[var(--amber-200)]/15 p-2">
-                    <input
-                      type="text"
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                      placeholder="音色名称"
-                      className="w-full rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-2.5 py-1.5 text-xs outline-none focus:border-[var(--amber-500)]"
-                    />
-                    <input
-                      type="text"
-                      value={editId}
-                      onChange={(e) => setEditId(e.target.value)}
-                      placeholder="音色 id"
-                      className="w-full rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-2.5 py-1.5 text-xs outline-none focus:border-[var(--amber-500)] font-mono"
-                    />
-                    <div className="flex gap-1.5">
-                      <button onClick={saveEdit} className="flex-1 rounded-lg bg-[var(--ink-900)] px-2 py-1 text-xs text-[var(--paper)] hover:bg-[var(--ink-700)] transition-colors">保存</button>
-                      <button onClick={() => setEditingId(null)} className="flex-1 rounded-lg border border-[var(--ink-200)] px-2 py-1 text-xs text-[var(--ink-700)] hover:bg-[var(--ink-100)] transition-colors">取消</button>
-                    </div>
-                  </div>
-                ) : (
-                  <div key={v.voice_id} className="flex items-center justify-between rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2">
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-xs font-medium text-[var(--ink-900)]">{v.name}</div>
-                      <div className="truncate text-[10px] text-[var(--ink-300)] font-mono">{v.voice_id}</div>
-                    </div>
-                    <div className="ml-2 flex shrink-0 gap-1">
-                      <button onClick={() => startEdit(v)} title="编辑" className="rounded-md px-1.5 py-1 text-xs text-[var(--ink-500)] hover:bg-[var(--ink-100)] hover:text-[var(--ink-900)] transition-colors">✎</button>
-                      <button onClick={() => removeVoice(v.voice_id)} title="删除" className="rounded-md px-1.5 py-1 text-xs text-[var(--ink-500)] hover:bg-[var(--seal)]/10 hover:text-[var(--seal)] transition-colors">×</button>
-                    </div>
-                  </div>
-                )
-              ))}
-            </div>
-            <div className="mt-2.5 space-y-1.5 rounded-xl border border-dashed border-[var(--ink-200)] p-2.5">
-              <input
-                type="text"
-                value={addName}
-                onChange={(e) => setAddName(e.target.value)}
-                placeholder="音色名称（如 曼波）"
-                className="w-full rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-2.5 py-1.5 text-xs outline-none focus:border-[var(--amber-500)]"
-              />
-              <input
-                type="text"
-                value={addId}
-                onChange={(e) => setAddId(e.target.value)}
-                placeholder="音色 id（从音色库复制）"
-                className="w-full rounded-lg border border-[var(--ink-200)] bg-[var(--paper-card)] px-2.5 py-1.5 text-xs outline-none focus:border-[var(--amber-500)] font-mono"
-              />
-              <button
-                onClick={addVoice}
-                disabled={!addName.trim() || !addId.trim()}
-                className="w-full rounded-lg bg-[var(--ink-900)] px-2 py-1.5 text-xs text-[var(--paper)] transition-colors hover:bg-[var(--ink-700)] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                + 添加音色
-              </button>
-            </div>
-            <a
-              href="https://mossland.mosi.cn/voice/library"
-              target="_blank"
-              rel="noreferrer"
-              className="mt-2 inline-block text-xs text-[var(--ink-500)] underline underline-offset-2 hover:text-[var(--amber-600)] transition-colors"
-            >
-              前往 Mossland 音色库查询 voice_id
-            </a>
-          </SubPanel>
-        </EngineCard>
-      )}
-
       {/* ── 插件引擎配置（音色表来自插件本身，通用） ── */}
-      {engineId !== "moss" && (() => {
+      {(() => {
         const cur = plugins.find((p) => p.id === engineId && p.loaded);
         if (!cur) {
           // 设置或插件列表还没到位就不下结论：plugins 初值是空数组、listPlugins 是异步的，
@@ -441,7 +273,16 @@ export function VoiceSynthPanel() {
                 voiceSelect={voiceSelectNode}
               />
             ) : (
-              <SubPanel title="音色管理" desc="选择引擎内置音色，或维护你自己的「我的音色」（如克隆音色 ID）。">
+              <SubPanel
+                title="音色管理"
+                // 文案按插件自述的音色表决定，不认引擎身份：有的云端引擎（音色全由
+                // 用户从服务商页面复制 id）不带内置音色，此时"选择引擎内置音色"是句空话
+                desc={
+                  cur.voices.length > 0
+                    ? "选择引擎内置音色，或维护你自己的「我的音色」（如克隆音色 ID）。"
+                    : "该引擎不自带音色：请在下方「我的音色」保存音色 ID，再回这里选用。"
+                }
+              >
                 <Field label="当前音色">
                   <select
                     value={settings?.plugin_voices?.[cur.id] ?? cur.voices[0]?.id ?? ""}
@@ -449,11 +290,13 @@ export function VoiceSynthPanel() {
                     disabled={taskRunning}
                     className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)] disabled:opacity-60"
                   >
-                    <optgroup label="内置音色">
-                      {cur.voices.map((v) => (
-                        <option key={v.id} value={v.id}>{v.label}</option>
-                      ))}
-                    </optgroup>
+                    {cur.voices.length > 0 && (
+                      <optgroup label="内置音色">
+                        {cur.voices.map((v) => (
+                          <option key={v.id} value={v.id}>{v.label}</option>
+                        ))}
+                      </optgroup>
+                    )}
                     {(settings?.plugin_custom_voices?.[cur.id] ?? []).length > 0 && (
                       <optgroup label="我的音色">
                         {(settings?.plugin_custom_voices?.[cur.id] ?? []).map((cv) => (

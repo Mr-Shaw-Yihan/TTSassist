@@ -1,11 +1,10 @@
 // generate_tts 命令：前端输入文本 → TTS 生成 → 写 messages.json → 广播。
-// 支持多引擎分发：settings.tts_engine = 内置引擎（moss）| 插件 id
+// settings.tts_engine 一律是插件 id（本体已无内置引擎），按 id 查 PluginManager。
 
 use tauri::{AppHandle, Manager};
 use crate::commands::AppState;
 use crate::plugins::PluginManager;
 use crate::storage::types::{Message, gen_id, now_iso};
-use crate::tts::moss::MossEngine;
 use crate::tts::traits::{TTSEngine, TTSParams};
 use crate::sync::{notify_changed, EVENT_MESSAGE_CHANGED};
 
@@ -40,15 +39,13 @@ pub async fn generate_tts_impl(app: &AppHandle, text: &str) -> Result<Message, S
     let content_dir = state.content_dir.clone();
 
     // 1. 读设置
-    let (tts_engine, moss_key, moss_voice, plugin_voices, mic_send_enabled, mic_device, mic_volume) = {
+    let (tts_engine, plugin_voices, mic_send_enabled, mic_device, mic_volume) = {
         let s = state
             .settings
             .read()
             .map_err(|e| format!("读取设置失败: {e}"))?;
         (
             s.tts_engine.clone(),
-            s.moss_api_key.clone(),
-            s.moss_voice_id.clone(),
             s.plugin_voices.clone(),
             s.mic_send_enabled,
             s.mic_output_device.clone(),
@@ -56,37 +53,23 @@ pub async fn generate_tts_impl(app: &AppHandle, text: &str) -> Result<Message, S
         )
     };
 
-    // 2. 据引擎分发：内置只剩 moss，其余引擎名一律按插件 id 查表
-    let audio_path = match tts_engine.as_str() {
-        "moss" => {
-            if moss_key.is_empty() {
-                return Err("请在设置中填写 Moss-TTS API Key".into());
-            }
-            if moss_voice.is_empty() {
-                return Err("请在设置中填写 Moss-TTS voice_id".into());
-            }
-            let engine = MossEngine::new(moss_key, moss_voice, content_dir.clone());
-            engine.generate(&text).await.map_err(|e| format!("{e}"))?
-        }
-        plugin_id => {
-            // 其余引擎名按插件 id 查找
-            let engine = plugins
-                .build_engine(plugin_id, &content_dir)
-                .ok_or_else(|| {
-                    format!("引擎「{plugin_id}」不可用：插件未安装或加载失败，请在插件管理中检查")
-                })?;
-            let voice = plugin_voices
-                .get(plugin_id)
-                .filter(|v| !v.is_empty())
-                .map(|s| s.as_str());
-            let params = TTSParams {
-                text: &text,
-                voice,
-                instruction: None,
-            };
-            engine.generate(params).await.map_err(|e| format!("{e}"))?
-        }
+    // 2. 引擎即插件：settings.tts_engine 就是插件 id，一律查表
+    //（本体已无内置引擎分支；旧引擎标识由 plugins::migrate_legacy_engine 在启动时改指到插件 id）
+    let engine = plugins
+        .build_engine(&tts_engine, &content_dir)
+        .ok_or_else(|| {
+            format!("引擎「{tts_engine}」不可用：插件未安装或加载失败，请在插件管理中检查")
+        })?;
+    let voice = plugin_voices
+        .get(&tts_engine)
+        .filter(|v| !v.is_empty())
+        .map(|s| s.as_str());
+    let params = TTSParams {
+        text,
+        voice,
+        instruction: None,
     };
+    let audio_path = engine.generate(params).await.map_err(|e| format!("{e}"))?;
 
     // [perf] T2 埋点：引擎返回 = 音频文件已写完可播放（不含播放设备缓冲延迟）。
     // cache 恒为 miss：当前 generate_tts 无缓存/收藏复用路径（收藏播放由前端直播已有

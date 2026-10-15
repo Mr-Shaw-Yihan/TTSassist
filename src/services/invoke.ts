@@ -3,7 +3,7 @@
 
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
-import type { Message, Favorite, Settings, MossVoice, CustomVoiceItem, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry, BundledPluginInfo, UpdateInfo, DownloadedInfo, AsrPluginInfo, PluginConfigInfo, AudioProcess, SubtitleSession, SubtitleStatus } from "../types";
+import type { Message, Favorite, Settings, CustomVoiceItem, AudioDevice, MicStatus, PluginInfo, PluginIndexEntry, BundledPluginInfo, UpdateInfo, DownloadedInfo, AsrPluginInfo, PluginConfigInfo, AudioProcess, SubtitleSession, SubtitleStatus } from "../types";
 
 // ── TTS ──────────────────────────────────────────
 
@@ -475,7 +475,6 @@ export async function updateSetting(
     | number
     | boolean
     | string[]
-    | MossVoice[]
     | Record<string, string>
     | Record<string, Record<string, string>>
     | Record<string, CustomVoiceItem[]>,

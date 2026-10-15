@@ -16,8 +16,10 @@ const mockedUpdate = vi.mocked(updateSetting);
 
 /** 前端权威（types/index.ts 的 Settings）字段镜像清单。
  *  口径说明（T-F 裁决）：后端 storage/types.rs 还有 minimax_api_key / minimax_global_api_key
- *  两个字段未出现在前端 types——它们是「旧 settings → plugin_config」迁移的读取源
- *  （见 storage/settings.rs 迁移块，两个版本后删除），**不属于前端字段漂移，勿补入本清单**。
+ *  以及 moss_api_key / moss_voice_id / moss_voices 未出现在前端 types——它们是「旧 settings →
+ *  plugin_config / plugin_voices / plugin_custom_voices」迁移的读取源
+ *  （见 storage/settings.rs 与 plugins/mod.rs 的 migrate_legacy_engine，两个版本后删除），
+ *  **不属于前端字段漂移，勿补入本清单**。
  *  后端/前端任一侧加字段时同步这里，漏一处测试即红。 */
 const EXPECTED_KEYS = [
   "tts_engine",
@@ -30,10 +32,7 @@ const EXPECTED_KEYS = [
   "clone_voice_name",
   "clone_voice_path",
   "theme",
-  "moss_api_key",
   "minimax_global_cloned_voices",
-  "moss_voice_id",
-  "moss_voices",
   "mic_output_device",
   "mic_send_enabled",
   "mic_playback_volume",
@@ -88,10 +87,7 @@ function makeSettings(): Settings {
     clone_voice_name: "",
     clone_voice_path: "",
     theme: "light",
-    moss_api_key: "",
     minimax_global_cloned_voices: [],
-    moss_voice_id: "11d3a27a-0951-4bcd-96ae-ab414f454764",
-    moss_voices: [{ name: "曼波", voice_id: "11d3a27a-0951-4bcd-96ae-ab414f454764" }],
     mic_output_device: "",
     mic_send_enabled: false,
     mic_playback_volume: 1.0,

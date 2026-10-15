@@ -1,7 +1,6 @@
 // TTS 引擎模块入口。
-// 内置引擎只保留 Moss（唯一尚未插件化的云端引擎）；其余云端引擎均已抽出为插件，
-// 由 plugins::PluginManager 加载。内置与插件引擎的分发都在 commands/tts.rs，
-// 这里不再有统一的引擎工厂函数（基座不认引擎身份，见 AGENTS.md 基座合同）。
+// 本体已无内置 TTS 引擎：云端与本地引擎一律是插件，由 plugins::PluginManager 加载，
+// 分发在 commands/tts.rs（settings.tts_engine 即插件 id）。
+// 这里只剩引擎合同 traits.rs——基座不认引擎身份（见 AGENTS.md 基座合同）。
 
 pub mod traits;
-pub mod moss;

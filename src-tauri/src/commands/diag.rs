@@ -354,7 +354,6 @@ fn render_settings_summary(state: &State<AppState>) -> String {
     lines.push(format!("  - tts_engine: {}", s.tts_engine));
     lines.push(format!("  - tts_model（音色 id）: {}", s.tts_model));
     lines.push(format!("  - engine_category: {}", s.engine_category));
-    lines.push(format!("  - moss_voice_id: {}", s.moss_voice_id));
     lines.push(format!("  - asr_plugin: {}", s.asr_plugin));
     lines.push(format!("  - asr_language: {}", s.asr_language));
     lines.push(format!("  - theme: {}", s.theme));
