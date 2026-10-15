@@ -60,13 +60,17 @@
 
 ### 在册豁免（读基线前先看这里，别照着上面的红线去拆）
 
-基线里的 57 条都属存量，不是新写的违规。分四类：
+基线里的 51 条都属存量，不是新写的违规。分三类：
+
+> **「内置引擎」一类已清零**（2026-10-15 MOSS 插件化，`c8dac14`）：本体不再有内置
+> TTS 引擎，`tts/moss.rs`、`tts/mod.rs`、`commands/tts.rs`、`commands/diag.rs` 与前端
+> `VoiceSynthPanel.tsx`/`types/index.ts`/`invoke.ts`/`settingsStore.ts` 的 moss 条目
+> 全部整条消失，基线由 57 条收到 51 条。
 
 | 类别 | 条目 | 处置 |
 |---|---|---|
-| 内置引擎（当前形态，非设计目标） | `tts/moss.rs`、`tts/mod.rs`、`commands/tts.rs`、前端的 `moss` | 真正的活是“把 MOSS 插件化”，拆完自然归 0 |
-| 遗留字段与默认值 | `storage/types.rs`、`storage/settings.rs`、`src/types/index.ts`、`settingsStore.test.ts` 的 `mimo`/`minimax`/`moss`/`edge-tts` | 设计 §3.4-4 明确“字段保留、两步走退役”，本版本不动 |
-| 一次性迁移表与运营字段 | `plugins/mod.rs`（旧标识→插件 id 映射）、`commands/remote.rs`（`mimo_invite_code`） | 旧键退役/线上 JSON 改字段后归 0 |
+| 遗留字段与默认值 | `storage/types.rs`、`storage/settings.rs`、`settingsStore.test.ts` 的 `mimo`/`minimax`/`moss`/`edge-tts` | 设计 §3.4-4 明确“字段保留、两步走退役”，本版本不动。`moss_*` 三字段已退出前端 `Settings` 类型（后端仍留作迁移读取源，与 `minimax_api_key` 同口径），下一版本删 |
+| 一次性迁移表与运营字段 | `plugins/mod.rs`（旧标识→插件 id 映射；含 moss→moss-tts 的 Key/选中音色/音色列表搬迁）、`commands/remote.rs`（`mimo_invite_code`） | 旧键退役/线上 JSON 改字段后归 0 |
 | **已知的基座缺口（下一批要拆）** | `commands/plugins.rs` 的 `genie` 31 处（基座写死了离线资源包的 zip 结构）、`minimax_clone.rs` + `MinimaxVoicePanel.tsx` + `invoke.ts`（MiniMax 克隆通道整体还在宿主/前端）、`usePluginInventory.ts` 的 `CLONE_CAPABLE` 集合（**就是第 1 条的在册反例**）、`InstalledCard/PluginSetupPanel/ResourcePackLinks.tsx` 的 `p.id === "genie-tts"` 分支 | 能力应改由插件自述（资源清单进 manifest、克隆能力进能力位）；拆一段跑一次 `-UpdateBaseline` |
 
 测试夹具里的引擎名（`perf.rs`、`manifest.rs`、`registry.rs`、`pluginTaskStore.test.ts` 等）
