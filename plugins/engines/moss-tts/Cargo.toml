@@ -1,7 +1,7 @@
 [package]
 name = "moss-tts"
-version = "0.1.0"
-description = "MOSS TTS 插件：Mossland moss-tts 云端合成（非流式，音色 ID 由用户在宿主「我的音色」保存）"
+version = "0.2.0"
+description = "MOSS TTS 插件：Mossland moss-tts-1.5-flash 云端合成（流式优先，音色 ID 由用户在宿主「我的音色」保存）"
 edition = "2021"
 
 [lib]

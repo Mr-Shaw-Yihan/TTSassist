@@ -14,16 +14,18 @@ $ErrorActionPreference = "Stop"
 
 $PluginId   = "moss-tts"
 $PluginName = "MOSS TTS（Mossland）"
-$Version    = "0.1.0"
+$Version    = "0.2.0"
 # 与 fish/mimo 同口径取 1.8.0：宿主 1.8.7 起就有通用插件配置与「我的音色」，
 # 写 1.9.0 会让当前开发树（版本号在 P6 发布时才 bump）直接拒载、无法真机验收
 $MinAppVer  = "1.8.0"
-$Desc       = "Mossland MOSS 云端语音合成（非流式，整段 MP3）：需 API Key；不自带音色，请到 Mossland 音色库复制 voice_id 后保存在「我的音色」里选用"
+$Desc       = "Mossland MOSS 云端语音合成（流式版）：PCM 边合成边播、首响更快（非流式整段合成实测七八个字要等 5 秒），需 API Key；不自带音色，请到 Mossland 音色库复制 voice_id 后保存在「我的音色」里选用"
 
 # 通用插件配置声明（宿主 ≥1.8.0 据此渲染设置面板并注入环境变量）。
 # env 名必须独立（与其它插件的必填 env 同名会触发宿主 find_required_env_conflict 拒载）。
 # 音色库地址只能写在字段说明里：PluginConfigPanel 的 help_url 按钮文案硬编成
 # 「获取 API Key ↗」，塞不下第二个链接（要做得给基座加引擎无关的自述位，本版不做）。
+# model 用 text 而非 select：manifest 校验强制 select 必须给出非空 options，
+# 而官方档位会变；text 才能做到"上新档位改一个字符串、不发版"（同 mimo-tts 的理由）。
 # 必须用 [ordered]：PS7(.NET Core) 每进程随机化字符串哈希，普通 hashtable 的
 # ConvertTo-Json 键序跨进程不稳定，manifest 就每次不一样 → zip sha 跟着变。
 $ConfigDecl = [ordered]@{
@@ -37,6 +39,15 @@ $ConfigDecl = [ordered]@{
             placeholder = "sk-..."
             env         = "MOSS_TTS_API_KEY"
             required    = $true
+        },
+        [ordered]@{
+            key         = "model"
+            type        = "text"
+            label       = "合成模型"
+            description = "留空即 moss-tts-1.5-flash（唯一支持流式的模型）；官方上新档位或音色不兼容时可在此改名，无需更新软件"
+            env         = "MOSS_TTS_MODEL"
+            placeholder = "moss-tts-1.5-flash"
+            required    = $false
         }
     )
 }
