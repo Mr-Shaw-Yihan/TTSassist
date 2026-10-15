@@ -79,11 +79,113 @@ pub fn migrate_legacy_engine(config_dir: &Path) {
         changed = true;
     }
 
+    // 3) 内置 moss → moss-tts 插件。三样东西都要搬：Key → plugin_config、选中音色 →
+    //    plugin_voices、音色列表 → 通用「我的音色」plugin_custom_voices（name→label、
+    //    voice_id→id）。MOSS 的音色从来就是用户手填的 voice_id（宿主不查服务端音色表），
+    //    与 fish 的克隆 id 同构，所以直接落通用机制、不在本体留引擎专属字段。
+    //    旧 JSON 键一律**保留**：Settings 是整结构序列化落盘的，删掉结构体字段会让
+    //    下一次任意设置写入把老用户的 Key 从 settings.json 抹掉（字段两步走退役）。
+    if obj.get("tts_engine").and_then(|x| x.as_str()) == Some("moss") {
+        obj.insert("tts_engine".into(), serde_json::Value::String("moss-tts".into()));
+
+        if let Some(key) = non_empty_str(obj.get("moss_api_key")) {
+            set_plugin_config_if_absent(obj, "moss-tts", "api_key", &key);
+        }
+
+        // 列表逐条宽松解析：缺 voice_id 的剔除，重复 id 只留第一条（前端用 id 当 key），
+        // 名称空的用 id 兜底，免得「我的音色」里出现空白行
+        let mut voices = legacy_moss_voices(obj.get("moss_voices"));
+
+        // 选中音色：空则回落列表首项；仍为空就不建 plugin_voices 条目
+        //（没配音色的老用户选了 moss-tts 由插件返回中文错误引导，比写个空值进去好）
+        let selected = non_empty_str(obj.get("moss_voice_id"))
+            .or_else(|| voices.first().map(|(id, _)| id.clone()));
+
+        if let Some(sel) = &selected {
+            // 不变式：选中值必须能在「我的音色」里找到，否则前端下拉显示空项
+            //（同类缺陷修过 utils/selectValue.ts，见 9835075）
+            if !voices.iter().any(|(id, _)| id == sel) {
+                voices.push((sel.clone(), sel.clone()));
+            }
+            set_plugin_voice_if_absent(obj, "moss-tts", sel.clone());
+        }
+        if !voices.is_empty() {
+            set_plugin_custom_voices_if_absent(obj, "moss-tts", &voices);
+        }
+        changed = true;
+    }
+
     if !changed {
         return;
     }
     if let Err(e) = crate::storage::atomic::write_json_pretty(&path, &value) {
         log_warn!("引擎标识迁移设置保存失败: {e}");
+    }
+}
+
+/// 取 JSON 字符串字段的非空值（去首尾空白；空串/缺失/非字符串一律 None）
+fn non_empty_str(v: Option<&serde_json::Value>) -> Option<String> {
+    v.and_then(|x| x.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// 老 `moss_voices: [{name, voice_id}]` → `(id, label)` 列表：剔除无 id 的脏条目、
+/// 按 id 去重（保留首条的名称）、名称缺失时用 id 兜底。
+fn legacy_moss_voices(v: Option<&serde_json::Value>) -> Vec<(String, String)> {
+    let Some(items) = v.and_then(|x| x.as_array()) else {
+        return Vec::new();
+    };
+    let mut seen = std::collections::HashSet::new();
+    items
+        .iter()
+        .filter_map(|item| {
+            let id = non_empty_str(item.get("voice_id"))?;
+            let label = non_empty_str(item.get("name")).unwrap_or_else(|| id.clone());
+            seen.insert(id.clone()).then_some((id, label))
+        })
+        .collect()
+}
+
+/// 写入 `plugin_config[plugin_id][key]`：已有值则保留（不覆盖用户在新面板里填的 Key）。
+fn set_plugin_config_if_absent(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    plugin_id: &str,
+    key: &str,
+    value: &str,
+) {
+    let pc = obj
+        .entry("plugin_config")
+        .or_insert_with(|| serde_json::json!({}));
+    let Some(map) = pc.as_object_mut() else { return };
+    let entry = map
+        .entry(plugin_id.to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if let Some(fields) = entry.as_object_mut() {
+        fields
+            .entry(key.to_string())
+            .or_insert_with(|| serde_json::Value::String(value.to_string()));
+    }
+}
+
+/// 写入 `plugin_custom_voices[plugin_id]`（通用「我的音色」）：该插件已有条目则整体保留，
+/// 不与迁移值合并——用户在新面板里存过的列表优先。
+fn set_plugin_custom_voices_if_absent(
+    obj: &mut serde_json::Map<String, serde_json::Value>,
+    plugin_id: &str,
+    voices: &[(String, String)],
+) {
+    let items: Vec<serde_json::Value> = voices
+        .iter()
+        .map(|(id, label)| serde_json::json!({ "id": id, "label": label }))
+        .collect();
+    let pcv = obj
+        .entry("plugin_custom_voices")
+        .or_insert_with(|| serde_json::json!({}));
+    if let Some(map) = pcv.as_object_mut() {
+        map.entry(plugin_id.to_string())
+            .or_insert(serde_json::Value::Array(items));
     }
 }
 
@@ -361,6 +463,153 @@ mod tests {
 
         let v = read_json(dir.path());
         assert_eq!(v["plugin_voices"]["mimo-tts"], "mimo_default");
+    }
+
+    #[test]
+    fn 迁移_moss引擎改插件id并搬key音色与音色列表() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"tts_engine":"moss","moss_api_key":"K1","moss_voice_id":"V1","moss_voices":[{"name":"曼波","voice_id":"V1"},{"name":"备用","voice_id":"V2"}]}"#,
+        )
+        .unwrap();
+
+        migrate_legacy_engine(dir.path());
+
+        let v = read_json(dir.path());
+        assert_eq!(v["tts_engine"], "moss-tts");
+        assert_eq!(v["plugin_config"]["moss-tts"]["api_key"], "K1");
+        assert_eq!(v["plugin_voices"]["moss-tts"], "V1");
+        // 音色列表进通用「我的音色」：name→label、voice_id→id，顺序保持
+        let cv = &v["plugin_custom_voices"]["moss-tts"];
+        assert_eq!(cv.as_array().map(|a| a.len()), Some(2));
+        assert_eq!(cv[0]["label"], "曼波");
+        assert_eq!(cv[0]["id"], "V1");
+        assert_eq!(cv[1]["id"], "V2");
+        // 字段两步走退役：本版只停写，旧键保留（降级回旧版仍读得到 Key）
+        assert_eq!(v["moss_api_key"], "K1");
+        assert_eq!(v["moss_voice_id"], "V1");
+        assert_eq!(v["moss_voices"].as_array().map(|a| a.len()), Some(2));
+    }
+
+    #[test]
+    fn 迁移_moss幂等且不覆盖插件侧已有值() {
+        let dir = tempfile::tempdir().unwrap();
+        // 用户已在新面板填过 Key、选过音色、存过「我的音色」——旧字段的值一律不得盖过去
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"tts_engine":"moss","moss_api_key":"OLD","moss_voice_id":"OLD-V","moss_voices":[{"name":"旧","voice_id":"OLD-V"}],"plugin_config":{"moss-tts":{"api_key":"NEW"}},"plugin_voices":{"moss-tts":"NEW-V"},"plugin_custom_voices":{"moss-tts":[{"id":"NEW-V","label":"新"}]}}"#,
+        )
+        .unwrap();
+
+        migrate_legacy_engine(dir.path());
+        let after1 = std::fs::read_to_string(dir.path().join("settings.json")).unwrap();
+        migrate_legacy_engine(dir.path());
+        let after2 = std::fs::read_to_string(dir.path().join("settings.json")).unwrap();
+
+        assert_eq!(after1, after2, "第二次跑不应再改动文件");
+        let v = read_json(dir.path());
+        assert_eq!(v["tts_engine"], "moss-tts");
+        assert_eq!(v["plugin_config"]["moss-tts"]["api_key"], "NEW");
+        assert_eq!(v["plugin_voices"]["moss-tts"], "NEW-V");
+        assert_eq!(v["plugin_custom_voices"]["moss-tts"][0]["id"], "NEW-V");
+    }
+
+    #[test]
+    fn 迁移_moss选中音色为空时回落列表首项() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"tts_engine":"moss","moss_voice_id":"","moss_voices":[{"name":"曼波","voice_id":"V1"},{"name":"备用","voice_id":"V2"}]}"#,
+        )
+        .unwrap();
+
+        migrate_legacy_engine(dir.path());
+
+        let v = read_json(dir.path());
+        assert_eq!(v["plugin_voices"]["moss-tts"], "V1", "空选中值应回落到列表首项");
+    }
+
+    #[test]
+    fn 迁移_moss列表脏数据剔除并按id去重() {
+        let dir = tempfile::tempdir().unwrap();
+        // 空/缺 voice_id 的条目剔除；重复 id 只留第一条（前端「我的音色」用 id 当 React key）；
+        // 空名称用 id 兜底，避免列表里出现空白行
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"tts_engine":"moss","moss_voice_id":"V1","moss_voices":[{"name":"甲","voice_id":"V1"},{"name":"乙","voice_id":""},{"name":"丙"},{"name":"","voice_id":"V2"},{"name":"甲改名","voice_id":"V1"}]}"#,
+        )
+        .unwrap();
+
+        migrate_legacy_engine(dir.path());
+
+        let cv = &read_json(dir.path())["plugin_custom_voices"]["moss-tts"];
+        let list = cv.as_array().unwrap();
+        assert_eq!(list.len(), 2, "只剩 V1 与 V2：{}", cv);
+        assert_eq!(list[0]["id"], "V1");
+        assert_eq!(list[0]["label"], "甲", "重复 id 保留第一条的名称");
+        assert_eq!(list[1]["id"], "V2");
+        assert_eq!(list[1]["label"], "V2", "空名称用 id 兜底");
+    }
+
+    #[test]
+    fn 迁移_moss老设置无音色列表时把选中音色补进我的音色() {
+        // 不变式：迁移后 plugin_voices 的值必定能在 plugin_custom_voices 里找到，
+        // 否则前端下拉显示空项（同类缺陷修过 utils/selectValue.ts，见 9835075）
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"tts_engine":"moss","moss_api_key":"K1","moss_voice_id":"V9"}"#,
+        )
+        .unwrap();
+
+        migrate_legacy_engine(dir.path());
+
+        let v = read_json(dir.path());
+        assert_eq!(v["plugin_voices"]["moss-tts"], "V9");
+        let cv = &v["plugin_custom_voices"]["moss-tts"];
+        assert_eq!(cv.as_array().map(|a| a.len()), Some(1), "缺列表时也要让选中音色可见：{}", cv);
+        assert_eq!(cv[0]["id"], "V9");
+    }
+
+    #[test]
+    fn 迁移_moss选中音色不在列表里时补一条() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"tts_engine":"moss","moss_voice_id":"V9","moss_voices":[{"name":"曼波","voice_id":"V1"}]}"#,
+        )
+        .unwrap();
+
+        migrate_legacy_engine(dir.path());
+
+        let cv = &read_json(dir.path())["plugin_custom_voices"]["moss-tts"];
+        let list = cv.as_array().unwrap();
+        assert_eq!(list.len(), 2, "列表原有条目 + 补上的选中项：{}", cv);
+        assert_eq!(list[1]["id"], "V9", "补在末尾，不打乱用户原有顺序");
+    }
+
+    #[test]
+    fn 迁移_moss全空时只改引擎指向() {
+        let dir = tempfile::tempdir().unwrap();
+        // 没配 Key、没音色的 moss 用户：不建空壳子表，选了 moss-tts 由插件报中文错误引导
+        std::fs::write(
+            dir.path().join("settings.json"),
+            r#"{"tts_engine":"moss","moss_api_key":"","moss_voice_id":"","moss_voices":[]}"#,
+        )
+        .unwrap();
+
+        migrate_legacy_engine(dir.path());
+
+        let v = read_json(dir.path());
+        assert_eq!(v["tts_engine"], "moss-tts");
+        assert!(v.get("plugin_config").is_none(), "空 Key 不应建 plugin_config 条目：{}", v);
+        assert!(v.get("plugin_voices").is_none(), "空选中值不应建 plugin_voices 条目：{}", v);
+        assert!(
+            v.get("plugin_custom_voices").is_none(),
+            "空列表不应建 plugin_custom_voices 条目：{}",
+            v
+        );
     }
 
     #[test]
