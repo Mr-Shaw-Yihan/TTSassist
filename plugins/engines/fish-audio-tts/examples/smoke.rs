@@ -45,6 +45,7 @@ fn main() {
     let dll_path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| r"..\..\target\release\fish_audio_tts.dll".to_string());
+    // allowlog: 示例 smoke CLI 进度输出，不含用户文本
     println!("加载 dll: {dll_path}");
     let lib = unsafe { Library::new(&dll_path) }.expect("dll 加载失败（先 cargo build --release -p fish-audio-tts）");
 
@@ -59,11 +60,13 @@ fn main() {
         )
     };
     let (id, name, version, fmt) = (cstr(&id), cstr(&name), cstr(&version), cstr(&fmt));
+    // allowlog: 示例 smoke CLI 进度输出，不含用户文本
     println!("id={id} name={name} version={version} audio_format={fmt}");
     assert_eq!(id, "fish-audio-tts", "dll 自报 id 必须与 manifest.id 一致");
 
     let voices_json = cstr(&voices);
     let voice_count = voices_json.matches("\"id\"").count();
+    // allowlog: 示例 smoke CLI 进度输出，不含用户文本
     println!("音色表条目数: {voice_count}");
     assert!(voice_count >= 14, "音色表应包含 default + 13 个社区音色");
 
@@ -113,6 +116,7 @@ fn main() {
     }
     let info_s = unsafe { CStr::from_ptr(info) }.to_string_lossy().into_owned();
     unsafe { free_cstr(info) };
+    // allowlog: 示例 smoke CLI 进度输出，不含用户文本
     println!("stream_start 会话打开: info={info_s}（{:.2}s）", tstart.elapsed().as_secs_f64());
     assert!(info_s.contains("pcm_s16le") && info_s.contains("44100") && info_s.contains("\"channels\":1"), "info 必须声明宿主支持的 pcm_s16le 44.1k 单声道");
 
@@ -143,10 +147,12 @@ fn main() {
         n_chunks += 1;
         unsafe { free_bytes(cbuf, clen) };
         if n_chunks == 1 || n_chunks % 8 == 0 {
+            // allowlog: 示例 smoke CLI 进度输出，不含用户文本
             println!("  块#{n_chunks} {clen}B @ {:.2}s", tstart.elapsed().as_secs_f64());
         }
     }
     let total_t = tstart.elapsed().as_secs_f64();
+    // allowlog: 示例 smoke CLI 进度输出，不含用户文本
     println!(
         "流式: {} 块共 {}B，首块 @ {:.2}s（总 {:.2}s）→ fish_smoke_stream.wav",
         n_chunks,
@@ -156,6 +162,7 @@ fn main() {
     );
     assert!(n_chunks > 1, "长文本应收到多个分块（实测仅 {} 块）", n_chunks);
     let dur = chunks.len() as f64 / (44100.0 * 2.0);
+    // allowlog: 示例 smoke CLI 进度输出，不含用户文本
     println!("流式音频时长（s16le/44.1k/mono 解释）≈ {dur:.1}s");
     std::fs::write("fish_smoke_stream.wav", wav_wrap(&chunks, 44100, 1)).expect("写 wav 失败");
 
@@ -177,6 +184,7 @@ fn main() {
     let rcode2 = unsafe { stream_next(session2, &mut cbuf, &mut clen, &mut cerr) };
     let wake = tab.elapsed();
     let msg2 = if cerr.is_null() { String::new() } else { cstr_from(&mut cerr, &free_cstr) };
+    // allowlog: 示例 smoke CLI 进度输出，不含用户文本
     println!("abort 后 next 返回 code={rcode2}「{msg2}」，耗时 {:.3}s", wake.as_secs_f64());
     assert_eq!(rcode2, 1, "abort 后 next 必须返回 VA_ERR");
     assert!(wake < std::time::Duration::from_secs(1), "abort 后 next 必须亚秒级返回");
@@ -184,6 +192,7 @@ fn main() {
         unsafe { free_bytes(cbuf, clen) };
     }
 
+    // allowlog: 示例 smoke CLI 进度输出，不含用户文本
     println!("\nFFI 冒烟全部通过 ✓（阻塞 ×2 + 流式收全 + 中止语义）");
 }
 
@@ -223,6 +232,7 @@ fn report_blocking(
     assert!(bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0, "{label} 输出不是 MP3 帧头");
     std::fs::write(out_file, bytes).expect("写 mp3 失败");
     unsafe { free_bytes(audio, len) };
+    // allowlog: 示例 smoke CLI 进度输出，不含用户文本
     println!("{label}: OK，{} 字节，耗时 {:.2}s → {out_file}", len, t0.elapsed().as_secs_f64());
 }
 
