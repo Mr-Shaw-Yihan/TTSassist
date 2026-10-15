@@ -134,3 +134,54 @@ settings.json 里那条「曼波」的 id 已被换成 `c6c0a40a-ea82-4468-9a21-
   只停写，保留降级可读；下一版才删字段。幂等靠 `tts_engine` 已改指 + 各 `*_if_absent` 语义。
 - 启动顺序已核实安全：`lib.rs` setup 里 `migrate_legacy_engine` 先跑，之后才 `load_settings`
   与插件 env 注入（`manager.inject_config_env`），迁移出来的 Key 当次启动即生效、无需重启。
+
+## 八、流式增量设计（2026-10-15 用户追加，覆盖 §一「不做流式化」这条非目标）
+
+### 8.1 为什么改：实测首响 5.3 秒
+
+真机验收时日志给出硬数字：`tts_first_audio=5342ms engine=moss-tts len=8`、`5389ms len=7`
+——**七八个字要等 5.3 秒才出声**。非流式（`delivery_method=url`：服务端合成完 → 返回 URL →
+再下载整段 mp3）天然如此，对"打字即说话"的辅助沟通场景是硬伤。
+
+### 8.2 线上文档核实（本地 `doc/tts-api/moss-tts.md` 是 7 月快照，已过时，别再拿它当依据）
+
+来源：`platform.mosi.cn/docs/reference/speech`、`/docs/scenarios/single-voice`、
+`/docs/getting-started/models`（2026-10-15 抓取，reference 页是前端渲染的，WebFetch 抓不到，
+需浏览器渲染后读 DOM）。
+
+| 项 | 事实 |
+|---|---|
+| 流式开关 | `stream: true`；与 `async=true`、非空 `webhook_url` **互斥** |
+| 模型 | **必须 `moss-tts-1.5-flash`**（枚举仅 4 个：`moss-tts-1.5-flash`(+`-2026-06-26` 快照)、`moss-tts-1.0-pro`(+`-2026-02-07`)；不满足报 `400 unsupported_stream`） |
+| 音频格式 | 流式**必须** `response_format:"pcm"`；非流式可 mp3/wav/pcm/flac/aac/opus |
+| 流式协议 | `stream_format`：`audio`（默认，原始 PCM 字节流，**"客户端必须根据响应头解释音频参数"**）/ `sse`（`text/event-stream`，每帧 `data:` JSON 按 `type` 分发，读到 `speech.audio.done`） |
+| 流式禁带字段 | `sample_rate`、`delivery_method`、`file_id` → 否则 `400 unsupported_for_stream`。**采样率不能点，只能从响应头读** |
+| 非流式响应 | `delivery_method=url` 时字段名确认为 **`url`**（`{"id","object":"audio.speech","status","url","response_format","content_type","created_at"}`）——本体内置版当年"猜"的候选名单命中，真机已验 |
+| 顺带发现 | 我们现在发的 `model:"moss-tts"` **不在文档枚举里**却实测可用（未文档化别名，官方随时可能收） |
+| 其它可选参数 | `language`（仅 1.5-flash，要英文全称如 `Chinese`，31 值）、`expected_duration_sec`、`aigc_metadata`、`input` 支持 `[pause 0.8s]`（仅 1.5-flash） |
+
+### 8.3 决策（用户 2026-10-15 拍板）
+
+1. **两条路径都用 `moss-tts-1.5-flash`**（不再发未文档化的 `"moss-tts"`），并**开 `model` 配置项**
+   （manifest `config.fields` 加 text 型 `model`，env `MOSS_TTS_MODEL`，留空用默认）——
+   照 mimo-tts 的理由：官方上新档位或音色不兼容时，用户改一个字符串即可，不用发插件版。
+   用 text 而非 select：manifest 校验强制 select 必须给非空 options，而档位会变。
+2. **版本升 `0.2.0`**（crate + manifest + 预装 zip 名 + 索引条目同步改）。
+3. 流式协议选 **`stream_format:"audio"`**（裸 PCM 分块），不用 sse：宿主拉块 ABI 要的就是
+   裸 `pcm_s16le`，与 fish 的 HTTP 分块 PCM 同构，省掉一层事件解析。
+4. **采样率/声道运行时从响应头解析**（文档明说参数在响应头里），解析不到才回落默认值；
+   解析结果写进 `stream_info_json`（`{"format":"pcm_s16le","sample_rate":R,"channels":C}`）。
+   真实值由实网探针确认（沿用 mimo 的 `#[ignore]` 探针 + `scripts/test-*-stream.ps1` 形态：
+   脚本自己从本机 settings.json 读 Key、**不打印 Key**）。
+5. 阻塞 `va_tts_synthesize` **保留**（8 符号是加载校验的硬性要求，也是老宿主兼容面），
+   协议不变（mp3 + `delivery_method=url`），只把模型换成 1.5-flash/可配置。
+6. 宿主零改动：`tts_stream.rs:182` 只按 `has_stream()`（符号存在与否）判定，导出
+   `va_tts_stream_*` 即恒走流式，无用户开关（与 fish/mimo 一致）。
+
+### 8.4 风险
+
+- **采样率回落值可能不对** → 表现为音调/语速异常（花栗鼠或慢放）。缓解：探针先测真值；
+  解析器认多种写法（`audio/L16;rate=…;channels=…`、裸 `rate=`、`x-sample-rate` 等）。
+- **1.5-flash 与旧别名的音色表现可能有差**（用户的"曼波"是 1.0 时代复制的 voice_id）：
+  真机一听即知；若 404 `voice_not_found` 就说明该音色不支持新模型，`model` 配置项可临时改回。
+- 流式请求不得带 `delivery_method`：请求体构造必须有单测钉住（多带一个键就是 400）。
