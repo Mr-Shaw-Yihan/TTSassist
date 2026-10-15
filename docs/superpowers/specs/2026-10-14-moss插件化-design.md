@@ -78,5 +78,59 @@ if obj.get("tts_engine") == Some("moss") {
 
 - 新增：`plugins/engines/moss-tts/**`（crate：Cargo.toml/lib.rs/manifest 由 build 产出）
 - 删除：`src-tauri/src/tts/moss.rs`
-- 改：`tts/mod.rs`、`commands/tts.rs`、`plugins/mod.rs`（迁移）、`storage/types.rs`（字段标注退役/停写 UI）、`settings.rs`/`src/types/index.ts`/前端设置面板与 `VoiceSynthPanel`/`settingsStore` 相关 moss 特判、`publish.ps1`（预装清单）、`base-hygiene` 基线、skill/参考文档"内置只剩 MOSS"一句。
+- 改：`tts/mod.rs`、`commands/tts.rs`、`commands/diag.rs`、`plugins/mod.rs`（迁移）、`storage/types.rs`（字段标注退役/停写 UI）、`settings.rs`/`src/types/index.ts`/前端设置面板与 `VoiceSynthPanel`/`settingsStore` 相关 moss 特判、`plugins-index.json`（加 moss-tts 条目）、`base-hygiene` 基线、skill/参考文档"内置只剩 MOSS"一句。
 - 文档：本设计 + 实施 plan（待生成）+ 看板 P2.8 勾选。
+
+## 七、音色机制调查结论与已确认决策（2026-10-15，动手前查透）
+
+### 7.1 MOSS 音色到底是什么模型（事实 + 出处）
+
+- **用户手填的 `{name, voice_id(UUID)}` 本地列表**，宿主**不调任何服务端音色接口**。
+  `doc/归档/开发记录.md` 阶段 10 决策原文：「不做音色列表查询接口（用户去
+  https://mossland.mosi.cn/voice/library 手动查）」「音色列表持久化到 settings，
+  用户在前端增删改（名称 + id）」「默认预置一个音色：曼波 / 11d3a27a-…」。
+- 存储：`storage/types.rs` `MossVoice{name,voice_id}` + `moss_voice_id` + `moss_voices`；
+  读写在 `storage/settings.rs`（load 兜底 default、`update_setting` 两个分支）。
+- 编辑面板**不在 VoiceManager**（那是本地引擎的音色包管理），而是内联在
+  `VoiceSynthPanel.tsx` 的 MOSS 专属分支：下拉选当前音色 + 每行「改名/改 id/删除」
+  + 底部「名称+id 添加」表单 + 音色库外链；删掉当前选中项自动回退首项；
+  `utils/selectValue.ts` 修过「只有一个音色时选不中」的缺陷（`9835075`）。
+- 合成：`commands/tts.rs` 直接读宿主两个字段（空则中文报错）；`tts/moss.rs` 从响应里
+  **猜字段名**取音频 url（`audio_url/url/output_url/audio/result_url` + `data.url`）再下载 mp3。
+  开发记录 9.5 承认「响应字段名未实测确认」→ 插件化后真机必须验一次能否出声。
+- 服务端其实有 `GET /v1/audio/voices`（列表）、`POST /v1/audio/voices`（创建/克隆）、
+  `POST /v1/audio/voice/generations`（`doc/tts-api/moss-tts.md` 接口清单），本 app 一个都没用。
+- 与 fish「我的音色」**语义 1:1 同构**：`{id,label}`、id 原样透传给云端
+  （fish 当 `reference_id`，MOSS 当 `voice_id`）→ 可干净复用 `plugin_custom_voices`。
+
+### 7.2 关键反证：预置 UUID 已陈旧过
+
+`Settings::default` 预置 `曼波 / 11d3a27a-0951-4bcd-96ae-ab414f454764`，但开发机真实
+settings.json 里那条「曼波」的 id 已被换成 `c6c0a40a-ea82-4468-9a21-333d3c4a76f6`
+（名字没变）。→ **硬编 voice UUID 会再次陈旧**，且陈旧后用户看到的是「选了内置音色却合成失败」。
+
+### 7.3 用户 2026-10-15 拍板的三项决策
+
+1. **插件内置音色表留空**（`voices_json = []`），MOSS 音色 100% 走通用「我的音色」。
+   宿主 `manager.rs` 解析空音色表无非空校验，安全。`synthesize` 收到空 voice 时返回中文错误
+   并附音色库地址；老用户迁移后零重复、零丢失；新装机需自己去音色库粘一个 voice_id
+   （比预置一个可能失效的 UUID 更诚实）。
+2. **不给 `CustomVoicePanel` 加就地编辑**：MOSS 老用户改名/改 id 退化为「删了重加」，
+   信息不丢，换取本任务改动面最小。
+3. **音色库链接写进 manifest 配置字段说明**（`api_key` 字段 description + 插件 description），
+   零基座改动。`PluginConfigPanel` 的 `help_url` 按钮文案被硬编成「获取 API Key ↗」，
+   塞不下第二个链接；若将来要「我的音色」区带可点链接，应加**引擎无关**的自述字段
+   （如 `config.custom_voices_hint_url`），记为基座缺口、本版不做（fish 同样受益）。
+
+### 7.4 实施坑（本次查证所得，写死在计划里）
+
+- **索引不能重生成**：`verify-index.ps1` Part A 要求 resources 里每个 zip 都被索引引用，
+  所以预装 zip 落地时必须**手工往 `plugins/plugins-index.json` 追加一条**（mimo-tts 当年
+  就是手工加的，`a3df6d2`；checksum 用 **zip** 的 sha256，不是 dll 的）。
+  不可用 `publish.ps1 -DryRun` 重生成——它只收「已有 dist 的引擎」，冷工作树会把另外 7 条抹掉。
+- **`package.ps1` 照 `mimo-tts` 那份**（`[ordered]` + 暂存文件时间戳归一 → zip 可复现），
+  不能照 `fish-audio-tts`（无时间戳归一，校验和不可复现，所以它才只走在线索引）。
+- 迁移**不删旧 JSON 键**（`moss_api_key`/`moss_voice_id`/`moss_voices`）：两步走退役的第一版
+  只停写，保留降级可读；下一版才删字段。幂等靠 `tts_engine` 已改指 + 各 `*_if_absent` 语义。
+- 启动顺序已核实安全：`lib.rs` setup 里 `migrate_legacy_engine` 先跑，之后才 `load_settings`
+  与插件 env 注入（`manager.inject_config_env`），迁移出来的 Key 当次启动即生效、无需重启。
