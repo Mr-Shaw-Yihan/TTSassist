@@ -21,10 +21,12 @@ pub const VOICE_LIBRARY_URL: &str = "https://mossland.mosi.cn/voice/library";
 /// API Key 获取地址
 pub const API_KEY_URL: &str = "https://platform.mosi.cn/app/api-keys";
 /// 响应头里读不到音频参数时的回落采样率。
-/// 文档只说"客户端必须根据响应头解释音频参数"、没给默认规格，故回落值仅为兜底；
-/// 真值由实网探针确认（`AudioParams::from_headers` 为 false 就说明走了回落）。
-pub const FALLBACK_SAMPLE_RATE: u32 = 24_000;
-/// 回落声道数（TTS 单声道是常态）
+/// 文档只说"客户端必须根据响应头解释音频参数"、没给默认规格，所以正常路径永远走响应头；
+/// 这个回落值取**实测真值**：2026-10-15 实网探针（`scripts/test-moss-stream.ps1`）
+/// 读到 `采样率 48000 / 声道 1 / 来自响应头 true`。写 24000 那种"常见 TTS 默认"会在
+/// 网关哪天不带头时变成花栗鼠音，比报错更难查。
+pub const FALLBACK_SAMPLE_RATE: u32 = 48_000;
+/// 回落声道数（实测同为单声道）
 pub const FALLBACK_CHANNELS: u32 = 1;
 /// 服务端返回音频 URL 的候选字段名。文档的响应示例已确认是 `url`，其余是本体内置版
 /// 留下的兜底（不同网关版本可能换名），保留不碍事。
@@ -457,6 +459,15 @@ mod tests {
             "回落时必须标 from_headers=false，探针据此判断真值有没有拿到"
         );
         assert_eq!(params_of(&[]).from_headers, false);
+    }
+
+    #[test]
+    fn 回落采样率钉住实测真值() {
+        // 2026-10-15 实网探针（scripts/test-moss-stream.ps1）实测：48000 Hz / 单声道，
+        // 且响应头里带得到（from_headers=true）。回落值只在网关哪天不带头时才生效，
+        // 但那时它必须是对的——按"常见 TTS 默认"写 24000 会直接出花栗鼠音，比报错更难查。
+        assert_eq!(FALLBACK_SAMPLE_RATE, 48_000);
+        assert_eq!(FALLBACK_CHANNELS, 1);
     }
 
     #[test]
