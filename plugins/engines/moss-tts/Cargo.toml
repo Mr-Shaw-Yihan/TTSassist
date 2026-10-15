@@ -1,0 +1,15 @@
+[package]
+name = "moss-tts"
+version = "0.1.0"
+description = "MOSS TTS 插件：Mossland moss-tts 云端合成（非流式，音色 ID 由用户在宿主「我的音色」保存）"
+edition = "2021"
+
+[lib]
+# 插件必须是动态库（Windows 上产出 moss_tts.dll，打包时改名 plugin.dll）
+crate-type = ["cdylib"]
+
+[dependencies]
+plugin-api = { path = "../../plugin-api" }
+# 阻塞客户端：宿主在 worker 线程里调 va_tts_synthesize，cdylib 内不宜自带 tokio 运行时
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde_json = "1"
