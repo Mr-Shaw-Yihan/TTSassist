@@ -22,9 +22,10 @@ export function catOf(pluginType: string | undefined | null): PluginCat {
   return "ext";
 }
 
-/** 支持音色克隆的插件 id（与宿主克隆链路绑定一致：
- *  minimax_clone.rs 仅服务 minimax-tts-global（国内版阉割无克隆）；hojo 为零样本克隆引擎） */
-const CLONE_CAPABLE = new Set(["hojo-tts", "minimax-tts-global"]);
+/** 支持音色克隆的插件 id（与宿主克隆链路绑定一致：minimax_clone.rs 仅服务
+ *  minimax-tts-global，国内整段版无克隆）。基座缺口：本应由插件自述能力位决定，
+ *  见 AGENTS.md「在册豁免」表；voice_library 这类能力位已由 utils/pluginCapability.ts 承接 */
+const CLONE_CAPABLE = new Set(["minimax-tts-global"]);
 export const supportsClone = (pluginId: string): boolean => CLONE_CAPABLE.has(pluginId);
 
 /** 商店条目：内置与在线索引合并去重后的统一形态（含已装态） */

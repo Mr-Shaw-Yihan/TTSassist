@@ -51,8 +51,6 @@ export function PluginPage() {
   const [q, setQ] = useState("");
   // 拖入 zip 时的浮层开关
   const [dragOver, setDragOver] = useState(false);
-  // 正在展示「安装方式二选一」面板的插件 id（在线下载 / 离线导入）
-  const [envPickId, setEnvPickId] = useState<string | null>(null);
 
   // 二级子分类过滤：云端/本地按引擎类别，支持克隆按宿主克隆链路绑定
   const subOk = (item: { id: string; category?: string }): boolean => {
@@ -270,9 +268,6 @@ export function PluginPage() {
                         online={inv.index?.find((o) => o.id === p.id)}
                         actions={actions}
                         busy={busy}
-                        envPickId={envPickId}
-                        setEnvPickId={setEnvPickId}
-                        onRefresh={() => void inv.reload()}
                       />
                     ))}
                   </div>

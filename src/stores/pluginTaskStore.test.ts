@@ -44,16 +44,16 @@ describe("pluginTaskStore", () => {
 
   it("startEnv 成功：调 runPluginSetup，终态 percent=100/done、message 用返回文案", async () => {
     mockedRunEnv.mockResolvedValueOnce("环境已就绪");
-    const msg = await usePluginTaskStore.getState().startEnv("genie-tts", "Genie 引擎");
-    expect(mockedRunEnv).toHaveBeenCalledWith("genie-tts");
+    const msg = await usePluginTaskStore.getState().startEnv("test-tts-plugin", "测试引擎");
+    expect(mockedRunEnv).toHaveBeenCalledWith("test-tts-plugin");
     expect(msg).toBe("环境已就绪");
     const t = usePluginTaskStore.getState().task!;
-    expect(t).toMatchObject({ pluginId: "genie-tts", kind: "env", status: "done", percent: 100, message: "环境已就绪" });
+    expect(t).toMatchObject({ pluginId: "test-tts-plugin", kind: "env", status: "done", percent: 100, message: "环境已就绪" });
   });
 
   it("startEnv 失败：status=error、error 记录，且 promise 以中文错误 reject", async () => {
     mockedRunEnv.mockRejectedValueOnce("下载失败");
-    await expect(usePluginTaskStore.getState().startEnv("genie-tts", "Genie")).rejects.toBe("下载失败");
+    await expect(usePluginTaskStore.getState().startEnv("test-tts-plugin", "测试引擎")).rejects.toBe("下载失败");
     const t = usePluginTaskStore.getState().task!;
     expect(t.status).toBe("error");
     expect(t.error).toBe("下载失败");
@@ -70,10 +70,10 @@ describe("pluginTaskStore", () => {
   it("单任务槽：running 未结束时拒绝新任务，且不触发第二次 invoke", async () => {
     const d = deferred<string>();
     mockedRunEnv.mockReturnValueOnce(d.promise);
-    const first = usePluginTaskStore.getState().startEnv("genie-tts", "Genie");
+    const first = usePluginTaskStore.getState().startEnv("test-tts-plugin", "测试引擎");
     // 此时应为 running
     expect(usePluginTaskStore.getState().task?.status).toBe("running");
-    await expect(usePluginTaskStore.getState().startVoice("genie-tts", "v", "x")).rejects.toBe("有安装任务正在进行，请等待完成后再试");
+    await expect(usePluginTaskStore.getState().startVoice("test-tts-plugin", "v", "x")).rejects.toBe("有安装任务正在进行，请等待完成后再试");
     expect(mockedRunEnv).toHaveBeenCalledTimes(1);
     expect(mockedRunVoice).not.toHaveBeenCalled();
     // 收尾第一个任务，避免悬挂
@@ -87,14 +87,14 @@ describe("pluginTaskStore", () => {
 
   it("retry：done 任务返回 null（仅 error 可重试）", async () => {
     mockedRunEnv.mockResolvedValueOnce("ok");
-    await usePluginTaskStore.getState().startEnv("genie-tts", "Genie");
+    await usePluginTaskStore.getState().startEnv("test-tts-plugin", "测试引擎");
     expect(usePluginTaskStore.getState().task?.status).toBe("done");
     expect(await usePluginTaskStore.getState().retry()).toBeNull();
   });
 
   it("retry：env 错误 → 重新走 startEnv", async () => {
     mockedRunEnv.mockRejectedValueOnce("boom");
-    await expect(usePluginTaskStore.getState().startEnv("genie-tts", "Genie")).rejects.toBe("boom");
+    await expect(usePluginTaskStore.getState().startEnv("test-tts-plugin", "测试引擎")).rejects.toBe("boom");
     mockedRunEnv.mockResolvedValueOnce("这次成功");
     const r = await usePluginTaskStore.getState().retry();
     expect(r).toBe("这次成功");
@@ -113,16 +113,16 @@ describe("pluginTaskStore", () => {
   it("applyProgress：命中当前 running 任务的 plugin_id 时更新 percent/message", () => {
     // 手动置入 running 任务，隔离 launch 逻辑单测进度守卫
     usePluginTaskStore.setState({
-      task: { pluginId: "genie-tts", kind: "env", label: "Genie", percent: -1, message: "正在准备…", status: "running" },
+      task: { pluginId: "test-tts-plugin", kind: "env", label: "测试引擎", percent: -1, message: "正在准备…", status: "running" },
     });
-    const p: PluginSetupProgress = { plugin_id: "genie-tts", kind: "env", percent: 42, message: "下载中 42%" };
+    const p: PluginSetupProgress = { plugin_id: "test-tts-plugin", kind: "env", percent: 42, message: "下载中 42%" };
     usePluginTaskStore.getState().applyProgress(p);
     expect(usePluginTaskStore.getState().task).toMatchObject({ percent: 42, message: "下载中 42%" });
   });
 
   it("applyProgress：plugin_id 不匹配时忽略（防串台）", () => {
     usePluginTaskStore.setState({
-      task: { pluginId: "genie-tts", kind: "env", label: "Genie", percent: 10, message: "m", status: "running" },
+      task: { pluginId: "test-tts-plugin", kind: "env", label: "测试引擎", percent: 10, message: "m", status: "running" },
     });
     usePluginTaskStore.getState().applyProgress({ plugin_id: "other", kind: "env", percent: 99, message: "x" });
     expect(usePluginTaskStore.getState().task).toMatchObject({ percent: 10, message: "m" });
@@ -141,15 +141,15 @@ describe("pluginTaskStore", () => {
 
   it("applyProgress：非 running（done/error/null）时忽略", () => {
     usePluginTaskStore.setState({
-      task: { pluginId: "genie-tts", kind: "env", label: "Genie", percent: 100, message: "完成", status: "done" },
+      task: { pluginId: "test-tts-plugin", kind: "env", label: "测试引擎", percent: 100, message: "完成", status: "done" },
     });
-    usePluginTaskStore.getState().applyProgress({ plugin_id: "genie-tts", kind: "env", percent: 3, message: "z" });
+    usePluginTaskStore.getState().applyProgress({ plugin_id: "test-tts-plugin", kind: "env", percent: 3, message: "z" });
     expect(usePluginTaskStore.getState().task).toMatchObject({ percent: 100, status: "done" });
   });
 
   it("clear：终态任务可清除为 null", () => {
     usePluginTaskStore.setState({
-      task: { pluginId: "genie-tts", kind: "env", label: "Genie", percent: 100, message: "完成", status: "done" },
+      task: { pluginId: "test-tts-plugin", kind: "env", label: "测试引擎", percent: 100, message: "完成", status: "done" },
     });
     usePluginTaskStore.getState().clear();
     expect(usePluginTaskStore.getState().task).toBeNull();

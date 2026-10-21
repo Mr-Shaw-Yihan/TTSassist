@@ -1,6 +1,6 @@
 // 语音中心 · TTS 合成面板：默认引擎选择 + 逐引擎配置（引擎一律是插件，基座不认引擎身份）。
 // 从设置页「语音合成」区整体析出，行为保持一致；MiniMax 国际克隆/管理交由 MinimaxVoicePanel 承担。
-// 引擎以 EngineCard 同构呈现；本地引擎环境未就绪时仍走页内确认卡（在线下载 / 导入离线资源包），与原实现一致。
+// 引擎以 EngineCard 同构呈现；插件自述需要装音色时走页内确认卡（确认后经全局任务 store 启动）。
 
 import { useState, useEffect } from "react";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -9,7 +9,6 @@ import {
   listPlugins,
   preloadVoice,
   promptEngineWarmup,
-  importResourcePackFlow,
 } from "../../services/invoke";
 import type { PluginInfo } from "../../types";
 import { hasVoiceLibrary } from "../../utils/pluginCapability";
@@ -20,9 +19,7 @@ import { MinimaxVoicePanel } from "./MinimaxVoicePanel";
 import { CloneSamplePanel } from "./CloneSamplePanel";
 import { PluginSetupPanel } from "../Plugins/PluginSetupPanel";
 import { PluginConfigPanel } from "../Settings/PluginConfigPanel";
-import { ResourcePackLinks } from "../Plugins/ResourcePackLinks";
 import { VoiceManager } from "../Settings/VoiceManager";
-import { toast } from "../common/Toast";
 
 export function VoiceSynthPanel() {
   const settings = useSettingsStore((s) => s.settings);
@@ -36,12 +33,10 @@ export function VoiceSynthPanel() {
 
   // 安装任务走全局 store（启动在用户确认处，进度面板只订阅）
   const task = usePluginTaskStore((s) => s.task);
-  const startEnv = usePluginTaskStore((s) => s.startEnv);
   const startVoice = usePluginTaskStore((s) => s.startVoice);
   const taskRunning = task?.status === "running";
 
   // 待确认项（页内确认卡片，替代 window.confirm，且确认前不改配置）
-  const [pendingEnv, setPendingEnv] = useState<{ pluginId: string; name: string } | null>(null);
   const [pendingVoice, setPendingVoice] = useState<
     { pluginId: string; voiceId: string; label: string } | null
   >(null);
@@ -58,16 +53,10 @@ export function VoiceSynthPanel() {
     return (v?.label ?? voiceId).replace(/\s*·\s*待下载$/, "");
   }
 
-  /** 切换引擎：选中未就绪的本地插件时，用页内卡片询问是否现在下载运行环境；
-   *  环境已就绪的本地引擎则询问是否后台预热（避免首次对话长等待） */
+  /** 切换引擎：环境已就绪的本地引擎询问是否后台预热（避免首次对话长等待） */
   function handleEngineChange(newId: string) {
     void patch("tts_engine", newId);
-    setPendingEnv(null);
     const p = plugins.find((x) => x.id === newId);
-    if (p?.has_setup && !p.setup_status?.ready) {
-      setPendingEnv({ pluginId: newId, name: p.name });
-      return;
-    }
     if (p?.category === "local" && p.setup_status?.ready) {
       const vid = settings?.plugin_voices?.[p.id] ?? p.voices[0]?.id ?? "";
       if (vid) void promptEngineWarmup(p.name, p.id, vid);
@@ -120,34 +109,6 @@ export function VoiceSynthPanel() {
         /* 错误已记录在 store，进度面板展示 */
       },
     );
-  }
-
-  /** 确认卡片：确认下载引擎运行环境 → 启动环境安装任务 */
-  function confirmEnvDownload() {
-    if (!pendingEnv) return;
-    const { pluginId, name } = pendingEnv;
-    setPendingEnv(null);
-    startEnv(pluginId, name).then(
-      () => {
-        listPlugins().then(setPlugins).catch(() => {});
-      },
-      () => {
-        /* 错误已记录在 store */
-      },
-    );
-  }
-
-  /** 确认卡片：导入离线资源包（网盘/QQ 群下载的 zip） */
-  async function confirmEnvImport() {
-    if (!pendingEnv) return;
-    const { pluginId } = pendingEnv;
-    setPendingEnv(null);
-    try {
-      const msg = await importResourcePackFlow(pluginId);
-      if (msg) listPlugins().then(setPlugins).catch(() => {});
-    } catch (e) {
-      toast(`导入资源包失败：${e}`, "err");
-    }
   }
 
   return (
@@ -387,42 +348,6 @@ export function VoiceSynthPanel() {
                     className="rounded-lg border border-[var(--ink-200)] px-3 py-1 text-[11px] text-[var(--ink-500)] hover:border-[var(--ink-300)]"
                   >
                     取消
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* 引擎环境未就绪：页内确认卡片 */}
-            {pendingEnv && pendingEnv.pluginId === cur.id && (
-              <div className="rounded-lg border border-[var(--amber-200)] bg-[var(--amber-200)]/15 px-3 py-2.5">
-                <p className="text-[11px] leading-relaxed text-[var(--ink-700)]">
-                  「{pendingEnv.name}」是本地引擎，首次使用需安装运行环境与语音模型（共约 1.1GB）。
-                  在线下载源在 HuggingFace，国内网络需开启代理（魔法上网）；
-                  也可从<ResourcePackLinks />下载离线资源包（genie-resources-v1.zip，约 800MB）直接导入。
-                </p>
-                {cur.requirements && (
-                  <p className="mt-1.5 text-[10px] leading-relaxed text-[var(--ink-500)]">
-                    资源需求：{cur.requirements}
-                  </p>
-                )}
-                <div className="mt-2 flex gap-2">
-                  <button
-                    onClick={confirmEnvDownload}
-                    className="rounded-lg bg-[var(--amber-500)] px-3 py-1 text-[11px] font-medium text-white transition-opacity hover:opacity-90"
-                  >
-                    在线下载（需魔法上网）
-                  </button>
-                  <button
-                    onClick={() => void confirmEnvImport()}
-                    className="rounded-lg border border-[var(--amber-500)] px-3 py-1 text-[11px] font-medium text-[var(--amber-600)] transition-colors hover:bg-[var(--amber-500)]/10"
-                  >
-                    导入离线资源包
-                  </button>
-                  <button
-                    onClick={() => setPendingEnv(null)}
-                    className="rounded-lg border border-[var(--ink-200)] px-3 py-1 text-[11px] text-[var(--ink-500)] hover:border-[var(--ink-300)]"
-                  >
-                    稍后
                   </button>
                 </div>
               </div>

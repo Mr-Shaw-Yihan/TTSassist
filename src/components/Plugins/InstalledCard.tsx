@@ -2,13 +2,8 @@
 // 配置职能不在插件库（语音中心负责）；启用/停用开关由 enabled/onToggle 传入后渲染。
 
 import { useSettingsStore } from "../../stores/settingsStore";
-import { usePluginTaskStore } from "../../stores/pluginTaskStore";
-import { PluginSetupPanel } from "./PluginSetupPanel";
-import { ResourcePackLinks } from "./ResourcePackLinks";
-import { importResourcePackFlow } from "../../services/invoke";
 import { isNewer } from "../../utils/version";
 import { supportsClone, type PluginCat } from "../../hooks/usePluginInventory";
-import { toast } from "../common/Toast";
 import type { PluginInfo, PluginIndexEntry } from "../../types";
 import type { PluginActions } from "../../hooks/usePluginActions";
 
@@ -18,9 +13,6 @@ export function InstalledCard({
   online,
   actions,
   busy,
-  envPickId,
-  setEnvPickId,
-  onRefresh,
   enabled,
   onToggle,
 }: {
@@ -30,18 +22,11 @@ export function InstalledCard({
   online?: PluginIndexEntry;
   actions: PluginActions;
   busy: string | null;
-  /** 正在展示「安装方式二选一」面板的插件 id */
-  envPickId: string | null;
-  setEnvPickId: (id: string | null) => void;
-  onRefresh: () => void;
   /** 启用/停用（后端停用能力就绪前不传，开关不渲染） */
   enabled?: boolean;
   onToggle?: (p: PluginInfo, next: boolean) => void;
 }) {
   const settings = useSettingsStore((s) => s.settings);
-  const task = usePluginTaskStore((s) => s.task);
-  const startEnv = usePluginTaskStore((s) => s.startEnv);
-  const taskRunning = task?.status === "running";
 
   const isCurrentEngine =
     (cat === "tts" && settings?.tts_engine === p.id) ||
@@ -116,11 +101,6 @@ export function InstalledCard({
             支持克隆
           </span>
         )}
-        {p.has_setup && (
-          <span className="rounded bg-[var(--ink-100)]/70 px-1.5 py-0.5 text-[9.5px] text-[var(--ink-500)]">
-            需下载环境
-          </span>
-        )}
       </div>
 
       {/* 描述 */}
@@ -132,83 +112,6 @@ export function InstalledCard({
       {!p.loaded && p.error && (
         <div className="mt-2 rounded-lg border border-[var(--seal)]/20 bg-[var(--seal)]/5 px-2.5 py-1.5 text-[10.5px] leading-relaxed text-[var(--seal)]">
           {p.error}
-        </div>
-      )}
-
-      {/* 本地引擎环境安装区（环境安装属插件库职责） */}
-      {p.loaded && p.has_setup && (
-        <div className="mt-2">
-          {task?.pluginId === p.id ? (
-            <PluginSetupPanel pluginId={p.id} onClosed={onRefresh} />
-          ) : p.setup_status?.ready ? (
-            <div className="rounded-lg border border-sky-600/25 bg-sky-600/5 px-2.5 py-1.5 text-[10.5px] text-sky-700">
-              ✓ 运行环境就绪 · 音色 {p.setup_status.voices.length} 个（管理在语音中心）
-            </div>
-          ) : envPickId === p.id ? (
-            <div className="rounded-lg border border-sky-600/25 bg-sky-600/5 px-2.5 py-2">
-              <div className="mb-1.5 text-[10.5px] font-medium text-sky-800">选择安装方式</div>
-              <div className="grid grid-cols-1 gap-1.5">
-                <button
-                  onClick={() => {
-                    setEnvPickId(null);
-                    startEnv(p.id, p.name).catch(() => { /* 错误已在 store */ });
-                  }}
-                  disabled={taskRunning || busy !== null}
-                  className="rounded-md border border-sky-600/40 px-2.5 py-1.5 text-left text-[10.5px] font-medium text-sky-700 transition-colors hover:bg-sky-600/10 disabled:opacity-40"
-                >
-                  在线下载（HuggingFace，国内需先开代理）
-                </button>
-                <button
-                  onClick={async () => {
-                    setEnvPickId(null);
-                    try {
-                      const msg = await importResourcePackFlow(p.id);
-                      if (msg) onRefresh();
-                    } catch (e) {
-                      toast(`导入资源包失败：${e}`, "err");
-                    }
-                  }}
-                  disabled={taskRunning || busy !== null}
-                  className="rounded-md border border-[var(--amber-500)]/60 px-2.5 py-1.5 text-left text-[10.5px] font-medium text-[var(--amber-600)] transition-colors hover:bg-[var(--amber-500)]/10 disabled:opacity-40"
-                >
-                  导入离线资源包（无需联网）
-                </button>
-              </div>
-              <div className="mt-1.5 flex items-center justify-between gap-2">
-                <span className="text-[9.5px] leading-relaxed text-[var(--ink-300)]">
-                  {p.id === "genie-tts" ? (
-                    <>
-                      资源包获取：<ResourcePackLinks />
-                    </>
-                  ) : (
-                    "离线资源包请联系该插件提供方获取"
-                  )}
-                </span>
-                <button
-                  onClick={() => setEnvPickId(null)}
-                  className="shrink-0 rounded-md border border-[var(--ink-200)] px-2 py-0.5 text-[10.5px] text-[var(--ink-500)] hover:border-[var(--ink-300)]"
-                >
-                  取消
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 rounded-lg border border-sky-600/25 bg-sky-600/5 px-2.5 py-1.5">
-              <span
-                className="min-w-0 flex-1 truncate text-[10.5px] text-sky-800"
-                title={p.setup_status?.summary ?? ""}
-              >
-                {p.setup_status?.summary ?? "运行环境未安装"}
-              </span>
-              <button
-                onClick={() => setEnvPickId(p.id)}
-                disabled={taskRunning || busy !== null}
-                className="shrink-0 rounded-lg bg-sky-600 px-2.5 py-1 text-[10.5px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40"
-              >
-                下载环境
-              </button>
-            </div>
-          )}
         </div>
       )}
 
