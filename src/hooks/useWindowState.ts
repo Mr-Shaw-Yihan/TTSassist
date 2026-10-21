@@ -1,31 +1,25 @@
-// 主窗口几何记忆：尺寸/位置/最大化写入 localStorage（WebView 持久存储），
-// 启动时恢复、拖动/缩放防抖保存、关闭前兜底保存。仅 main 窗口挂载。
-// 选择 localStorage 而非 settings.json：纯前端零后端命令，避免与窗口无关的设置写入。
+// 主窗口几何记忆：尺寸写 settings.json，位置/最大化写 localStorage。仅 main 窗口挂载。
 //
-// 健壮性护栏（2026-10-08）：主窗是 visible=false 创建、悬浮球 boot 动画放完才显示，
-// 期间可能触发 onResized/关闭兜底存到接近 1×1 的占位小值；setSize 又不会按 minWidth
-// 兜底，导致下次冷启动恢复成一个几乎看不见的小窗。故：恢复前校验尺寸下限、保存前
-// 拦截不可见/退化尺寸——从读写两端杜绝坏值。
+// 2026-10-22 分工调整（B3 配合 A10）：尺寸不再由前端在启动后 setSize 恢复——主窗以
+// visible=false 创建，Rust 在 setup 里读 settings.json 的 window_width/window_height
+// 先 set_size 再 show，首帧即记忆尺寸。前端那一跳（配置默认尺寸露脸 → 横向弹开）正是
+// 「先竖后横」的来源，故这里**只保存不恢复尺寸**。
+// 位置与最大化还没迁进 settings（A10 范围外），仍走 localStorage 的读与写。
+//
+// 保留的健壮性护栏（2026-10-08）：窗口未布局/未显示时 innerSize 会读到接近 1×1 的占位小值，
+// 一旦被记下，下次冷启动就是一个几乎看不见的小窗。故保存前一律过 plausibleSize 过滤。
 
 import { useEffect } from "react";
-import {
-  getCurrentWindow,
-  availableMonitors,
-  PhysicalPosition,
-  PhysicalSize,
-} from "@tauri-apps/api/window";
+import { getCurrentWindow, availableMonitors, PhysicalPosition } from "@tauri-apps/api/window";
+import { updateSetting } from "../services/invoke";
+import { windowSizeSettings } from "../utils/windowGeometry";
 
 const KEY = "va-window-state";
 const SAVE_DEBOUNCE_MS = 800;
-// 恢复/保存认可的物理像素边长下限。配置最小尺寸为逻辑 360×540，任何合理缩放下
-// 物理边长都远大于此阈值；低于阈值即视为占位/退化值（窗口未布局或未显示时读到的小值）。
-const MIN_SIDE_PHYSICAL = 200;
 
 interface WindowState {
   x?: number;
   y?: number;
-  width?: number;
-  height?: number;
   maximized?: boolean;
 }
 
@@ -47,26 +41,18 @@ function writeState(patch: WindowState) {
   }
 }
 
-function plausibleSize(w?: number, h?: number): boolean {
-  return !!w && !!h && w >= MIN_SIDE_PHYSICAL && h >= MIN_SIDE_PHYSICAL;
-}
-
 export function useWindowState() {
   useEffect(() => {
     const win = getCurrentWindow();
     let cancelled = false;
     let timer: number | null = null;
 
-    // 启动恢复：最大化优先，否则恢复上次的尺寸与位置
+    // 启动恢复：只恢复位置与最大化；尺寸由 Rust 在显示前应用
     (async () => {
       const saved = readState();
       if (!saved) return;
       try {
         if (await win.isMaximized()) return; // 已是最大化（如系统记住的状态）则不覆盖
-        // 仅恢复合理尺寸；异常小值（历史坏存档）忽略，保持配置默认窗口大小
-        if (plausibleSize(saved.width, saved.height)) {
-          await win.setSize(new PhysicalSize(saved.width!, saved.height!));
-        }
         if (saved.x !== undefined && saved.y !== undefined) {
           // 仅当保存的位置落在任一显示器范围内才应用（防止拔掉外接屏后窗口失踪）
           const monitors = await availableMonitors();
@@ -84,32 +70,37 @@ export function useWindowState() {
         }
         if (saved.maximized) await win.maximize();
       } catch {
-        /* 恢复失败用默认窗口尺寸 */
+        /* 恢复失败保持现状 */
       }
     })();
+
+    /** 记一次当前几何：尺寸进 settings.json，位置/最大化进 localStorage */
+    async function saveNow() {
+      try {
+        if (await win.isMaximized()) {
+          writeState({ maximized: true });
+          return;
+        }
+        // 窗口不可见（boot 前 visible=false / 收托盘隐藏）时不记尺寸，
+        // 避免把未布局的占位小值持久化
+        if (!(await win.isVisible())) return;
+        const size = await win.innerSize();
+        for (const [key, value] of windowSizeSettings(size.width, size.height)) {
+          await updateSetting(key, value);
+        }
+        const pos = await win.outerPosition();
+        writeState({ x: pos.x, y: pos.y, maximized: false });
+      } catch {
+        /* ignore */
+      }
+    }
 
     // 变化防抖保存（拖动/缩放高频事件）
     const scheduleSave = () => {
       if (timer !== null) window.clearTimeout(timer);
       timer = window.setTimeout(() => {
-        void (async () => {
-          if (cancelled) return;
-          try {
-            if (await win.isMaximized()) {
-              writeState({ maximized: true });
-              return;
-            }
-            // 窗口不可见（boot 前 visible=false / 收托盘隐藏）时不记尺寸，
-            // 避免把未布局的占位小值持久化
-            if (!(await win.isVisible())) return;
-            const size: PhysicalSize = await win.innerSize();
-            if (!plausibleSize(size.width, size.height)) return;
-            const pos: PhysicalPosition = await win.outerPosition();
-            writeState({ x: pos.x, y: pos.y, width: size.width, height: size.height, maximized: false });
-          } catch {
-            /* ignore */
-          }
-        })();
+        if (cancelled) return;
+        void saveNow();
       }, SAVE_DEBOUNCE_MS);
     };
 
@@ -119,21 +110,7 @@ export function useWindowState() {
     // 关闭前兜底保存（防抖可能还没落盘）
     const unClose = win.onCloseRequested(() => {
       if (timer !== null) window.clearTimeout(timer);
-      void (async () => {
-        try {
-          if (await win.isMaximized()) {
-            writeState({ maximized: true });
-            return;
-          }
-          if (!(await win.isVisible())) return;
-          const size = await win.innerSize();
-          if (!plausibleSize(size.width, size.height)) return;
-          const pos = await win.outerPosition();
-          writeState({ x: pos.x, y: pos.y, width: size.width, height: size.height, maximized: false });
-        } catch {
-          /* ignore */
-        }
-      })();
+      void saveNow();
     });
 
     return () => {

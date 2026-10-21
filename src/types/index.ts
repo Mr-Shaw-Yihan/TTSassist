@@ -103,6 +103,11 @@ export interface Settings {
   fx_order: string[];
   /** 各预设参数记忆（预设 key → 参数 key → 值；v1 仅后端通道，UI 不开放调节） */
   fx_params: Record<string, Record<string, string>>;
+  /** 主窗口记忆宽度（物理像素；0 = 无记忆，用配置文件默认尺寸）。
+   *  启动时由 Rust 在窗口显示前应用并夹到 [最小尺寸, 屏幕尺寸]，前端只写不读（B3/A10） */
+  window_width: number;
+  /** 主窗口记忆高度（物理像素；0 = 无记忆） */
+  window_height: number;
 }
 
 /** 通用插件配置：manifest 的 config 声明 */

@@ -64,6 +64,8 @@ const EXPECTED_KEYS = [
   "fx_preset",
   "fx_order",
   "fx_params",
+  "window_width",
+  "window_height",
 ] as const;
 
 // 穷举守卫（T-E）：EXPECTED_KEYS 漏掉任何 Settings 字段时，下面这行在编译期报错
@@ -119,6 +121,8 @@ function makeSettings(): Settings {
     fx_preset: "off",
     fx_order: [],
     fx_params: {},
+    window_width: 0,
+    window_height: 0,
   };
 }
 
