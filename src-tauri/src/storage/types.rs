@@ -195,6 +195,11 @@ pub struct Settings {
     /// 各预设的参数记忆（预设 key → 参数 key → 值；v1 仅作后端通道，UI 不开放调节）
     #[serde(default)]
     pub fx_params: HashMap<String, HashMap<String, String>>,
+    // ── 存储位置 ──────────────────────────────
+    /// 用户是否已确认「我的数据」存放位置（首启弹窗只弹一次）。
+    /// 老用户升级时缺省 false → 首启会问一次；自选/确认默认两条路径都置 true。
+    #[serde(default)]
+    pub storage_choice_made: bool,
 }
 
 impl Default for Settings {
@@ -250,6 +255,7 @@ impl Default for Settings {
             fx_preset: "off".to_string(),
             fx_order: Vec::new(),
             fx_params: HashMap::new(),
+            storage_choice_made: false,
         }
     }
 }

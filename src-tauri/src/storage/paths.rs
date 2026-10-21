@@ -49,12 +49,17 @@ pub const POINTER_FILE_NAME: &str = "storage.json";
 pub struct StoragePaths {
     /// %APPDATA%\com.voiceassist.app —— 只放小而敏感的配置文件
     pub config_root: PathBuf,
-    /// 内容与重数据的根，默认跟随安装位置（<exe>\data）
+    /// 内容与重数据的根，默认等于配置根；用户可自选（storage.json 指针）
     pub content_root: PathBuf,
     /// 插件代码根（manifest + dll + registry），跟随安装位置
     pub plugins_root: PathBuf,
     /// 内容根因不可写等原因回退时为 true → 界面必须向用户说明原因
     pub content_fallback: bool,
+    /// 1.9.0 测试版把「我的数据」放在 `<exe>\data`。启动时由唯一解析入口填入，
+    /// 供自动回迁与存储报告统计；与内容根相同时表示“没有另一处旧数据”。
+    pub legacy_exe_data: Option<PathBuf>,
+    /// 插件根因安装目录不可写而回退到 `<内容根>\plugins` 时为 true
+    pub plugins_fallback: bool,
 }
 
 impl StoragePaths {
@@ -65,7 +70,14 @@ impl StoragePaths {
         plugins_root: PathBuf,
         content_fallback: bool,
     ) -> Self {
-        Self { config_root, content_root, plugins_root, content_fallback }
+        Self {
+            config_root,
+            content_root,
+            plugins_root,
+            content_fallback,
+            legacy_exe_data: None,
+            plugins_fallback: false,
+        }
     }
 
     // ── 配置根下的条目 ────────────────────────

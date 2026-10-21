@@ -68,12 +68,15 @@ fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths
         .map(PathBuf::from)
         .unwrap_or_else(|| exe_dir.join("plugins"));
 
-    let paths = storage::paths::StoragePaths::from_dirs(
+    let mut paths = storage::paths::StoragePaths::from_dirs(
         config_root,
         content_root,
         plugins_root,
         fallback,
     );
+    // 1.9.0 测试版的旧数据源（<exe>\data）。只在这里取一次，业务代码不碰 current_exe；
+    // 与内容根相同时报告侧会忽略（表示没有“另一处旧数据”）。
+    paths.legacy_exe_data = Some(exe_dir.join("data"));
     if let Err(e) = paths.ensure_layout() {
         log_warn!("创建存储目录失败: {e}");
     }
@@ -478,6 +481,9 @@ pub fn run() {
             crate::commands::settings::get_settings,
             crate::commands::settings::update_setting,
             crate::commands::storage::storage_report,
+            crate::commands::storage::storage_choice_pending,
+            crate::commands::storage::confirm_default_content_root,
+            crate::commands::storage::set_content_root,
             crate::commands::storage::take_storage_notice,
             crate::commands::storage::plugin_data_size,
             crate::commands::storage::delete_plugin_data,

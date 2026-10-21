@@ -618,6 +618,14 @@ export interface OrphanData {
   bytes: number;
 }
 
+/** 一块磁盘的容量（首启弹窗与存储页展示剩余空间） */
+export interface DriveInfo {
+  /** 盘符，如 "C:" */
+  letter: string;
+  free_bytes: number;
+  total_bytes: number;
+}
+
 export interface StorageReport {
   config_root: string;
   content_root: string;
@@ -627,11 +635,45 @@ export interface StorageReport {
   orphans: OrphanData[];
   migration: "none" | "migratable" | "conflict";
   legacy_bytes: number;
+  /** 用户是否已确认过「我的数据」位置（false = 首启弹窗仍应出现） */
+  storage_choice_made: boolean;
+  /** 1.9.0 测试版留在安装目录的数据体积（0 = 没有另一处旧数据） */
+  legacy_exe_data_bytes: number;
+  drives: DriveInfo[];
+  /** 插件代码根 */
+  plugins_root: string;
+  /** true = 安装目录不可写，插件根已回退到 <我的数据>\plugins */
+  plugins_fallback: boolean;
+}
+
+/** 「更改数据位置」的执行结果 */
+export interface StorageMoveReport {
+  moved_bytes: number;
+  moved_files: number;
+  /** 目标位置已有同名而跳过的项（绝不覆盖） */
+  skipped: string[];
+  backup_dir: string;
+  need_restart: boolean;
 }
 
 /** 读一次存储报告（递归求和，大目录可能要等以秒计，调用方自己转圈） */
 export async function getStorageReport(): Promise<StorageReport> {
   return invoke<StorageReport>("storage_report");
+}
+
+/** 首启弹窗是否还需要出现（用户没确认过位置 → true） */
+export async function storageChoicePending(): Promise<boolean> {
+  return invoke<boolean>("storage_choice_pending");
+}
+
+/** 确认「就用默认位置」：记下选择，首启弹窗不再出现 */
+export async function confirmDefaultContentRoot(): Promise<void> {
+  return invoke<void>("confirm_default_content_root");
+}
+
+/** 更改「我的数据」存放位置：校验 → 迁移 → 写指针 → 旧处转备份 */
+export async function setContentRoot(path: string): Promise<StorageMoveReport> {
+  return invoke<StorageMoveReport>("set_content_root", { path });
 }
 
 /** 某个插件的重数据体积（卸载弹窗按需查；装着的插件不在 orphans 里） */

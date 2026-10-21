@@ -91,6 +91,7 @@ pub fn load_settings(config_dir: &Path) -> Settings {
             fx_params: v.get("fx_params")
                 .and_then(|x| serde_json::from_value::<std::collections::HashMap<String, std::collections::HashMap<String, String>>>(x.clone()).ok())
                 .unwrap_or(default.fx_params),
+            storage_choice_made: v.get("storage_choice_made").and_then(|x| x.as_bool()).unwrap_or(default.storage_choice_made),
         },
         Err(_) => default,
     };
@@ -218,6 +219,7 @@ pub fn update_setting(config_dir: &Path, key: &str, value: serde_json::Value) ->
         "fx_preset" => if let Some(v) = value.as_str() { s.fx_preset = v.to_string() },
         "fx_order" => if let Ok(list) = serde_json::from_value::<Vec<String>>(value.clone()) { s.fx_order = list },
         "fx_params" => if let Ok(map) = serde_json::from_value::<std::collections::HashMap<String, std::collections::HashMap<String, String>>>(value.clone()) { s.fx_params = map },
+        "storage_choice_made" => if let Some(v) = value.as_bool() { s.storage_choice_made = v },
         _ => {} // 未知键忽略
     }
     save_settings(config_dir, &s)?;
@@ -428,6 +430,16 @@ mod tests {
         );
         assert_eq!(s2.plugin_config, s.plugin_config);
         assert_eq!(s2.plugin_voices, s.plugin_voices);
+    }
+
+    #[test]
+    fn 首启数据位置选择标记缺省未选且可更新() {
+        let dir = tempdir().unwrap();
+        let d = dir.path().to_path_buf();
+        assert!(!load_settings(&d).storage_choice_made, "缺省未选，首启应弹窗");
+        let back = update_setting(&d, "storage_choice_made", serde_json::json!(true)).unwrap();
+        assert!(back.storage_choice_made);
+        assert!(load_settings(&d).storage_choice_made, "选择结果要落盘");
     }
 
     #[test]

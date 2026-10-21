@@ -84,6 +84,7 @@ $Manifest = [ordered]@{
     min_app_version = $MinAppVer
     checksum        = $Hash
     description     = $Desc
+    capabilities    = @{ voice_library = $true }
     config          = $ConfigDecl
 }
 [System.IO.File]::WriteAllText(

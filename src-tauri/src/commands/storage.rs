@@ -10,6 +10,7 @@ use std::path::Path;
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
+use crate::commands::AppState;
 use crate::plugins::PluginManager;
 use crate::storage::migrate::{self, StorageState};
 use crate::storage::paths::{self, StoragePaths};
@@ -31,6 +32,15 @@ pub struct OrphanData {
     pub bytes: u64,
 }
 
+/// 一块磁盘的可用/总容量，首启弹窗与存储页据此提示“放哪个盘”
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct DriveInfo {
+    /// 盘符，如 "C:"
+    pub letter: String,
+    pub free_bytes: u64,
+    pub total_bytes: u64,
+}
+
 #[derive(Serialize)]
 pub struct StorageReport {
     pub config_root: String,
@@ -43,6 +53,27 @@ pub struct StorageReport {
     pub migration: String,
     /// 旧位置待迁移项的总体积，界面拿它写「要搬 3.2 GB」
     pub legacy_bytes: u64,
+    /// 用户是否已确认过「我的数据」位置（false = 首启弹窗仍应出现）
+    pub storage_choice_made: bool,
+    /// 1.9.0 测试版留在 `<exe>\data` 的数据体积（0 = 没有另一处旧数据）
+    pub legacy_exe_data_bytes: u64,
+    /// 本机磁盘剩余空间，首启弹窗展示
+    pub drives: Vec<DriveInfo>,
+    /// 插件代码根（manifest + dll），用于界面上说明插件装在哪
+    pub plugins_root: String,
+    /// true = 安装目录不可写，插件根已回退到 `<我的数据>\plugins`
+    pub plugins_fallback: bool,
+}
+
+/// 「更改数据位置」的执行结果（前端据此提示搬了多少、原件在哪、要不要重启）
+#[derive(Serialize, Debug, Default, Clone)]
+pub struct StorageMoveReport {
+    pub moved_bytes: u64,
+    pub moved_files: usize,
+    /// 目标位置已有同名而跳过的项（绝不覆盖）
+    pub skipped: Vec<String>,
+    pub backup_dir: String,
+    pub need_restart: bool,
 }
 
 /// 迁移状态对外只暴露三种标签（前端按它决定按钮文案，取值不得漂移）
@@ -98,7 +129,17 @@ pub fn orphan_plugin_data(plugin_data_root: &Path, installed: &[String]) -> Resu
 }
 
 /// 汇总存储报告。纯函数（状态都从参数进来），便于单测与在 blocking 线程里跑。
-pub fn build_report(paths: &StoragePaths, installed: &[String]) -> StorageReport {
+/// 磁盘容量来自系统查询，单测走 `build_report_with_drives` 注入。
+pub fn build_report(paths: &StoragePaths, installed: &[String], storage_choice_made: bool) -> StorageReport {
+    build_report_with_drives(paths, installed, storage_choice_made, enumerate_drives())
+}
+
+fn build_report_with_drives(
+    paths: &StoragePaths,
+    installed: &[String],
+    storage_choice_made: bool,
+    drives: Vec<DriveInfo>,
+) -> StorageReport {
     let mut buckets = vec![
         bucket("records", "消息与收藏", &paths.content_root, records_bytes(paths)),
         bucket("audio", "合成音频", &paths.audio_dir(), paths::dir_size(&paths.audio_dir())),
@@ -153,7 +194,74 @@ pub fn build_report(paths: &StoragePaths, installed: &[String]) -> StorageReport
         orphans,
         migration: migration_tag(state).to_string(),
         legacy_bytes,
+        storage_choice_made,
+        legacy_exe_data_bytes: legacy_exe_data_bytes(paths),
+        drives,
+        plugins_root: paths.plugins_root.display().to_string(),
+        plugins_fallback: paths.plugins_fallback,
     }
+}
+
+/// `<exe>\data` 里的旧数据体积。仅当它确实是**另一处**位置时才算：
+/// 内容根当前还默认跟随安装目录时两者相同，不能提示用户“有旧数据待迁”。
+fn legacy_exe_data_bytes(paths: &StoragePaths) -> u64 {
+    paths
+        .legacy_exe_data
+        .as_ref()
+        .filter(|p| **p != paths.content_root)
+        .map(|p| migrate::path_size(p))
+        .unwrap_or(0)
+}
+
+/// 枚举本机磁盘及其剩余空间（首启弹窗与存储页用）。
+/// 取不到容量的盘（光驱无盘等）直接跳过，不让界面出现 0/0 的怪条目。
+#[cfg(windows)]
+fn enumerate_drives() -> Vec<DriveInfo> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetLogicalDriveStringsW};
+
+    let len = unsafe { GetLogicalDriveStringsW(None) };
+    if len == 0 {
+        return Vec::new();
+    }
+    let mut buf = vec![0u16; len as usize + 1];
+    let written = unsafe { GetLogicalDriveStringsW(Some(&mut buf[..])) };
+    if written == 0 {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    for root in buf[..written as usize].split(|c| *c == 0) {
+        if root.is_empty() {
+            continue;
+        }
+        let mut wide: Vec<u16> = root.to_vec();
+        wide.push(0);
+        let (mut free, mut total) = (0u64, 0u64);
+        let ok = unsafe {
+            GetDiskFreeSpaceExW(
+                PCWSTR(wide.as_ptr()),
+                Some(&mut free as *mut u64),
+                Some(&mut total as *mut u64),
+                None,
+            )
+            .is_ok()
+        };
+        if !ok {
+            continue;
+        }
+        let letter = String::from_utf16_lossy(root)
+            .trim_end_matches('\\')
+            .to_string();
+        out.push(DriveInfo { letter, free_bytes: free, total_bytes: total });
+    }
+    out.sort_by(|a, b| a.letter.cmp(&b.letter));
+    out
+}
+
+#[cfg(not(windows))]
+fn enumerate_drives() -> Vec<DriveInfo> {
+    Vec::new()
 }
 
 /// 三个记录类 JSON 的合计体积（它们是内容根的直接子文件，不在任何子目录里）
@@ -226,9 +334,56 @@ pub async fn storage_report(app: AppHandle) -> Result<StorageReport, String> {
         .iter()
         .map(|p| p.id.clone())
         .collect();
-    tauri::async_runtime::spawn_blocking(move || build_report(&paths, &installed))
+    let choice_made = app
+        .state::<AppState>()
+        .settings
+        .read()
+        .map(|s| s.storage_choice_made)
+        .map_err(|e| format!("读取设置失败: {e}"))?;
+    tauri::async_runtime::spawn_blocking(move || build_report(&paths, &installed, choice_made))
         .await
         .map_err(|e| format!("存储扫描任务失败: {e}"))
+}
+
+/// 首启弹窗是否还需要出现：用户没确认过位置就为 true。
+/// 老用户升级时字段缺失 → false（未选）→ 弹一次，之后不再打扰。
+#[tauri::command]
+pub fn storage_choice_pending(state: State<'_, AppState>) -> Result<bool, String> {
+    state
+        .settings
+        .read()
+        .map(|s| !s.storage_choice_made)
+        .map_err(|e| format!("读取设置失败: {e}"))
+}
+
+/// 用户确认「就用默认位置」：记下选择，首启弹窗不再出现。
+#[tauri::command]
+pub fn confirm_default_content_root(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    mark_storage_choice_made(&app, &state)
+}
+
+/// 把「已选择数据位置」落盘并同步内存（两条确认路径共用）。
+fn mark_storage_choice_made(app: &AppHandle, state: &AppState) -> Result<(), String> {
+    let updated = crate::storage::settings::update_setting(
+        &state.config_dir,
+        "storage_choice_made",
+        serde_json::json!(true),
+    )
+    .map_err(|e| format!("保存设置失败: {e}"))?;
+    let mut guard = state
+        .settings
+        .write()
+        .map_err(|e| format!("更新内存设置失败: {e}"))?;
+    *guard = updated;
+    crate::sync::notify_changed(app, crate::sync::EVENT_SETTINGS_CHANGED);
+    Ok(())
+}
+
+/// 更改「我的数据」存放位置（A2 实现）。
+/// 骨架阶段必须**报错而不是假装成功**：前端会据此提示“已搬家”，假成功会误导用户。
+#[tauri::command]
+pub async fn set_content_root(_path: String, _app: AppHandle) -> Result<StorageMoveReport, String> {
+    Err("更改数据位置功能尚未就绪，请稍后重试".to_string())
 }
 
 /// 删除某个「插件已不在」的残留引擎数据目录，返回释放的字节数。
@@ -362,5 +517,49 @@ mod tests {
         assert_eq!(migration_tag(StorageState::Fresh), "none");
         assert_eq!(migration_tag(StorageState::Migratable), "migratable");
         assert_eq!(migration_tag(StorageState::Conflict), "conflict");
+    }
+
+    #[test]
+    fn 存储报告带首启标记插件根与磁盘信息() {
+        // 前端「存储」页与首启弹窗的跨线契约字段，少一个 B 线就编译不过
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("cfg");
+        let content = dir.path().join("data");
+        let plugins = dir.path().join("plugins");
+        let exe_data = dir.path().join("exe").join("data");
+        std::fs::create_dir_all(&exe_data).unwrap();
+        std::fs::write(exe_data.join("messages.json"), b"12345").unwrap();
+
+        let mut p = StoragePaths::from_dirs(cfg, content, plugins.clone(), false);
+        p.legacy_exe_data = Some(exe_data);
+        let drives = vec![DriveInfo { letter: "C:".into(), free_bytes: 100, total_bytes: 200 }];
+        let r = build_report_with_drives(&p, &[], true, drives);
+
+        assert!(r.storage_choice_made);
+        assert_eq!(r.plugins_root, plugins.display().to_string());
+        assert!(!r.plugins_fallback);
+        assert_eq!(r.legacy_exe_data_bytes, 5, "1.9.0 测试版留在 <exe>\\data 的数据要能统计到");
+        assert_eq!(r.drives[0].letter, "C:");
+        assert_eq!(r.drives[0].free_bytes, 100);
+    }
+
+    #[test]
+    fn 旧exe数据与内容根相同时不重复统计() {
+        // 内容根当前仍默认跟随安装目录时，<exe>\data 就是内容根本身，
+        // 不能把它当成“另一处旧数据”提示用户迁移。
+        let dir = tempfile::tempdir().unwrap();
+        let content = dir.path().join("data");
+        std::fs::create_dir_all(&content).unwrap();
+        std::fs::write(content.join("messages.json"), b"12345").unwrap();
+        let mut p = StoragePaths::from_dirs(
+            dir.path().join("cfg"),
+            content.clone(),
+            dir.path().join("plugins"),
+            false,
+        );
+        p.legacy_exe_data = Some(content);
+        let r = build_report_with_drives(&p, &[], false, Vec::new());
+        assert_eq!(r.legacy_exe_data_bytes, 0);
+        assert!(!r.storage_choice_made);
     }
 }
