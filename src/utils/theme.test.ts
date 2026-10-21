@@ -53,4 +53,33 @@ describe("皮肤持久化键与启动引导脚本", () => {
     // 必须是同步脚本：带 type=module 会被推迟到解析后执行，首帧仍会闪
     expect(indexHtml).not.toMatch(/<script[^>]+type="module"[^>]*>[\s\S]*data-theme/);
   });
+
+  /** 真跑一遍 index.html 里那段内联脚本（它是 resolveInitialTheme 的副本，只有执行才能证明等价） */
+  function runBootScript(stored: string | null): string | undefined {
+    const match = indexHtml.match(/<script>([\s\S]*?)<\/script>/);
+    if (!match) throw new Error("index.html 找不到内联脚本");
+    const attrs: Record<string, string> = {};
+    const document = {
+      documentElement: {
+        setAttribute: (k: string, v: string) => {
+          attrs[k] = v;
+        },
+      },
+    };
+    const localStorage = { getItem: () => stored };
+    new Function("document", "localStorage", match[1])(document, localStorage);
+    return attrs["data-theme"];
+  }
+
+  it("内联脚本执行结果与 resolveInitialTheme 一致：存了 dark 就首帧夜间", () => {
+    expect(runBootScript("dark")).toBe("dark");
+    expect(runBootScript("dark")).toBe(resolveInitialTheme("dark"));
+  });
+
+  it("内联脚本在没存过 / 存 light / 坏数据时都是首帧日间", () => {
+    for (const stored of [null, "", "light", "{ 坏 JSON,", '{"other":1}']) {
+      expect(runBootScript(stored)).toBe("light");
+      expect(runBootScript(stored)).toBe(resolveInitialTheme(stored));
+    }
+  });
 });
