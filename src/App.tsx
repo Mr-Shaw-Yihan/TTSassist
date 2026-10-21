@@ -20,6 +20,7 @@ import { RemotePage } from "./components/Remote/RemotePage";
 import { UpdateDialog } from "./components/Settings/UpdateDialog";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "./stores/updateStore";
+import { usePluginUpdateStore } from "./stores/pluginUpdateStore";
 import { usePluginTaskStore } from "./stores/pluginTaskStore";
 import { useWindowState } from "./hooks/useWindowState";
 import { ToastHost, toast } from "./components/common/Toast";
@@ -98,6 +99,8 @@ function App() {
   const dismissDialog = useUpdateStore((s) => s.dismissDialog);
   const checkUpdate = useUpdateStore((s) => s.check);
   const updateDot = useUpdateStore(shouldShowUpdateDot);
+  // 侧栏「插件」红点：有可更新的已装插件时亮（启动后台静默查得，失败不打扰）
+  const pluginDot = usePluginUpdateStore((s) => s.count > 0);
 
   // 全局唯一播放元素（互斥播放）
   const playingRef = useRef<HTMLAudioElement | null>(null);
@@ -151,6 +154,12 @@ function App() {
   useEffect(() => {
     void checkUpdate();
   }, [checkUpdate]);
+
+  // 启动时后台静默查一次「插件可更新」（延迟到首帧后，不抢启动网络/渲染；失败不打扰）
+  useEffect(() => {
+    const t = setTimeout(() => void usePluginUpdateStore.getState().check(), 1500);
+    return () => clearTimeout(t);
+  }, []);
 
   // 启动时：当前引擎若为已就绪的本地引擎，询问是否后台预热
   //（避免第一次对话时现场加载模型久等；通用机制，适用所有 category=local 引擎）
@@ -684,7 +693,7 @@ function App() {
               “字幕功能凭空消失”（插件页里它又显示正常）。现在入口不消失，
               无可用引擎时由字幕页自己的提示引导去「插件」页装。 */}
           <SideButton icon={<TexIcon name="subtitle" size={16} />} label="字幕" active={tab === "subtitle"} onClick={() => setTab("subtitle")} />
-          <SideButton icon={<TexIcon name="grid" size={16} />} label="插件" active={tab === "plugins"} onClick={() => setTab("plugins")} />
+          <SideButton icon={<TexIcon name="grid" size={16} />} label="插件" active={tab === "plugins"} dot={pluginDot} onClick={() => setTab("plugins")} />
           <SideButton icon={<TexIcon name="remote" size={16} />} label="遥控" active={tab === "remote"} onClick={() => setTab("remote")} />
           <SideButton icon={<TexIcon name="gear" size={16} />} label="设置" active={tab === "settings"} dot={updateDot} onClick={() => setTab("settings")} />
           <div className="flex-1" />
