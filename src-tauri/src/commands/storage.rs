@@ -852,8 +852,8 @@ mod tests {
         let dst = tempfile::tempdir().unwrap();
         std::fs::write(src.path().join("messages.json"), b"[1]").unwrap();
         std::fs::write(src.path().join("favorites.json"), b"[7]").unwrap();
-        std::fs::create_dir_all(src.path().join("audio")).unwrap();
-        std::fs::write(src.path().join("audio").join("a.wav"), b"x").unwrap();
+        std::fs::create_dir_all(src.path().join(paths::AUDIO_DIR_NAME)).unwrap();
+        std::fs::write(src.path().join(paths::AUDIO_DIR_NAME).join("a.wav"), b"x").unwrap();
         std::fs::write(dst.path().join("favorites.json"), b"[9]").unwrap(); // 目标已有 → 不得覆盖
 
         let plan = build_move_plan(src.path(), dst.path());
@@ -894,18 +894,18 @@ mod tests {
         let dst = tempfile::tempdir().unwrap();
         let backup = tempfile::tempdir().unwrap();
         std::fs::write(src.path().join("messages.json"), b"[1,2]").unwrap();
-        std::fs::create_dir_all(src.path().join("audio")).unwrap();
-        std::fs::write(src.path().join("audio").join("a.wav"), b"abc").unwrap();
+        std::fs::create_dir_all(src.path().join(paths::AUDIO_DIR_NAME)).unwrap();
+        std::fs::write(src.path().join(paths::AUDIO_DIR_NAME).join("a.wav"), b"abc").unwrap();
 
         let report = move_content(src.path(), dst.path(), backup.path()).unwrap();
 
         assert_eq!(report.moved_files, 2);
         assert_eq!(report.moved_bytes, 8, "5 字节 messages.json + 3 字节 a.wav");
         assert!(dst.path().join("messages.json").exists());
-        assert!(dst.path().join("audio").join("a.wav").exists());
+        assert!(dst.path().join(paths::AUDIO_DIR_NAME).join("a.wav").exists());
         assert!(!src.path().join("messages.json").exists(), "搬完原件应从旧位置移走");
         assert!(backup.path().join("messages.json").exists(), "原件进备份，可回退");
-        assert!(backup.path().join("audio").join("a.wav").exists());
+        assert!(backup.path().join(paths::AUDIO_DIR_NAME).join("a.wav").exists());
     }
 
     #[test]

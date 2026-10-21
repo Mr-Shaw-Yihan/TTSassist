@@ -661,8 +661,7 @@ impl TTSEngine for PluginEngine {
         let timeout_secs = self.plugin.manifest.timeout_secs;
 
         // FFI 合成是阻塞调用 → 丢到 blocking 线程池，避免卡住异步运行时。
-        // 本地引擎首次推理可能加载模型（数十秒）甚至引导下载运行环境（数分钟），
-        // 超时上限由清单 timeout_secs 声明（默认 60s）。
+        // 超时上限由清单 timeout_secs 声明（默认 60s），各引擎可按自身特性放宽。
         let fut = tauri::async_runtime::spawn_blocking(move || {
             plugin.synthesize(&text, voice.as_deref())
         });
@@ -677,7 +676,7 @@ impl TTSEngine for PluginEngine {
                 .map_err(|e| TtsError::Network(e.to_string()))?,
             Err(_) => {
                 return Err(TtsError::Network(format!(
-                    "插件合成超时（超过 {timeout_secs} 秒）。本地引擎首次使用需下载运行环境与模型，请联网后重试；若反复超时请检查插件状态。"
+                    "插件合成超时（超过 {timeout_secs} 秒）。请检查网络连接与插件状态后重试。"
                 )));
             }
         };

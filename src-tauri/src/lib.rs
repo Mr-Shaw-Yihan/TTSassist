@@ -307,6 +307,13 @@ pub fn run() {
             // 老用户本地会残留其目录与注册表条目、与承接者并存。按表在 load_all 前一次性清走并迁移设置。
             plugins::sweep_replaced_plugins(&plugins_root, &config_dir);
 
+            // 已下线的本地引擎（见 plugins::RETIRED_PLUGIN_IDS）：清走插件目录与引擎数据并提示一次。
+            if let Some(text) =
+                plugins::sweep_retired_plugins(&plugins_root, &paths.plugin_data_root())
+            {
+                app.state::<commands::storage::MigrationNotice>().set(text);
+            }
+
             // 插件系统：加载已安装插件（单个插件失败只记日志，不影响主流程）；
             // 传入 AppHandle 供宿主能力桥注入（声明 requires_host_bridge 的插件）
             let plugin_manager = plugins::PluginManager::load_all(&plugins_root, Some(app.handle()));
@@ -466,8 +473,6 @@ pub fn run() {
             crate::commands::plugins::set_plugin_config,
             crate::commands::plugins::clear_plugin_config,
             crate::commands::plugins::install_plugin_zip,
-            crate::commands::plugins::import_offline_resources,
-            crate::commands::plugins::clean_failed_resources,
             crate::commands::plugins::fetch_plugin_index,
             crate::commands::plugins::download_install_plugin,
             crate::commands::plugins::list_bundled_plugins,

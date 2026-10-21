@@ -1070,45 +1070,6 @@ mod tests {
         assert!(pm.list().is_empty());
     }
 
-    /// 真机验证：加载本机已安装的 genie-tts 插件（走宿主完整加载链路），
-    /// 校验元信息 / 本地类别 / 动态音色表。不触发合成（避免引导下载几百 MB）。
-    /// 前置：先跑过 plugins/genie-tts/package.ps1 -Install。手动运行：
-    /// cargo test -- --ignored genie插件加载与音色表
-    #[test]
-    #[cfg(target_os = "windows")]
-    #[ignore = "需本机已安装 genie-tts 插件，手动运行"]
-    fn genie插件加载与音色表() {
-        // 阶段 22 起插件位于 exe 同级 plugins/ 目录
-        let exe_dir = std::env::current_exe()
-            .expect("获取 exe 路径")
-            .parent().expect("exe 父目录").to_path_buf();
-        let plugin_dir = exe_dir.join("plugins/genie-tts");
-        assert!(plugin_dir.exists(), "genie-tts 插件未安装: {}", plugin_dir.display());
-
-        let plugin = crate::plugins::loader::LoadedPlugin::load(&plugin_dir, APP_VERSION)
-            .expect("genie-tts 插件加载失败");
-        assert_eq!(plugin.dll_id, "genie-tts");
-        assert_eq!(plugin.audio_format, "wav");
-        assert_eq!(plugin.manifest.category, "local", "本地插件类别应为 local");
-        assert!(plugin.manifest.timeout_secs >= 600, "本地引擎超时应放宽");
-
-        // 能力符号：本地引擎应同时导出 setup 与音色管理（阶段 21）
-        assert!(plugin.has_setup(), "genie-tts 应支持环境安装");
-        assert!(plugin.has_voice_management(), "genie-tts 应支持音色管理");
-
-        // 数据目录环境变量应在加载时注入（指向 <插件目录>/data）
-        let env_key = "VA_PLUGIN_DATA_DIR_GENIE_TTS";
-        let content_dir = std::env::var(env_key).expect("数据目录环境变量应已注入");
-        assert!(content_dir.ends_with("data"), "数据目录应以 data 结尾: {content_dir}");
-
-        // 动态音色表：应含预置角色（磁盘扫描 + 内置清单，不触发网络）
-        let voices_json = plugin.query_voices_json();
-        let voices: Vec<plugin_api::VoiceItem> =
-            serde_json::from_str(&voices_json).expect("音色表应为合法 JSON");
-        assert!(!voices.is_empty(), "动态音色表不应为空");
-        assert!(voices.iter().any(|v| v.id == "feibi"), "应含预置角色 feibi");
-    }
-
     /// 实网验证：加载本机已安装的 edge-tts 插件并真实合成。
     /// 需要联网（连微软服务）；默认 ignored，手动运行：
     /// cargo test -- --ignored edge插件实网合成

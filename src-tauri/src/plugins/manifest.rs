@@ -355,8 +355,8 @@ mod tests {
     fn 本地插件清单字段解析() {
         let dir = tempfile::tempdir().unwrap();
         let json = serde_json::json!({
-            "id": "genie-tts",
-            "name": "Genie TTS",
+            "id": "demo-local-tts",
+            "name": "Demo Local TTS",
             "version": "1.0.0",
             "type": "tts_engine",
             "platform": ["windows"],
