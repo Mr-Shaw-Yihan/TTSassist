@@ -11,7 +11,7 @@ use super::config;
 use super::loader::{
     LoadedAsrPlugin, LoadedFxPlugin, LoadedPlugin, LoadedServicePlugin, PluginEngine,
 };
-use super::manifest::{PluginConfigDecl, PluginManifest};
+use super::manifest::{Capabilities, PluginConfigDecl, PluginManifest};
 use super::registry;
 use super::PluginError;
 use tauri::Manager;
@@ -59,6 +59,9 @@ pub struct PluginInfo {
     pub requirements: Option<String>,
     /// 配置声明（manifest.config，通用插件配置机制）：None = 无配置项
     pub config: Option<PluginConfigDecl>,
+    /// 能力声明（manifest.capabilities）：前端据此决定功能入口是否展示。
+    /// 读自磁盘清单，加载失败的插件也透出；缺省全 false。
+    pub capabilities: Capabilities,
 }
 
 /// 插件管理器。dll 一经加载常驻到进程退出（运行期卸载有崩溃风险，见 loader.rs 头注）。
@@ -609,6 +612,11 @@ impl PluginManager {
             let requirements = manifest.as_ref().and_then(|m| m.requirements.clone());
             // 配置声明（读自磁盘清单，加载失败的插件设置面板也要能展示）
             let config_decl = manifest.as_ref().and_then(|m| m.config.clone());
+            // 能力声明（同上：读自磁盘清单，前端入口展示不依赖插件是否加载成功）
+            let capabilities = manifest
+                .as_ref()
+                .map(|m| m.capabilities)
+                .unwrap_or_default();
 
             result.push(PluginInfo {
                 id: entry.id.clone(),
@@ -630,6 +638,7 @@ impl PluginManager {
                 has_voice_management,
                 requirements,
                 config: config_decl,
+                capabilities,
             });
         }
         result
@@ -1060,6 +1069,35 @@ mod tests {
         assert_eq!(infos.len(), 1);
         assert!(!infos[0].loaded);
         assert!(infos[0].error.as_deref().unwrap_or("").contains("校验"));
+        assert!(
+            !infos[0].capabilities.voice_library,
+            "清单未声明 capability 时默认 false"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn 清单capabilities透出到插件列表() {
+        let dir = tempfile::tempdir().unwrap();
+        // 用校验和不符让插件加载失败：capabilities 读自磁盘清单，
+        // 加载失败也必须透出，否则前端会把支持音色库的引擎一起隐藏。
+        install_test_plugin(
+            dir.path(),
+            Some("0000000000000000000000000000000000000000000000000000000000000000".into()),
+        );
+        let manifest_path = dir.path().join("plugins/test-plugin/manifest.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        manifest["capabilities"] = serde_json::json!({ "voice_library": true });
+        std::fs::write(&manifest_path, manifest.to_string()).unwrap();
+
+        let pm = PluginManager::load_all(&dir.path().join("plugins"), None);
+        let infos = pm.list();
+        assert_eq!(infos.len(), 1);
+        assert!(
+            infos[0].capabilities.voice_library,
+            "manifest 声明的 voice_library 必须出现在 PluginInfo 中"
+        );
     }
 
     #[test]

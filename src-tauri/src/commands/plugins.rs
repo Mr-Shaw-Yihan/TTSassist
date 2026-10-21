@@ -957,6 +957,7 @@ mod tests {
             has_voice_management: false,
             requirements: None,
             config,
+            capabilities: Default::default(),
         }
     }
 
