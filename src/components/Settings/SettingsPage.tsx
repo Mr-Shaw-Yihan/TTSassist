@@ -1,5 +1,5 @@
 // 设置页面（主界面侧边栏"设置"项的右侧内容区）：分类收纳（手风琴）。
-// 分类：虚拟麦克风 / 插件服务（service 型插件配置） / 快捷键 / 外观 / 关于。
+// 分类：快捷键（固定首位，本页最高频）/ 虚拟麦克风 / 插件服务（service 型插件配置）/ 存储 / 关于。
 // 注：TTS「语音合成」与 ASR「语音输入」已析出至顶层「语音」中心页（VoiceCenterPage），此处不再承载引擎/音色配置。
 
 import { useState, useEffect } from "react";
@@ -84,29 +84,8 @@ export function SettingsPage() {
     <div className="flex h-full flex-col">
       <div className="scrollbar-thin flex-1 space-y-2.5 overflow-y-auto px-4 py-5 text-sm">
         <div className="mx-auto max-w-xl space-y-2.5">
-          {/* 虚拟麦克风 */}
-          <Section title="虚拟麦克风">
-            <MicSettings />
-          </Section>
-
-          {/* 插件服务（service 类型插件，如手机遥控）：通用配置卡上屏（含 display 只读字段） */}
-          {plugins.some((p) => p.plugin_type === "service" && p.config) && (
-            <Section title="插件服务">
-              {plugins
-                .filter((p) => p.plugin_type === "service" && p.config)
-                .map((p) => (
-                  <PluginConfigPanel key={p.id} pluginId={p.id} pluginName={p.name} />
-                ))}
-            </Section>
-          )}
-
-          {/* 存储：数据存在哪、各占多大、残留引擎数据清理。
-              Section 收起时不渲染 children，所以递归扫盘只在用户展开时才跑一次 */}
-          <Section title="存储">
-            <StoragePanel />
-          </Section>
-
-          {/* 快捷键：浮窗呼出 / 语音输入 / 播放最近一条消息 / 开关发送到麦克风 */}
+          {/* 快捷键：浮窗呼出 / 语音输入 / 播放最近一条消息 / 开关发送到麦克风。
+              固定排第一：全屏游戏里靠键盘操作，是本页最高频的入口（B4） */}
           <Section title="快捷键">
             <div className="space-y-4">
               <HotkeyRow
@@ -139,6 +118,27 @@ export function SettingsPage() {
             </div>
           </Section>
 
+          {/* 虚拟麦克风 */}
+          <Section title="虚拟麦克风">
+            <MicSettings />
+          </Section>
+
+          {/* 插件服务（service 类型插件，如手机遥控）：通用配置卡上屏（含 display 只读字段） */}
+          {plugins.some((p) => p.plugin_type === "service" && p.config) && (
+            <Section title="插件服务">
+              {plugins
+                .filter((p) => p.plugin_type === "service" && p.config)
+                .map((p) => (
+                  <PluginConfigPanel key={p.id} pluginId={p.id} pluginName={p.name} />
+                ))}
+            </Section>
+          )}
+
+          {/* 存储：数据存在哪、各占多大、残留引擎数据清理。
+              Section 收起时不渲染 children，所以递归扫盘只在用户展开时才跑一次 */}
+          <Section title="存储">
+            <StoragePanel />
+          </Section>
 
           {/* 关于 */}
           <Section
