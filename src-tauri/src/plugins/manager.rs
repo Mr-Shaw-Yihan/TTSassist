@@ -11,7 +11,7 @@ use super::config;
 use super::loader::{
     LoadedAsrPlugin, LoadedFxPlugin, LoadedPlugin, LoadedServicePlugin, PluginEngine,
 };
-use super::manifest::{PluginConfigDecl, PluginManifest};
+use super::manifest::{Capabilities, PluginConfigDecl, PluginManifest};
 use super::registry;
 use super::PluginError;
 use tauri::Manager;
@@ -59,6 +59,9 @@ pub struct PluginInfo {
     pub requirements: Option<String>,
     /// 配置声明（manifest.config，通用插件配置机制）：None = 无配置项
     pub config: Option<PluginConfigDecl>,
+    /// 能力声明（manifest.capabilities）：前端据此决定功能入口是否展示。
+    /// 读自磁盘清单，加载失败的插件也透出；缺省全 false。
+    pub capabilities: Capabilities,
 }
 
 /// 插件管理器。dll 一经加载常驻到进程退出（运行期卸载有崩溃风险，见 loader.rs 头注）。
@@ -609,6 +612,11 @@ impl PluginManager {
             let requirements = manifest.as_ref().and_then(|m| m.requirements.clone());
             // 配置声明（读自磁盘清单，加载失败的插件设置面板也要能展示）
             let config_decl = manifest.as_ref().and_then(|m| m.config.clone());
+            // 能力声明（同上：读自磁盘清单，前端入口展示不依赖插件是否加载成功）
+            let capabilities = manifest
+                .as_ref()
+                .map(|m| m.capabilities)
+                .unwrap_or_default();
 
             result.push(PluginInfo {
                 id: entry.id.clone(),
@@ -630,6 +638,7 @@ impl PluginManager {
                 has_voice_management,
                 requirements,
                 config: config_decl,
+                capabilities,
             });
         }
         result
@@ -1060,6 +1069,35 @@ mod tests {
         assert_eq!(infos.len(), 1);
         assert!(!infos[0].loaded);
         assert!(infos[0].error.as_deref().unwrap_or("").contains("校验"));
+        assert!(
+            !infos[0].capabilities.voice_library,
+            "清单未声明 capability 时默认 false"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn 清单capabilities透出到插件列表() {
+        let dir = tempfile::tempdir().unwrap();
+        // 用校验和不符让插件加载失败：capabilities 读自磁盘清单，
+        // 加载失败也必须透出，否则前端会把支持音色库的引擎一起隐藏。
+        install_test_plugin(
+            dir.path(),
+            Some("0000000000000000000000000000000000000000000000000000000000000000".into()),
+        );
+        let manifest_path = dir.path().join("plugins/test-plugin/manifest.json");
+        let mut manifest: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        manifest["capabilities"] = serde_json::json!({ "voice_library": true });
+        std::fs::write(&manifest_path, manifest.to_string()).unwrap();
+
+        let pm = PluginManager::load_all(&dir.path().join("plugins"), None);
+        let infos = pm.list();
+        assert_eq!(infos.len(), 1);
+        assert!(
+            infos[0].capabilities.voice_library,
+            "manifest 声明的 voice_library 必须出现在 PluginInfo 中"
+        );
     }
 
     #[test]
@@ -1068,45 +1106,6 @@ mod tests {
         let pm = PluginManager::load_all(&dir.path().join("plugins"), None);
         assert!(pm.get("不存在").is_none());
         assert!(pm.list().is_empty());
-    }
-
-    /// 真机验证：加载本机已安装的 genie-tts 插件（走宿主完整加载链路），
-    /// 校验元信息 / 本地类别 / 动态音色表。不触发合成（避免引导下载几百 MB）。
-    /// 前置：先跑过 plugins/genie-tts/package.ps1 -Install。手动运行：
-    /// cargo test -- --ignored genie插件加载与音色表
-    #[test]
-    #[cfg(target_os = "windows")]
-    #[ignore = "需本机已安装 genie-tts 插件，手动运行"]
-    fn genie插件加载与音色表() {
-        // 阶段 22 起插件位于 exe 同级 plugins/ 目录
-        let exe_dir = std::env::current_exe()
-            .expect("获取 exe 路径")
-            .parent().expect("exe 父目录").to_path_buf();
-        let plugin_dir = exe_dir.join("plugins/genie-tts");
-        assert!(plugin_dir.exists(), "genie-tts 插件未安装: {}", plugin_dir.display());
-
-        let plugin = crate::plugins::loader::LoadedPlugin::load(&plugin_dir, APP_VERSION)
-            .expect("genie-tts 插件加载失败");
-        assert_eq!(plugin.dll_id, "genie-tts");
-        assert_eq!(plugin.audio_format, "wav");
-        assert_eq!(plugin.manifest.category, "local", "本地插件类别应为 local");
-        assert!(plugin.manifest.timeout_secs >= 600, "本地引擎超时应放宽");
-
-        // 能力符号：本地引擎应同时导出 setup 与音色管理（阶段 21）
-        assert!(plugin.has_setup(), "genie-tts 应支持环境安装");
-        assert!(plugin.has_voice_management(), "genie-tts 应支持音色管理");
-
-        // 数据目录环境变量应在加载时注入（指向 <插件目录>/data）
-        let env_key = "VA_PLUGIN_DATA_DIR_GENIE_TTS";
-        let content_dir = std::env::var(env_key).expect("数据目录环境变量应已注入");
-        assert!(content_dir.ends_with("data"), "数据目录应以 data 结尾: {content_dir}");
-
-        // 动态音色表：应含预置角色（磁盘扫描 + 内置清单，不触发网络）
-        let voices_json = plugin.query_voices_json();
-        let voices: Vec<plugin_api::VoiceItem> =
-            serde_json::from_str(&voices_json).expect("音色表应为合法 JSON");
-        assert!(!voices.is_empty(), "动态音色表不应为空");
-        assert!(voices.iter().any(|v| v.id == "feibi"), "应含预置角色 feibi");
     }
 
     /// 实网验证：加载本机已安装的 edge-tts 插件并真实合成。

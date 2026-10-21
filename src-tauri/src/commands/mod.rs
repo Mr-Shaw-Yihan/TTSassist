@@ -30,9 +30,9 @@ use crate::storage::types::Settings;
 /// 多命令共享的全局状态。
 ///
 /// - `config_dir`: 配置根（%APPDATA%\com.voiceassist.app），放 settings / 遥控配对 / 存储指针
-/// - `content_dir`: 内容根（消息、音频、样本、日志、插件重数据）。Task 4 Step 6 翻默认后
-///   默认跟随安装位置 `<exe>\data`（`VA_STORAGE_DIR` > storage.json 指针 > 不可写时回退 LOCALAPPDATA），
-///   不再等于配置根；新代码请从 `crate::storage::paths::StoragePaths` 取路径
+/// - `content_dir`: 内容根（消息、音频、样本、日志、插件重数据）。默认 = 配置根
+///   （`%APPDATA%\com.voiceassist.app`），用户自选时由 `VA_STORAGE_DIR` > storage.json 指针
+///   决定；`<exe>\data` 仅为 1.9.0 测试版历史来源。新代码请从 `StoragePaths` 取路径
 /// - `settings`: 缓存一份在内存中（读多写少），更新时同时写文件 + 改内存
 pub struct AppState {
     pub config_dir: PathBuf,

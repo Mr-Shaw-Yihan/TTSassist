@@ -18,6 +18,7 @@ pub mod sync;
 pub mod tray;
 pub mod tts;
 pub mod win32;
+pub mod window_size;
 
 use std::sync::Mutex;
 use tauri::Manager;
@@ -27,10 +28,8 @@ use crate::storage::types::Settings;
 
 /// 解析三根（配置 / 内容 / 插件），路径来源收口到 `storage::paths`。
 ///
-/// ⚠ 行为不变约束：在迁移能力（`storage::migrate`，存储计划 Task 4）落地前，
-/// `exe_default` 传的是 **配置根**，即内容根默认 == 配置根 —— 本函数今天只收口“谁来定路径”，
-/// 不搬任何数据。翻默认（内容根 → `<exe>\data`）单独放在 Task 4 Step 6，与迁移提示同批发布；
-/// 否则用户会看到“消息/音频全空”（数据其实还在 AppData），等于我们自造一场数据丢失事故。
+/// 内容根默认 = 配置根（`%APPDATA%\com.voiceassist.app`），用户可用 `VA_STORAGE_DIR`
+/// 或 `storage.json` 指针自选位置；`<exe>\data` 只是 1.9.0 测试版的历史来源（见 A3 回迁）。
 fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths {
     use std::path::PathBuf;
     use storage::paths::*;
@@ -52,28 +51,36 @@ fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths
         .map(|a| PathBuf::from(a).join("com.voiceassist.app").join("data"))
         .unwrap_or_else(|| exe_dir.join("data-fallback"));
 
-    // 内容根默认跟随安装位置（存储计划 Task 4 Step 6：迁移能力、界面与急救程序都就位了才翻）。
-    // 装到不可写目录时 decide_content_root 会回退 LOCALAPPDATA 并置 fallback，界面必须向用户说明。
+    // 内容根默认 = 配置根（%APPDATA%）：数据不再放安装目录，覆盖升级/卸载不会连带删掉。
+    // 用户自选位置走 storage.json 指针；装到不可写目录时回退 LOCALAPPDATA 并置 fallback。
     let (content_root, fallback) = decide_content_root(
         env_dir,
         pointer,
+        Some(config_root.clone()),
         exe_dir.join("data"),
         local_fallback,
         &probe_writable,
     );
 
-    // 插件代码根沿用阶段 22 口径：VA_PLUGINS_DIR > exe 同级 plugins/（跟随安装位置）
-    let plugins_root = std::env::var("VA_PLUGINS_DIR")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| exe_dir.join("plugins"));
+    // 插件代码根：VA_PLUGINS_DIR > exe 同级 plugins/（可写）> `<内容根>\plugins` 回退。
+    // Program Files 场景下安装目录不可写，不回退会导致装/更新插件失败。
+    let (plugins_root, plugins_fallback) = decide_plugins_root(
+        std::env::var("VA_PLUGINS_DIR").ok().map(PathBuf::from),
+        exe_dir.join("plugins"),
+        content_root.clone(),
+        &probe_writable,
+    );
 
-    let paths = storage::paths::StoragePaths::from_dirs(
+    let mut paths = storage::paths::StoragePaths::from_dirs(
         config_root,
         content_root,
         plugins_root,
         fallback,
     );
+    paths.plugins_fallback = plugins_fallback;
+    // 1.9.0 测试版的旧数据源（<exe>\data）。只在这里取一次，业务代码不碰 current_exe；
+    // 与内容根相同时报告侧会忽略（表示没有“另一处旧数据”）。
+    paths.legacy_exe_data = Some(exe_dir.join("data"));
     if let Err(e) = paths.ensure_layout() {
         log_warn!("创建存储目录失败: {e}");
     }
@@ -81,6 +88,12 @@ fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths
         log_warn!(
             "内容数据回退到 {}（安装目录不可写或指定位置失效），设置页需向用户说明",
             paths.content_root.display()
+        );
+    }
+    if plugins_fallback {
+        log_warn!(
+            "插件目录回退到 {}（安装目录不可写），设置页需向用户说明",
+            paths.plugins_root.display()
         );
     }
     paths
@@ -176,6 +189,10 @@ pub fn run() {
                 crate::perf::drain_startup_pending();
             }
 
+            // 主窗以 visible=false 创建：先按记忆尺寸定形再显示，避免“先竖版再变形”的跳动。
+            // 尺寸由前端在窗口变化后写入设置（物理像素），这里只负责启动首帧应用。
+            window_size::show_main_with_remembered_size(app.handle(), &settings);
+
             // asset: 协议必须放行内容根，否则 `<audio src>` 会被作用域直接拒掉，
             // 症状是“点了没声、按钮还卡在播放中”——翻默认后音频已经不住在 $APPDATA 里了
             //（真机验收当时就是这么暴出来的，单测与构建皆绿，只有跑起来才发现）。
@@ -217,6 +234,12 @@ pub fn run() {
                     log_warn!("新旧两处都有数据，需用户在设置页选择处置（不静默二选一）")
                 }
                 other => log_info!("存储状态：{:?}", other),
+            }
+
+            // 1.9.0 测试版曾把「我的数据」放在安装目录：升级后自动迁回默认位置，
+            // 否则用户看到空聊天列表会以为数据丢了。用户自选过位置时不回迁。
+            if let Some(text) = commands::storage::pull_back_legacy_if_needed(&paths) {
+                app.state::<commands::storage::MigrationNotice>().set(text);
             }
 
             // 克隆样本通用环境变量：宿主只把「已导入样本的绝对路径」告诉插件，
@@ -288,6 +311,13 @@ pub fn run() {
             // 已下架的内置插件（映射表见 plugins::REPLACED_PLUGINS）：bootstrap 只装不删，
             // 老用户本地会残留其目录与注册表条目、与承接者并存。按表在 load_all 前一次性清走并迁移设置。
             plugins::sweep_replaced_plugins(&plugins_root, &config_dir);
+
+            // 已下线的本地引擎（见 plugins::RETIRED_PLUGIN_IDS）：清走插件目录与引擎数据并提示一次。
+            if let Some(text) =
+                plugins::sweep_retired_plugins(&plugins_root, &paths.plugin_data_root())
+            {
+                app.state::<commands::storage::MigrationNotice>().set(text);
+            }
 
             // 插件系统：加载已安装插件（单个插件失败只记日志，不影响主流程）；
             // 传入 AppHandle 供宿主能力桥注入（声明 requires_host_bridge 的插件）
@@ -448,8 +478,6 @@ pub fn run() {
             crate::commands::plugins::set_plugin_config,
             crate::commands::plugins::clear_plugin_config,
             crate::commands::plugins::install_plugin_zip,
-            crate::commands::plugins::import_offline_resources,
-            crate::commands::plugins::clean_failed_resources,
             crate::commands::plugins::fetch_plugin_index,
             crate::commands::plugins::download_install_plugin,
             crate::commands::plugins::list_bundled_plugins,
@@ -478,10 +506,14 @@ pub fn run() {
             crate::commands::settings::get_settings,
             crate::commands::settings::update_setting,
             crate::commands::storage::storage_report,
+            crate::commands::storage::storage_choice_pending,
+            crate::commands::storage::confirm_default_content_root,
+            crate::commands::storage::set_content_root,
             crate::commands::storage::take_storage_notice,
             crate::commands::storage::plugin_data_size,
             crate::commands::storage::delete_plugin_data,
             crate::commands::storage::migrate_storage_now,
+            crate::commands::storage::cleanup_storage_temp,
             crate::commands::audio::resolve_audio_url,
             crate::commands::clone_voice::import_clone_voice,
             crate::commands::clone_voice::remove_clone_voice,

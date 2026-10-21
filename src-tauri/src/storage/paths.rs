@@ -26,6 +26,12 @@ pub const CACHE_DIR_NAME: &str = "cache";
 pub const LOGS_DIR_NAME: &str = "logs";
 pub const PLUGIN_DATA_DIR_NAME: &str = "plugin-data";
 
+/// 内容根下的记录类文件名：它们与 audio/ 必须同根（删消息是按引用计数删音频的）。
+/// 搬家/回迁/备份识别共用这份字面量，不在业务代码里各写一遍。
+pub const MESSAGES_FILE_NAME: &str = "messages.json";
+pub const FAVORITES_FILE_NAME: &str = "favorites.json";
+pub const SUBTITLE_HISTORY_FILE_NAME: &str = "subtitle_history.json";
+
 /// 由内容根取子目录（业务代码只拿到 `&Path` 时用它们，不要自己 join 字面量）
 pub fn audio_dir_in(content_root: &Path) -> PathBuf { content_root.join(AUDIO_DIR_NAME) }
 pub fn samples_dir_in(content_root: &Path) -> PathBuf { content_root.join(SAMPLES_DIR_NAME) }
@@ -49,12 +55,17 @@ pub const POINTER_FILE_NAME: &str = "storage.json";
 pub struct StoragePaths {
     /// %APPDATA%\com.voiceassist.app —— 只放小而敏感的配置文件
     pub config_root: PathBuf,
-    /// 内容与重数据的根，默认跟随安装位置（<exe>\data）
+    /// 内容与重数据的根，默认等于配置根；用户可自选（storage.json 指针）
     pub content_root: PathBuf,
     /// 插件代码根（manifest + dll + registry），跟随安装位置
     pub plugins_root: PathBuf,
     /// 内容根因不可写等原因回退时为 true → 界面必须向用户说明原因
     pub content_fallback: bool,
+    /// 1.9.0 测试版把「我的数据」放在 `<exe>\data`。启动时由唯一解析入口填入，
+    /// 供自动回迁与存储报告统计；与内容根相同时表示“没有另一处旧数据”。
+    pub legacy_exe_data: Option<PathBuf>,
+    /// 插件根因安装目录不可写而回退到 `<内容根>\plugins` 时为 true
+    pub plugins_fallback: bool,
 }
 
 impl StoragePaths {
@@ -65,7 +76,14 @@ impl StoragePaths {
         plugins_root: PathBuf,
         content_fallback: bool,
     ) -> Self {
-        Self { config_root, content_root, plugins_root, content_fallback }
+        Self {
+            config_root,
+            content_root,
+            plugins_root,
+            content_fallback,
+            legacy_exe_data: None,
+            plugins_fallback: false,
+        }
     }
 
     // ── 配置根下的条目 ────────────────────────
@@ -110,11 +128,16 @@ impl StoragePaths {
     }
 }
 
-/// 决定内容根：环境变量 > 指针文件 > <exe>\data；被选位置不可写则回退 fallback。
+/// 决定内容根：环境变量 > 指针文件 > 配置根（新默认）> `<exe>\data`（仅历史兜底）；
+/// 被选位置不可写则回退 fallback。
+///
+/// `<exe>\data` 自 1.9.0 起**不再是默认落点**：数据在安装目录里会随卸载一起被删。
+/// 它只在 `default_root` 缺失（非正常启动路径）时兜底，正常启动总会传配置根。
 /// `writable` 注入以便单测（真实实现是 `probe_writable`）。
 pub fn decide_content_root(
     env_dir: Option<PathBuf>,
     pointer: Option<PathBuf>,
+    default_root: Option<PathBuf>,
     exe_default: PathBuf,
     fallback: PathBuf,
     writable: &dyn Fn(&Path) -> bool,
@@ -127,10 +150,34 @@ pub fn decide_content_root(
     if let Some(p) = pointer.filter(|p| !p.as_os_str().is_empty()) {
         return if writable(&p) { (p, false) } else { (fallback, true) };
     }
+    if let Some(p) = default_root.filter(|p| !p.as_os_str().is_empty()) {
+        return if writable(&p) { (p, false) } else { (fallback, true) };
+    }
     if writable(&exe_default) {
         return (exe_default, false);
     }
     (fallback, true)
+}
+
+/// 决定插件代码根：`VA_PLUGINS_DIR` > `<exe>\plugins`（可写）> `<content_root>\plugins`。
+/// 返回 `(root, used_fallback)`。
+///
+/// 为什么需要回退：装到 `C:\Program Files\TTSassist` 时普通用户写不了安装目录，
+/// 装/更新插件会直接失败。回退到「我的数据」下，数据与插件一起可迁移、可备份。
+/// 环境变量是开发/急救逃生口，设了就照用（不因不可写而静默改道）。
+pub fn decide_plugins_root(
+    env_dir: Option<PathBuf>,
+    exe_plugins: PathBuf,
+    content_root: PathBuf,
+    writable: &dyn Fn(&Path) -> bool,
+) -> (PathBuf, bool) {
+    if let Some(p) = env_dir.filter(|p| !p.as_os_str().is_empty()) {
+        return (p, false);
+    }
+    if writable(&exe_plugins) {
+        return (exe_plugins, false);
+    }
+    (content_root.join("plugins"), true)
 }
 
 /// 由 `%APPDATA%` 拼配置根（拆成纯函数以便单测，不读环境变量）
@@ -219,10 +266,29 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn decide_content_root_无env无指针时默认等于配置根() {
+        let cfg = PathBuf::from(r"C:\Users\u\AppData\Roaming\com.voiceassist.app");
+        let exe_default = PathBuf::from(r"C:\exe\data");
+        let fallback = PathBuf::from(r"C:\Users\u\AppData\Local\com.voiceassist.app\data");
+        let (root, used_fallback) = decide_content_root(None, None, Some(cfg.clone()), exe_default, fallback, &|_| true);
+        assert_eq!(root, cfg, "默认落点必须是配置根（%APPDATA%），不再是 <exe>\\data");
+        assert!(!used_fallback);
+    }
+
+    #[test]
+    fn decide_content_root_指针优先于默认() {
+        let cfg = PathBuf::from(r"C:\cfg");
+        let picked = PathBuf::from(r"D:\VoiceAssistData");
+        let (root, _) = decide_content_root(None, Some(picked.clone()), Some(cfg), PathBuf::from(r"C:\exe\data"), PathBuf::from(r"C:\fb"), &|_| true);
+        assert_eq!(root, picked, "用户自选位置（指针）最高优先（仅次于 env）");
+    }
+
+    #[test]
     fn 内容根优先级_环境变量高于指针高于默认() {
         let (root, fb) = decide_content_root(
             Some(PathBuf::from("E:\\env")),
             Some(PathBuf::from("D:\\pointer")),
+            Some(PathBuf::from("C:\\default")),
             PathBuf::from("C:\\exe\\data"),
             PathBuf::from("C:\\fallback"),
             &|_| true,
@@ -233,6 +299,7 @@ mod tests {
         let (root, fb) = decide_content_root(
             None,
             Some(PathBuf::from("D:\\pointer")),
+            Some(PathBuf::from("C:\\default")),
             PathBuf::from("C:\\exe\\data"),
             PathBuf::from("C:\\fallback"),
             &|_| true,
@@ -243,11 +310,12 @@ mod tests {
         let (root, _) = decide_content_root(
             None,
             None,
+            Some(PathBuf::from("C:\\default")),
             PathBuf::from("C:\\exe\\data"),
             PathBuf::from("C:\\fallback"),
             &|_| true,
         );
-        assert_eq!(root, PathBuf::from("C:\\exe\\data"));
+        assert_eq!(root, PathBuf::from("C:\\default"), "默认 = 配置根，不是安装目录");
     }
 
     #[test]
@@ -255,6 +323,7 @@ mod tests {
         let (root, fb) = decide_content_root(
             None,
             Some(PathBuf::from("E:\\gone")),
+            None,
             PathBuf::from("C:\\exe\\data"),
             PathBuf::from("C:\\Users\\x\\AppData\\Local\\com.voiceassist.app\\data"),
             &|p: &Path| p != Path::new("E:\\gone"),
@@ -264,6 +333,44 @@ mod tests {
             PathBuf::from("C:\\Users\\x\\AppData\\Local\\com.voiceassist.app\\data")
         );
         assert!(fb, "非默认位置失效必须标记，界面才能说明原因");
+    }
+
+    #[test]
+    fn decide_plugins_root_安装目录不可写时回退到我的数据() {
+        let exe_plugins = PathBuf::from(r"C:\Program Files\TTSassist\plugins");
+        let content = PathBuf::from(r"D:\VoiceAssistData");
+        let (root, fallback) = decide_plugins_root(
+            None,
+            exe_plugins.clone(),
+            content.clone(),
+            &|p: &Path| p != exe_plugins.as_path(),
+        );
+        assert_eq!(
+            root,
+            content.join("plugins"),
+            "装到 Program Files 时插件目录必须回退，否则装/更新插件会失败"
+        );
+        assert!(fallback, "回退必须标记，设置页要说明插件装在哪");
+    }
+
+    #[test]
+    fn decide_plugins_root_可写时跟随安装目录且环境变量优先() {
+        let exe_plugins = PathBuf::from(r"D:\Apps\TTSassist\plugins");
+        let content = PathBuf::from(r"C:\Users\u\AppData\Roaming\com.voiceassist.app");
+        let (root, fallback) =
+            decide_plugins_root(None, exe_plugins.clone(), content, &|_| true);
+        assert_eq!(root, exe_plugins, "可写时跟随安装位置（阶段 22 口径）");
+        assert!(!fallback);
+
+        let env = PathBuf::from(r"E:\dev-plugins");
+        let (root, fallback) = decide_plugins_root(
+            Some(env.clone()),
+            PathBuf::from(r"Z:\gone"),
+            PathBuf::from(r"Z:\data"),
+            &|_| false,
+        );
+        assert_eq!(root, env, "开发/急救用的环境变量优先级最高");
+        assert!(!fallback);
     }
 
     #[test]

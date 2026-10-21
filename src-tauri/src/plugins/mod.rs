@@ -342,6 +342,69 @@ fn move_subtable(
     true
 }
 
+// baseok: 下线清理表只记已移除插件的 id（与 REPLACED_PLUGINS 同性质），不含任何引擎协议分支
+const RETIRED_PLUGIN_IDS: &[&str] = &["genie-tts", "hojo-tts"];
+
+/// 列出插件根下确实存在目录的已下线插件 id（顺序固定，便于日志与测试）。
+pub fn find_retired_plugins(plugins_root: &Path) -> Vec<String> {
+    RETIRED_PLUGIN_IDS
+        .iter()
+        .filter(|id| plugins_root.join(id).is_dir())
+        .map(|id| (*id).to_string())
+        .collect()
+}
+
+/// 启动期清理已下线插件（须在 PluginManager::load_all 之前调用）：
+/// 删插件代码目录 + 引擎数据目录 + 注册表条目；删除失败只记日志、不 panic。
+/// 有目录被清走时返回一次性提示（含释放空间），否则 None。幂等。
+pub fn sweep_retired_plugins(plugins_root: &Path, plugin_data_root: &Path) -> Option<String> {
+    let mut removed_ids: Vec<&str> = Vec::new();
+    let mut released = 0u64;
+
+    for &id in RETIRED_PLUGIN_IDS {
+        let code_dir = plugins_root.join(id);
+        let data_dir = plugin_data_root.join(id);
+        let mut removed_any = false;
+        for dir in [&code_dir, &data_dir] {
+            if !dir.exists() {
+                continue;
+            }
+            let bytes = crate::storage::paths::dir_size(dir);
+            match std::fs::remove_dir_all(dir) {
+                Ok(()) => {
+                    released += bytes;
+                    removed_any = true;
+                }
+                Err(e) => log_warn!("[插件清理] 删除已下线引擎目录失败 {}：{e}", dir.display()),
+            }
+        }
+        if removed_any {
+            removed_ids.push(id);
+        }
+    }
+
+    // 注册表条目即使目录已不在也要清（否则 load_all 仍会去加载已空的目录）
+    let mut reg = registry::load_registry(plugins_root);
+    let before = reg.plugins.len();
+    reg.plugins.retain(|e| !RETIRED_PLUGIN_IDS.contains(&e.id.as_str()));
+    if reg.plugins.len() != before {
+        if let Err(e) = registry::save_registry(plugins_root, &reg) {
+            log_warn!("[插件清理] 移除已下线引擎注册表条目失败：{e}");
+        }
+    }
+
+    if removed_ids.is_empty() {
+        return None; // 目录早已不在（只清了注册表残留）时不打扰用户
+    }
+    let text = format!(
+        "已移除本地引擎 {}（正在重新设计，后续版本回归），释放 {:.1} MB",
+        removed_ids.join(" / "),
+        released as f64 / 1024.0 / 1024.0
+    );
+    log_info!("[插件清理] {text}");
+    Some(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -698,5 +761,51 @@ mod tests {
         let v = read_json(&config);
         assert_eq!(v["plugin_config"]["minimax-tts-stream"]["api_key"], "NEW", "不得覆盖用户已在新面板填的值");
         assert!(v["plugin_config"].get("minimax-tts").is_none(), "旧条目无论如何都要清走");
+    }
+
+    #[test]
+    fn 下线插件_启动时被识别并列入清理清单() {
+        let root = tempfile::tempdir().unwrap();
+        // baseok: 下线清理清单的测试必须点名具体引擎 id
+        for id in ["genie-tts", "hojo-tts", "edge-tts"] {
+            std::fs::create_dir_all(root.path().join(id)).unwrap();
+        }
+        let stale = find_retired_plugins(root.path());
+        // baseok: 断言清理清单内容，必须点名具体引擎 id
+        assert_eq!(
+            stale,
+            vec!["genie-tts".to_string(), "hojo-tts".to_string()],
+            "只清理已下线的本地引擎，edge-tts 必须保留"
+        );
+    }
+
+    #[test]
+    fn 下线插件_清理目录与引擎数据并只通知一次() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = root.path().join("plugins");
+        let data = root.path().join("engine-data");
+        // baseok: 构造下线引擎的残留插件目录与引擎数据
+        std::fs::create_dir_all(plugins.join("genie-tts")).unwrap();
+        std::fs::create_dir_all(data.join("genie-tts/models")).unwrap();
+        std::fs::write(data.join("genie-tts/models/a.bin"), vec![0u8; 1024 * 1024]).unwrap();
+        std::fs::create_dir_all(plugins.join("edge-tts")).unwrap();
+        std::fs::write(
+            plugins.join("registry.json"),
+            r#"{"plugins":[{"id":"genie-tts","version":"0.1.0","installed_at":"x"},{"id":"edge-tts","version":"0.1.1","installed_at":"y"}],"suppressed":[]}"#,
+        )
+        .unwrap();
+
+        let notice = sweep_retired_plugins(&plugins, &data).expect("应给出一次性提示");
+        // baseok: 提示与断言必须点名被清理的引擎 id
+        assert!(notice.contains("genie-tts"), "提示应点名被清理的引擎：{notice}");
+        assert!(notice.contains("MB"), "提示应给出释放空间：{notice}");
+        assert!(!plugins.join("genie-tts").exists());
+        assert!(!data.join("genie-tts").exists());
+        assert!(plugins.join("edge-tts").exists(), "未下线的插件不能误删");
+        let reg = std::fs::read_to_string(plugins.join("registry.json")).unwrap();
+        assert!(!reg.contains("genie-tts"), "注册表不应再有下线插件：{reg}");
+        assert!(reg.contains("edge-tts"), "无关插件的注册表条目不能被误删");
+
+        assert!(sweep_retired_plugins(&plugins, &data).is_none(), "再跑一次应为空操作");
     }
 }

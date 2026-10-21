@@ -80,7 +80,7 @@ fn dir_has_entries(p: &Path) -> bool {
 
 /// 按当前布局判定状态——启动日志与 `storage_report` 共用这一份逻辑，不分两头写。
 ///
-/// 两根仍相同时（内容根尚未翻默认到安装位置）根本没“搬家”这回事，必须返回 Current：
+/// 两根相同时（默认落点 = 配置根）根本没“搬家”这回事，必须返回 Current：
 /// 否则 `messages.json` 会被同时看成“新位置已有”与“旧位置待迁”，误判成 Conflict。
 ///
 /// 旧位置仍有数据时，**不能拿“新位置已有数据”当冲突依据**：拷贝就是先填新位置的，
@@ -186,7 +186,7 @@ pub fn migrate_items_with_verify(
 /// 归档目标若已被占，改名存放而**不是盖上去**。
 /// 必须这样写：Windows 的 `fs::rename` 带 REPLACE 语义，目标存在时不报错而是
 /// **静默销毁旧归档**（实测就是这个 bug）——而归档是用户回退的唯一凭据。
-fn free_backup_target(backup_dir: &Path, name: &str) -> PathBuf {
+pub(crate) fn free_backup_target(backup_dir: &Path, name: &str) -> PathBuf {
     let first = backup_dir.join(name);
     if !first.exists() {
         return first;

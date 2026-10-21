@@ -103,6 +103,7 @@ mod tests {
             requirements: None,
             config: None,
             requires_host_bridge: false,
+            capabilities: Default::default(),
         };
         m.config = Some(super::super::manifest::PluginConfigDecl {
             help_url: None,

@@ -52,6 +52,19 @@ pub struct PluginManifest {
     /// 未声明 = 不注入，反向调用不可用。设计见 doc/移动端遥控器设计.md §二。
     #[serde(default)]
     pub requires_host_bridge: bool,
+    /// 插件能力声明（可选）：宿主与前端据此决定功能入口是否展示。
+    /// 缺省全 false，老清单零影响。
+    #[serde(default)]
+    pub capabilities: Capabilities,
+}
+
+/// 插件能力表。新增能力一律 `#[serde(default)]` 缺省 false，
+/// 宿主和前端不得按引擎 id 分支判断同一件事。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Capabilities {
+    /// 是否有云端音色库（「我的音色」配置块据此显示）
+    pub voice_library: bool,
 }
 
 /// 插件配置声明（manifest.config）
@@ -252,6 +265,7 @@ mod tests {
             requirements: None,
             config: None,
             requires_host_bridge: false,
+            capabilities: Capabilities::default(),
         }
     }
 
@@ -341,8 +355,8 @@ mod tests {
     fn 本地插件清单字段解析() {
         let dir = tempfile::tempdir().unwrap();
         let json = serde_json::json!({
-            "id": "genie-tts",
-            "name": "Genie TTS",
+            "id": "demo-local-tts",
+            "name": "Demo Local TTS",
             "version": "1.0.0",
             "type": "tts_engine",
             "platform": ["windows"],
@@ -510,5 +524,19 @@ mod tests {
         // 老清单无此字段 → false（不注入，向后兼容）
         let m = sample();
         assert!(!m.requires_host_bridge);
+    }
+
+    #[test]
+    fn manifest_解析capabilities_voice_library_缺省为false() {
+        let raw = r#"{"id":"edge-tts","name":"Edge","version":"0.1.0","type":"tts",
+            "platform":["windows"],"entry":"plugin.dll","min_app_version":"1.9.0",
+            "checksum":"x","description":"d"}"#;
+        let m: PluginManifest = serde_json::from_str(raw).unwrap();
+        assert!(!m.capabilities.voice_library, "未声明时默认 false");
+
+        let raw2 = raw.replace("\"description\":\"d\"}",
+            "\"description\":\"d\",\"capabilities\":{\"voice_library\":true}}");
+        let m2: PluginManifest = serde_json::from_str(&raw2).unwrap();
+        assert!(m2.capabilities.voice_library, "显式声明 true 时被解析");
     }
 }
