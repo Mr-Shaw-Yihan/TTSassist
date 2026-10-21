@@ -12,6 +12,7 @@ import {
   importResourcePackFlow,
 } from "../../services/invoke";
 import type { PluginInfo } from "../../types";
+import { hasVoiceLibrary } from "../../utils/pluginCapability";
 import { Field, SubPanel } from "../common/SettingsSection";
 import { CustomVoicePanel } from "./CustomVoicePanel";
 import { EngineCard } from "./EngineCard";
@@ -273,14 +274,20 @@ export function VoiceSynthPanel() {
                 voiceSelect={voiceSelectNode}
               />
             ) : (
+              /* 其余云引擎用「音色管理」分区卡。「我的音色」按能力显示（B5）：读插件自述的
+                 manifest capabilities.voice_library，缺省视为 false —— 没有云端音色库的引擎
+                 不再摆一个用户照着填也永远用不上的音色保存框；既无内置音色又无音色库时整块不渲染，
+                 不留空壳 */
+              !hasVoiceLibrary(cur) && cur.voices.length === 0 ? null : (
               <SubPanel
                 title="音色管理"
-                // 文案按插件自述的音色表决定，不认引擎身份：有的云端引擎（音色全由
-                // 用户从服务商页面复制 id）不带内置音色，此时"选择引擎内置音色"是句空话
+                // 文案按插件自述的音色表与能力位决定，不认引擎身份
                 desc={
-                  cur.voices.length > 0
-                    ? "选择引擎内置音色，或维护你自己的「我的音色」（如克隆音色 ID）。"
-                    : "该引擎不自带音色：请在下方「我的音色」保存音色 ID，再回这里选用。"
+                  !hasVoiceLibrary(cur)
+                    ? "选择引擎内置音色。"
+                    : cur.voices.length > 0
+                      ? "选择引擎内置音色，或维护你自己的「我的音色」（如克隆音色 ID）。"
+                      : "该引擎不自带音色：请在下方「我的音色」保存音色 ID，再回这里选用。"
                 }
               >
                 <Field label="当前音色">
@@ -308,6 +315,7 @@ export function VoiceSynthPanel() {
                     )}
                   </select>
                 </Field>
+                {hasVoiceLibrary(cur) && (
                 <CustomVoicePanel
                   items={settings?.plugin_custom_voices?.[cur.id] ?? []}
                   currentVoiceId={settings?.plugin_voices?.[cur.id] ?? cur.voices[0]?.id ?? ""}
@@ -333,7 +341,9 @@ export function VoiceSynthPanel() {
                     }
                   }}
                 />
+                )}
               </SubPanel>
+              )
             )}
 
             {/* 克隆样本卡：插件自述驱动——`voices` 里有 id="clone" 就显示，

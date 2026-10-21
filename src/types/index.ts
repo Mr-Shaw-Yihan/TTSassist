@@ -241,6 +241,15 @@ export interface PluginInfo {
   config?: PluginConfigDecl | null;
   /** 资源需求说明（供用户下载前判断配置；可为空） */
   requirements?: string | null;
+  /** 插件自述能力位（manifest.capabilities）：字段缺失一律按「不具备」，见 utils/pluginCapability.ts */
+  capabilities?: PluginCapabilities | null;
+}
+
+/** 插件能力位。目前只有云端音色库；后续能力（如流式、克隆）也一律走这里自述，
+ *  本体与前端不得再按引擎 id 写死判断（基座合同） */
+export interface PluginCapabilities {
+  /** 有云端音色库：用户可保存并选用自己的音色 ID（「我的音色」） */
+  voice_library?: boolean;
 }
 
 /** 官方插件索引条目（fetch_plugin_index 返回） */
