@@ -577,6 +577,48 @@ fn move_content(src: &Path, dst: &Path, backup: &Path) -> Result<StorageMoveRepo
     move_content_with(src, dst, backup, || Ok(()))
 }
 
+/// 1.9.0 测试版把「我的数据」放在 `<exe>\data`。回迁前提：
+/// `<exe>\data\messages.json` 存在，且默认内容根还没有 messages.json。
+/// 第三个条件（用户没自选位置）由调用方 `pull_back_legacy_if_needed` 把关。
+pub fn should_pull_back_legacy(exe_data: &Path, content_root: &Path) -> bool {
+    exe_data.join(paths::MESSAGES_FILE_NAME).is_file()
+        && !content_root.join(paths::MESSAGES_FILE_NAME).exists()
+}
+
+/// 启动时回迁测试版遗留数据，返回给用户看的一句话（无需回迁则 None）。
+///
+/// 用户自选过位置（content_root != config_root）时绝不回迁：数据不能悄悄搬到他没选的地方，
+/// 否则 D 盘用户升级后会看到另一份空列表。失败只记日志，绝不影响启动。
+pub fn pull_back_legacy_if_needed(paths: &StoragePaths) -> Option<String> {
+    if paths.content_root != paths.config_root {
+        return None;
+    }
+    let exe_data = paths.legacy_exe_data.as_deref()?;
+    if exe_data == paths.content_root || !should_pull_back_legacy(exe_data, &paths.content_root) {
+        return None;
+    }
+
+    let stamp = chrono::Utc::now().format("%Y%m%d").to_string();
+    let backup = paths.backup_dir(&stamp);
+    // 回迁不写指针：默认位置就是配置根，指针只在用户自选后才需要
+    match move_content_with(exe_data, &paths.content_root, &backup, || Ok(())) {
+        Ok(r) if r.moved_files > 0 => {
+            let mb = r.moved_bytes as f64 / 1024.0 / 1024.0;
+            let text = format!(
+                "已把 1.9.0 测试版放在安装目录的消息与音频迁回默认位置（{} 个文件 / {:.1} MB），原件保留在 {}",
+                r.moved_files, mb, r.backup_dir
+            );
+            log_info!("{text}");
+            Some(text)
+        }
+        Ok(_) => None,
+        Err(e) => {
+            log_warn!("测试版数据自动回迁失败（数据仍在安装目录，可手动拷贝到默认位置）：{e}");
+            None
+        }
+    }
+}
+
 /// 更改「我的数据」存放位置：可写校验 → 复制校验 → 写指针 → 旧处转备份。
 ///
 /// 两次搬家（尤其同一天）会复用同一个 `.migrated-backup-<stamp>` 目录，靠
@@ -895,5 +937,60 @@ mod tests {
         assert_eq!(first.moved_files, 1);
         assert_eq!(second.moved_files, 0, "第二次没有可搬的东西");
         assert_eq!(std::fs::read(dst.path().join("messages.json")).unwrap(), b"[1]");
+    }
+
+    #[test]
+    fn legacy_exe_data_仅在默认位置缺messages时判定为可回迁() {
+        // 1.9.0 测试版把数据放 <exe>\data；回迁前提是默认位置还没有消息，
+        // 否则就是把测试版旧数据盖到用户升级后新写的数据上。
+        let exe_data = tempfile::tempdir().unwrap();
+        let content = tempfile::tempdir().unwrap();
+        std::fs::write(exe_data.path().join("messages.json"), b"[1,2]").unwrap();
+        assert!(should_pull_back_legacy(exe_data.path(), content.path()), "默认位置空 → 应回迁");
+        std::fs::write(content.path().join("messages.json"), b"[9]").unwrap();
+        assert!(
+            !should_pull_back_legacy(exe_data.path(), content.path()),
+            "默认位置已有数据 → 不得回迁覆盖"
+        );
+    }
+
+    #[test]
+    fn 用户自选位置时不回迁测试版数据() {
+        // 三条件之「用户没自选位置」：content_root != config_root 时，数据不能搬到他没选的地方。
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = dir.path().join("cfg");
+        let chosen = dir.path().join("D-data");
+        let exe_data = dir.path().join("exe").join("data");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::create_dir_all(&chosen).unwrap();
+        std::fs::create_dir_all(&exe_data).unwrap();
+        std::fs::write(exe_data.join("messages.json"), b"[1]").unwrap();
+
+        let mut custom = StoragePaths::from_dirs(
+            cfg.clone(),
+            chosen.clone(),
+            dir.path().join("plugins"),
+            false,
+        );
+        custom.legacy_exe_data = Some(exe_data.clone());
+        assert!(pull_back_legacy_if_needed(&custom).is_none());
+        assert!(exe_data.join("messages.json").exists(), "自选位置时不得搬动测试版数据");
+        assert!(!chosen.join("messages.json").exists());
+
+        // 默认位置（content == config）→ 回迁并给出通知，原件转备份
+        let mut default = StoragePaths::from_dirs(
+            cfg.clone(),
+            cfg.clone(),
+            dir.path().join("plugins"),
+            false,
+        );
+        default.legacy_exe_data = Some(exe_data.clone());
+        let notice = pull_back_legacy_if_needed(&default).expect("应回迁并返回通知");
+        assert!(notice.contains("测试版"), "通知要说明数据从哪来：{notice}");
+        assert!(!exe_data.join("messages.json").exists(), "回迁后原件应收进备份");
+        assert_eq!(std::fs::read(cfg.join("messages.json")).unwrap(), b"[1]");
+        let backups = migrate::find_backups(&cfg);
+        assert_eq!(backups.len(), 1, "原件必须留一份备份");
+        assert!(backups[0].join("messages.json").exists());
     }
 }

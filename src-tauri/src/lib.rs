@@ -221,6 +221,12 @@ pub fn run() {
                 other => log_info!("存储状态：{:?}", other),
             }
 
+            // 1.9.0 测试版曾把「我的数据」放在安装目录：升级后自动迁回默认位置，
+            // 否则用户看到空聊天列表会以为数据丢了。用户自选过位置时不回迁。
+            if let Some(text) = commands::storage::pull_back_legacy_if_needed(&paths) {
+                app.state::<commands::storage::MigrationNotice>().set(text);
+            }
+
             // 克隆样本通用环境变量：宿主只把「已导入样本的绝对路径」告诉插件，
             // 格式/大小/用法全部由插件自决（基座不认识任何引擎，见 AGENTS.md 基座合同）。
             // API Key 不再在此硬编码注入：改由各插件 manifest 的 config 声明，
