@@ -726,9 +726,84 @@ pub async fn migrate_storage_now(app: AppHandle) -> Result<String, String> {
     ))
 }
 
+/// 清理可重建的临时文件（cache / downloads / logs），返回释放字节数。
+/// 清单写死在这三个目录：消息、音频、样本、引擎数据一律不碰。
+pub fn cleanup_temp(paths: &StoragePaths) -> Result<u64, String> {
+    let mut freed = 0u64;
+    for dir in [paths.cache_dir(), paths.downloads_dir(), paths.logs_dir()] {
+        if !dir.is_dir() {
+            continue;
+        }
+        freed += paths::dir_size(&dir);
+        std::fs::remove_dir_all(&dir)
+            .map_err(|e| format!("清理「{}」失败: {e}", dir.display()))?;
+    }
+    Ok(freed)
+}
+
+/// 设置页「清理临时文件」按钮：删 cache/downloads/logs，返回释放字节数。
+#[tauri::command]
+pub async fn cleanup_storage_temp(app: AppHandle) -> Result<u64, String> {
+    let paths = app.state::<StoragePaths>().inner().clone();
+    tauri::async_runtime::spawn_blocking(move || cleanup_temp(&paths))
+        .await
+        .map_err(|e| format!("清理任务失败: {e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 清理临时文件只删cache与downloads与logs() {
+        // 用户点「清理临时文件」只应清可重建的内容；消息、音频、样本、引擎数据一律不动
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for (sub, name, size) in [
+            ("cache", "a.bin", 3usize),
+            ("downloads", "b.bin", 5),
+            ("logs", "app.log", 7),
+            ("audio", "a.mp3", 11),
+            ("voice_samples", "s.wav", 13),
+            ("plugin-data", "m.bin", 17),
+        ] {
+            let d = root.join(sub);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join(name), vec![0u8; size]).unwrap();
+        }
+        std::fs::write(root.join("messages.json"), b"[1]").unwrap();
+        let p = StoragePaths::from_dirs(
+            root.to_path_buf(),
+            root.to_path_buf(),
+            root.join("plugins"),
+            false,
+        );
+
+        let freed = cleanup_temp(&p).unwrap();
+
+        assert_eq!(freed, 15, "只统计 cache/downloads/logs 的 3+5+7 字节");
+        assert!(!p.cache_dir().exists());
+        assert!(!p.downloads_dir().exists());
+        assert!(!p.logs_dir().exists());
+        assert!(p.audio_dir().join("a.mp3").exists(), "合成音频不是临时文件");
+        assert!(p.samples_dir().join("s.wav").exists(), "克隆样本不是临时文件");
+        assert!(p.plugin_data_root().join("m.bin").exists(), "引擎数据不是临时文件");
+        assert!(root.join("messages.json").exists(), "消息记录不是临时文件");
+    }
+
+    #[test]
+    fn 清理临时文件目录缺失返回零() {
+        // 全新安装没有任何临时文件，点一下不该报错
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let p = StoragePaths::from_dirs(
+            root.to_path_buf(),
+            root.to_path_buf(),
+            root.join("plugins"),
+            false,
+        );
+        assert_eq!(cleanup_temp(&p).unwrap(), 0);
+    }
 
     #[test]
     fn 残留数据是plugin_data与注册表差集() {

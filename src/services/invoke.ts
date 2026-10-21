@@ -387,6 +387,12 @@ export async function pickAudioFile(): Promise<string | null> {
   return null;
 }
 
+/** 弹目录选择器（「更改我的数据位置」与首启弹窗共用）；返回绝对路径或 null（用户取消） */
+export async function pickDirectory(title: string): Promise<string | null> {
+  const selected = await open({ directory: true, multiple: false, title });
+  return typeof selected === "string" ? selected : null;
+}
+
 /** MiniMax 国际版音色克隆：上传音频（+可选样本）→ voice_clone API，返回克隆的 voice_id */
 export async function minimaxGlobalVoiceClone(
   filePath: string,
@@ -667,4 +673,9 @@ export async function migrateStorageNow(): Promise<string> {
  */
 export async function takeStorageNotice(): Promise<string | null> {
   return invoke<string | null>("take_storage_notice");
+}
+
+/** 清理可重建的临时文件（下载残留 / 日志 / 临时内容），返回释放字节数 */
+export async function cleanupStorageTemp(): Promise<number> {
+  return invoke<number>("cleanup_storage_temp");
 }

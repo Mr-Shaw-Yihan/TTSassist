@@ -508,6 +508,7 @@ pub fn run() {
             crate::commands::storage::plugin_data_size,
             crate::commands::storage::delete_plugin_data,
             crate::commands::storage::migrate_storage_now,
+            crate::commands::storage::cleanup_storage_temp,
             crate::commands::audio::resolve_audio_url,
             crate::commands::clone_voice::import_clone_voice,
             crate::commands::clone_voice::remove_clone_voice,
