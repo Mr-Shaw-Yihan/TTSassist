@@ -73,6 +73,15 @@
     ],
     "windows": {
       "nsis": {
+        "languages": [
+          "SimpChinese",
+          "English"
+        ],
+        "displayLanguageSelector": false,
+        "startMenuFolder": "TTSassist",
+        "installerIcon": "./icons/icon.ico",
+        "headerImage": "./windows/installer-header.bmp",
+        "sidebarImage": "./windows/installer-sidebar.bmp",
         "installerHooks": "./windows/installer-hooks.nsh"
       }
     }
