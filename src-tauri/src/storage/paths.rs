@@ -159,6 +159,27 @@ pub fn decide_content_root(
     (fallback, true)
 }
 
+/// 决定插件代码根：`VA_PLUGINS_DIR` > `<exe>\plugins`（可写）> `<content_root>\plugins`。
+/// 返回 `(root, used_fallback)`。
+///
+/// 为什么需要回退：装到 `C:\Program Files\TTSassist` 时普通用户写不了安装目录，
+/// 装/更新插件会直接失败。回退到「我的数据」下，数据与插件一起可迁移、可备份。
+/// 环境变量是开发/急救逃生口，设了就照用（不因不可写而静默改道）。
+pub fn decide_plugins_root(
+    env_dir: Option<PathBuf>,
+    exe_plugins: PathBuf,
+    content_root: PathBuf,
+    writable: &dyn Fn(&Path) -> bool,
+) -> (PathBuf, bool) {
+    if let Some(p) = env_dir.filter(|p| !p.as_os_str().is_empty()) {
+        return (p, false);
+    }
+    if writable(&exe_plugins) {
+        return (exe_plugins, false);
+    }
+    (content_root.join("plugins"), true)
+}
+
 /// 由 `%APPDATA%` 拼配置根（拆成纯函数以便单测，不读环境变量）
 pub fn config_root_from(appdata: Option<PathBuf>) -> Option<PathBuf> {
     appdata.map(|a| a.join(CONFIG_DIR_NAME))
@@ -312,6 +333,44 @@ mod tests {
             PathBuf::from("C:\\Users\\x\\AppData\\Local\\com.voiceassist.app\\data")
         );
         assert!(fb, "非默认位置失效必须标记，界面才能说明原因");
+    }
+
+    #[test]
+    fn decide_plugins_root_安装目录不可写时回退到我的数据() {
+        let exe_plugins = PathBuf::from(r"C:\Program Files\TTSassist\plugins");
+        let content = PathBuf::from(r"D:\VoiceAssistData");
+        let (root, fallback) = decide_plugins_root(
+            None,
+            exe_plugins.clone(),
+            content.clone(),
+            &|p: &Path| p != exe_plugins.as_path(),
+        );
+        assert_eq!(
+            root,
+            content.join("plugins"),
+            "装到 Program Files 时插件目录必须回退，否则装/更新插件会失败"
+        );
+        assert!(fallback, "回退必须标记，设置页要说明插件装在哪");
+    }
+
+    #[test]
+    fn decide_plugins_root_可写时跟随安装目录且环境变量优先() {
+        let exe_plugins = PathBuf::from(r"D:\Apps\TTSassist\plugins");
+        let content = PathBuf::from(r"C:\Users\u\AppData\Roaming\com.voiceassist.app");
+        let (root, fallback) =
+            decide_plugins_root(None, exe_plugins.clone(), content, &|_| true);
+        assert_eq!(root, exe_plugins, "可写时跟随安装位置（阶段 22 口径）");
+        assert!(!fallback);
+
+        let env = PathBuf::from(r"E:\dev-plugins");
+        let (root, fallback) = decide_plugins_root(
+            Some(env.clone()),
+            PathBuf::from(r"Z:\gone"),
+            PathBuf::from(r"Z:\data"),
+            &|_| false,
+        );
+        assert_eq!(root, env, "开发/急救用的环境变量优先级最高");
+        assert!(!fallback);
     }
 
     #[test]

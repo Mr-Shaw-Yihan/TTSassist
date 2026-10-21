@@ -61,11 +61,14 @@ fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths
         &probe_writable,
     );
 
-    // 插件代码根沿用阶段 22 口径：VA_PLUGINS_DIR > exe 同级 plugins/（跟随安装位置）
-    let plugins_root = std::env::var("VA_PLUGINS_DIR")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| exe_dir.join("plugins"));
+    // 插件代码根：VA_PLUGINS_DIR > exe 同级 plugins/（可写）> `<内容根>\plugins` 回退。
+    // Program Files 场景下安装目录不可写，不回退会导致装/更新插件失败。
+    let (plugins_root, plugins_fallback) = decide_plugins_root(
+        std::env::var("VA_PLUGINS_DIR").ok().map(PathBuf::from),
+        exe_dir.join("plugins"),
+        content_root.clone(),
+        &probe_writable,
+    );
 
     let mut paths = storage::paths::StoragePaths::from_dirs(
         config_root,
@@ -73,6 +76,7 @@ fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths
         plugins_root,
         fallback,
     );
+    paths.plugins_fallback = plugins_fallback;
     // 1.9.0 测试版的旧数据源（<exe>\data）。只在这里取一次，业务代码不碰 current_exe；
     // 与内容根相同时报告侧会忽略（表示没有“另一处旧数据”）。
     paths.legacy_exe_data = Some(exe_dir.join("data"));
@@ -83,6 +87,12 @@ fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths
         log_warn!(
             "内容数据回退到 {}（安装目录不可写或指定位置失效），设置页需向用户说明",
             paths.content_root.display()
+        );
+    }
+    if plugins_fallback {
+        log_warn!(
+            "插件目录回退到 {}（安装目录不可写），设置页需向用户说明",
+            paths.plugins_root.display()
         );
     }
     paths
