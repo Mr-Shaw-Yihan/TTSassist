@@ -17,8 +17,9 @@ export async function deleteOrphanData(orphan: OrphanData): Promise<boolean> {
     danger: true,
     confirmText: "删除",
     message:
-      `将删除约 ${formatBytes(orphan.bytes)}：\n${orphan.path}\n\n` +
-      "这个插件已经不在安装列表里。删掉后重新安装该插件需要重新下载模型与运行环境。\n\n确定要删除吗？",
+      `将删除约 ${formatBytes(orphan.bytes)} 引擎数据（模型与运行环境）：\n${orphan.path}\n\n` +
+      "这个插件已经不在安装列表里，删掉后重新安装该插件需要重新下载。\n" +
+      "这里只动引擎数据，不会删除消息、收藏、音频与克隆样本。\n\n确定要删除吗？",
   });
   if (!ok) return false;
   try {
@@ -61,7 +62,7 @@ export function OrphanRows({
             disabled={busyId !== null}
             className="shrink-0 rounded-lg border border-[var(--ink-200)] px-2.5 py-1 text-[11px] text-[var(--seal)] transition-colors hover:border-[var(--seal)] disabled:opacity-50"
           >
-            {busyId === o.id ? "删除中…" : "删除数据"}
+            {busyId === o.id ? "删除中…" : "删除引擎数据"}
           </button>
         </li>
       ))}
@@ -111,6 +112,9 @@ export function OrphanDataDisclosure({ onChanged }: { onChanged?: () => void }) 
       </button>
       {open && (
         <div className="mt-2 rounded-xl border border-[var(--ink-200)]/70 bg-[var(--ink-100)]/25 px-3.5 py-3">
+          <p className="mb-2 text-[11px] leading-relaxed text-[var(--ink-300)]">
+            这里只是各插件下载的模型与运行环境，和「我的数据」（消息、收藏、音频、克隆样本）是两回事，删这里不影响后者。
+          </p>
           {loading && <p className="text-xs text-[var(--ink-300)]">正在统计各插件数据目录…</p>}
           {!loading && orphans && orphans.length === 0 && (
             <p className="text-xs text-[var(--ink-300)]">
