@@ -186,7 +186,7 @@ pub fn migrate_items_with_verify(
 /// 归档目标若已被占，改名存放而**不是盖上去**。
 /// 必须这样写：Windows 的 `fs::rename` 带 REPLACE 语义，目标存在时不报错而是
 /// **静默销毁旧归档**（实测就是这个 bug）——而归档是用户回退的唯一凭据。
-fn free_backup_target(backup_dir: &Path, name: &str) -> PathBuf {
+pub(crate) fn free_backup_target(backup_dir: &Path, name: &str) -> PathBuf {
     let first = backup_dir.join(name);
     if !first.exists() {
         return first;

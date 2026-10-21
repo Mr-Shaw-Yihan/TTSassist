@@ -5,7 +5,7 @@
 //
 // 路径一律向 `StoragePaths` 要，不在这里拼字面量（AGENTS.md 存储契约）。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
@@ -379,11 +379,252 @@ fn mark_storage_choice_made(app: &AppHandle, state: &AppState) -> Result<(), Str
     Ok(())
 }
 
-/// 更改「我的数据」存放位置（A2 实现）。
-/// 骨架阶段必须**报错而不是假装成功**：前端会据此提示“已搬家”，假成功会误导用户。
+// ── 搬家（更改「我的数据」位置）──────────────────────────────
+
+/// 待搬的一项：`rel` 是相对内容根的 `/` 分隔路径（同时也是备份里的归档结构）
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoveItem {
+    pub rel: String,
+    pub bytes: u64,
+}
+
+/// 搬家计划：只读扫描一次，决定搬什么、跳过什么
+#[derive(Debug, Default)]
+pub struct MovePlan {
+    pub items: Vec<MoveItem>,
+    /// 目标已有同名的项：**绝不覆盖**，原件留在旧位置
+    pub skipped: Vec<String>,
+    pub total_bytes: u64,
+}
+
+/// 搬家的内容类清单。与 migrate 的 CONTENT_* 同口径，但**不含** cache/downloads/logs：
+/// 那是可重建的临时文件，搬过去只会拖慢第一次启动（设计 D7）。
+const MOVE_FILES: [&str; 3] = [
+    paths::MESSAGES_FILE_NAME,
+    paths::FAVORITES_FILE_NAME,
+    paths::SUBTITLE_HISTORY_FILE_NAME,
+];
+const MOVE_DIRS: [&str; 3] = [
+    paths::AUDIO_DIR_NAME,
+    paths::SAMPLES_DIR_NAME,
+    paths::PLUGIN_DATA_DIR_NAME,
+];
+
+fn join_rel(root: &Path, rel: &str) -> PathBuf {
+    rel.split('/').fold(root.to_path_buf(), |p, seg| p.join(seg))
+}
+
+fn collect_rel_files(dir: &Path, prefix: &str, out: &mut Vec<(String, u64)>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let Ok(ft) = entry.file_type() else { continue };
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let rel = format!("{prefix}/{name}");
+        if ft.is_dir() {
+            collect_rel_files(&entry.path(), &rel, out);
+        } else if ft.is_file() {
+            let bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            out.push((rel, bytes));
+        }
+    }
+}
+
+/// 扫描内容根，生成搬家计划（不写任何东西）。
+/// 目标已有同名就跳过：用户的旧数据只有一份，覆盖等于销毁。
+pub fn build_move_plan(src: &Path, dst: &Path) -> MovePlan {
+    let mut found: Vec<(String, u64)> = Vec::new();
+    for name in MOVE_FILES {
+        let p = src.join(name);
+        if p.is_file() {
+            let bytes = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+            found.push((name.to_string(), bytes));
+        }
+    }
+    for name in MOVE_DIRS {
+        let p = src.join(name);
+        if p.is_dir() {
+            collect_rel_files(&p, name, &mut found);
+        }
+    }
+    found.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut plan = MovePlan::default();
+    for (rel, bytes) in found {
+        if join_rel(dst, &rel).exists() {
+            plan.skipped.push(rel);
+        } else {
+            plan.total_bytes += bytes;
+            plan.items.push(MoveItem { rel, bytes });
+        }
+    }
+    plan
+}
+
+#[derive(Debug, Default)]
+struct CopyOutcome {
+    copied: Vec<String>,
+    /// 扫描后、复制前目标被写入的项（同样不覆盖）
+    skipped: Vec<String>,
+    bytes: u64,
+}
+
+/// 逐项复制并校验字节数。任一项失败 → 删掉本次已复制的目标再报错，**源侧一律不动**。
+fn copy_content_verified(src: &Path, dst: &Path, plan: &MovePlan) -> Result<CopyOutcome, String> {
+    let mut out = CopyOutcome::default();
+    for item in &plan.items {
+        let from = join_rel(src, &item.rel);
+        let to = join_rel(dst, &item.rel);
+        if to.exists() {
+            out.skipped.push(item.rel.clone());
+            continue;
+        }
+        if let Some(parent) = to.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                rollback_copied(dst, &out.copied);
+                return Err(format!("创建目标目录失败: {e}"));
+            }
+        }
+        // 校验基准取「复制前一刻」的源大小：搬家期间应用还在写旧位置，
+        // 用扫描时的体积会因为用户发了一条消息而误判校验失败。
+        let expected = std::fs::metadata(&from).map(|m| m.len()).unwrap_or(0);
+        if let Err(e) = std::fs::copy(&from, &to) {
+            rollback_copied(dst, &out.copied);
+            return Err(format!("复制「{}」失败: {e}", item.rel));
+        }
+        let actual = std::fs::metadata(&to).map(|m| m.len()).unwrap_or(0);
+        if actual != expected {
+            let _ = std::fs::remove_file(&to);
+            rollback_copied(dst, &out.copied);
+            return Err(format!("复制校验失败，已回退：{}", item.rel));
+        }
+        out.bytes += actual;
+        out.copied.push(item.rel.clone());
+    }
+    Ok(out)
+}
+
+fn rollback_copied(dst: &Path, rels: &[String]) {
+    for rel in rels.iter().rev() {
+        let _ = std::fs::remove_file(join_rel(dst, rel));
+    }
+}
+
+/// 复制全部成功后才把原件移进备份。失败只记日志：数据已经在新位置了，
+/// 反过来报错只会让用户以为搬家失败而重复操作。
+fn archive_sources(src: &Path, backup: &Path, rels: &[String]) {
+    for rel in rels {
+        let from = join_rel(src, rel);
+        let to = join_rel(backup, rel);
+        let Some(parent) = to.parent() else { continue };
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            log_warn!("搬家原件入备份失败（数据已在新位置，原件保留）: {e}");
+            continue;
+        }
+        let name = to
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        // 同日多次搬家时备份里可能已有同名项：改名存放，绝不覆盖旧归档
+        let target = migrate::free_backup_target(parent, &name);
+        if let Err(e) = move_file(&from, &target) {
+            log_warn!("搬家原件入备份失败（数据已在新位置，原件保留）: {e}");
+        }
+    }
+}
+
+/// 优先 rename；跨卷失败时退回复制 + 校验 + 删源（与 migrate 的归档同语义）
+fn move_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    let expected = std::fs::metadata(from)?.len();
+    std::fs::copy(from, to)?;
+    let actual = std::fs::metadata(to)?.len();
+    if actual != expected {
+        let _ = std::fs::remove_file(to);
+        return Err(std::io::Error::other("跨卷复制校验失败"));
+    }
+    std::fs::remove_file(from)
+}
+
+/// 搬家的核心：复制 →（落指针）→ 原件归档。
+/// `after_copy` 在复制全部校验通过后、动原件之前执行（生产路径用它写 `storage.json`）。
+fn move_content_with(
+    src: &Path,
+    dst: &Path,
+    backup: &Path,
+    after_copy: impl FnOnce() -> Result<(), String>,
+) -> Result<StorageMoveReport, String> {
+    let plan = build_move_plan(src, dst);
+    let outcome = copy_content_verified(src, dst, &plan)?;
+    after_copy()?;
+    archive_sources(src, backup, &outcome.copied);
+
+    let mut skipped = plan.skipped;
+    skipped.extend(outcome.skipped);
+    Ok(StorageMoveReport {
+        moved_bytes: outcome.bytes,
+        moved_files: outcome.copied.len(),
+        skipped,
+        backup_dir: backup.display().to_string(),
+        need_restart: true,
+    })
+}
+
+/// 测试便捷入口（生产路径要写指针，用 `move_content_with`）
+#[cfg(test)]
+fn move_content(src: &Path, dst: &Path, backup: &Path) -> Result<StorageMoveReport, String> {
+    move_content_with(src, dst, backup, || Ok(()))
+}
+
+/// 更改「我的数据」存放位置：可写校验 → 复制校验 → 写指针 → 旧处转备份。
+///
+/// 两次搬家（尤其同一天）会复用同一个 `.migrated-backup-<stamp>` 目录，靠
+/// `free_backup_target` 给撞名附件改名；被跳过的项留在旧位置，绝不覆盖。
 #[tauri::command]
-pub async fn set_content_root(_path: String, _app: AppHandle) -> Result<StorageMoveReport, String> {
-    Err("更改数据位置功能尚未就绪，请稍后重试".to_string())
+pub async fn set_content_root(path: String, app: AppHandle) -> Result<StorageMoveReport, String> {
+    let target = PathBuf::from(path.trim());
+    if target.as_os_str().is_empty() {
+        return Err("请选择要存放「我的数据」的文件夹".to_string());
+    }
+    let paths = app.state::<StoragePaths>().inner().clone();
+    let src = paths.content_root.clone();
+    let pointer_file = paths.pointer_file();
+    let backup_root = paths.backup_dir(&chrono::Utc::now().format("%Y%m%d").to_string());
+
+    let report = tauri::async_runtime::spawn_blocking(move || {
+        if !paths::probe_writable(&target) {
+            return Err(format!("目标位置不可写，请换一个文件夹：{}", target.display()));
+        }
+        // probe 会建目录，这时 canonicalize 才拿得到真实路径
+        let canon_src = std::fs::canonicalize(&src).unwrap_or_else(|_| src.clone());
+        let canon_dst = std::fs::canonicalize(&target).unwrap_or_else(|_| target.clone());
+        if canon_src == canon_dst {
+            // 选的就是当前位置：只记下选择，不搬任何东西
+            return Ok(StorageMoveReport { need_restart: false, ..Default::default() });
+        }
+        if canon_dst.starts_with(&canon_src) || canon_src.starts_with(&canon_dst) {
+            return Err("新位置不能与当前位置互相包含，请选择另一个文件夹".to_string());
+        }
+        move_content_with(&src, &target, &backup_root, || {
+            let pointer = paths::pointer_json(&target, Some(&src.display().to_string()));
+            crate::storage::atomic::atomic_write(&pointer_file, pointer.as_bytes())
+                .map_err(|e| format!("写存储指针失败（数据已复制到新位置，可重试）: {e}"))
+        })
+    })
+    .await
+    .map_err(|e| format!("搬家任务失败: {e}"))??;
+
+    let state = app.state::<AppState>();
+    mark_storage_choice_made(&app, state.inner())?;
+    let mb = report.moved_bytes as f64 / 1024.0 / 1024.0;
+    log_info!(
+        "「我的数据」位置更新：{} 个文件 / {:.1} MB，原件在 {}",
+        report.moved_files,
+        mb,
+        report.backup_dir
+    );
+    Ok(report)
 }
 
 /// 删除某个「插件已不在」的残留引擎数据目录，返回释放的字节数。
@@ -561,5 +802,98 @@ mod tests {
         let r = build_report_with_drives(&p, &[], false, Vec::new());
         assert_eq!(r.legacy_exe_data_bytes, 0);
         assert!(!r.storage_choice_made);
+    }
+
+    #[test]
+    fn move_plan_列出待搬项且跳过目标已存在() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("messages.json"), b"[1]").unwrap();
+        std::fs::write(src.path().join("favorites.json"), b"[7]").unwrap();
+        std::fs::create_dir_all(src.path().join("audio")).unwrap();
+        std::fs::write(src.path().join("audio").join("a.wav"), b"x").unwrap();
+        std::fs::write(dst.path().join("favorites.json"), b"[9]").unwrap(); // 目标已有 → 不得覆盖
+
+        let plan = build_move_plan(src.path(), dst.path());
+        assert!(plan.items.iter().any(|i| i.rel == "messages.json"));
+        assert!(plan.items.iter().any(|i| i.rel == "audio/a.wav"));
+        assert!(plan.skipped.iter().any(|s| s.contains("favorites.json")), "目标已存在的文件必须跳过而非覆盖");
+        assert!(plan.total_bytes > 0);
+    }
+
+    #[test]
+    fn move_plan_源不存在时为空且不报错() {
+        let dst = tempfile::tempdir().unwrap();
+        let plan = build_move_plan(std::path::Path::new(r"Z:\不存在的目录"), dst.path());
+        assert!(plan.items.is_empty());
+        assert!(plan.total_bytes == 0);
+    }
+
+    #[test]
+    fn move_plan_不搬临时文件() {
+        // cache/downloads/logs 是可重建的临时文件，搬家时不该跟着走（设计 D7）
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        for dir in ["cache", "downloads", "logs", "audio"] {
+            std::fs::create_dir_all(src.path().join(dir)).unwrap();
+            std::fs::write(src.path().join(dir).join("f.bin"), b"x").unwrap();
+        }
+        let plan = build_move_plan(src.path(), dst.path());
+        let rels: Vec<&str> = plan.items.iter().map(|i| i.rel.as_str()).collect();
+        assert!(rels.contains(&"audio/f.bin"));
+        for temp in ["cache/f.bin", "downloads/f.bin", "logs/f.bin"] {
+            assert!(!rels.contains(&temp), "临时文件不应搬：{temp}");
+        }
+    }
+
+    #[test]
+    fn move_content_复制校验后原件转备份() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let backup = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("messages.json"), b"[1,2]").unwrap();
+        std::fs::create_dir_all(src.path().join("audio")).unwrap();
+        std::fs::write(src.path().join("audio").join("a.wav"), b"abc").unwrap();
+
+        let report = move_content(src.path(), dst.path(), backup.path()).unwrap();
+
+        assert_eq!(report.moved_files, 2);
+        assert_eq!(report.moved_bytes, 8, "5 字节 messages.json + 3 字节 a.wav");
+        assert!(dst.path().join("messages.json").exists());
+        assert!(dst.path().join("audio").join("a.wav").exists());
+        assert!(!src.path().join("messages.json").exists(), "搬完原件应从旧位置移走");
+        assert!(backup.path().join("messages.json").exists(), "原件进备份，可回退");
+        assert!(backup.path().join("audio").join("a.wav").exists());
+    }
+
+    #[test]
+    fn move_content_目标已有同名绝不覆盖() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let backup = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("favorites.json"), b"new").unwrap();
+        std::fs::write(dst.path().join("favorites.json"), b"old").unwrap();
+
+        let report = move_content(src.path(), dst.path(), backup.path()).unwrap();
+
+        assert_eq!(report.moved_files, 0);
+        assert_eq!(std::fs::read(dst.path().join("favorites.json")).unwrap(), b"old", "目标已有内容不得被覆盖");
+        assert!(src.path().join("favorites.json").exists(), "跳过项留在原处，不塞进备份");
+        assert!(report.skipped.iter().any(|s| s == "favorites.json"));
+    }
+
+    #[test]
+    fn move_content_重复执行幂等() {
+        let src = tempfile::tempdir().unwrap();
+        let dst = tempfile::tempdir().unwrap();
+        let backup = tempfile::tempdir().unwrap();
+        std::fs::write(src.path().join("messages.json"), b"[1]").unwrap();
+
+        let first = move_content(src.path(), dst.path(), backup.path()).unwrap();
+        let second = move_content(src.path(), dst.path(), backup.path()).unwrap();
+
+        assert_eq!(first.moved_files, 1);
+        assert_eq!(second.moved_files, 0, "第二次没有可搬的东西");
+        assert_eq!(std::fs::read(dst.path().join("messages.json")).unwrap(), b"[1]");
     }
 }

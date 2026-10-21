@@ -26,6 +26,12 @@ pub const CACHE_DIR_NAME: &str = "cache";
 pub const LOGS_DIR_NAME: &str = "logs";
 pub const PLUGIN_DATA_DIR_NAME: &str = "plugin-data";
 
+/// 内容根下的记录类文件名：它们与 audio/ 必须同根（删消息是按引用计数删音频的）。
+/// 搬家/回迁/备份识别共用这份字面量，不在业务代码里各写一遍。
+pub const MESSAGES_FILE_NAME: &str = "messages.json";
+pub const FAVORITES_FILE_NAME: &str = "favorites.json";
+pub const SUBTITLE_HISTORY_FILE_NAME: &str = "subtitle_history.json";
+
 /// 由内容根取子目录（业务代码只拿到 `&Path` 时用它们，不要自己 join 字面量）
 pub fn audio_dir_in(content_root: &Path) -> PathBuf { content_root.join(AUDIO_DIR_NAME) }
 pub fn samples_dir_in(content_root: &Path) -> PathBuf { content_root.join(SAMPLES_DIR_NAME) }
