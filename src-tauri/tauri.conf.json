@@ -83,6 +83,11 @@
         "headerImage": "./windows/installer-header.bmp",
         "sidebarImage": "./windows/installer-sidebar.bmp",
         "installerHooks": "./windows/installer-hooks.nsh"
+      },
+      "wix": {
+        "language": [
+          "zh-CN"
+        ]
       }
     }
   }
