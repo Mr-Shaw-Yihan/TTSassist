@@ -5,6 +5,30 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VoiceAssist</title>
+    <script>
+      // 首帧皮肤（必须同步、且在样式之前）：真实主题在后端 settings.json 里，要异步加载才知道，
+      // 而 CSS 的浅色变量挂在 :root，于是夜间用户启动时会先闪一帧日间。这里同步读
+      // settingsStore 记下的 localStorage 副本，让首帧就是正确皮肤。
+      // 判定规则与 src/utils/theme.ts 的 resolveInitialTheme 保持一致（改了要同步改，单测会盯键名）。
+      (function () {
+        var raw = null;
+        try {
+          raw = localStorage.getItem("va-theme");
+        } catch (e) {
+          raw = null;
+        }
+        var value = (raw || "").trim();
+        var theme = value === "dark" ? "dark" : "light";
+        if (value !== "dark" && value.charAt(0) === "{") {
+          try {
+            if (JSON.parse(value).theme === "dark") theme = "dark";
+          } catch (e) {
+            /* 坏数据回落浅色 */
+          }
+        }
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
   </head>
 
   <body>

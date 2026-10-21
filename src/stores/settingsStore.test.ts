@@ -2,7 +2,7 @@
 // 断言 patch 后本地态与调用参数正确；另设「Settings 字段完整性」测试，
 // 挡住「后端加字段前端忘同步」那一类回归（v1.8.2 事故的前端翻版）。
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useSettingsStore } from "./settingsStore";
 import type { Settings } from "../types";
 
@@ -159,5 +159,65 @@ describe("settingsStore", () => {
     expect(missing).toEqual([]);
     // 顺序无关的总数一致性：types 多出清单外字段同样视为失同步
     expect(keys.length).toBe(EXPECTED_KEYS.length);
+  });
+});
+
+// B2 皮肤启动即应用：patch theme 必须同步写 localStorage，供 index.html 的内联同步脚本
+// 下次启动首帧读取（真实 settings.json 要异步加载，赶不上首帧）。
+describe("settingsStore 皮肤持久化", () => {
+  /** node 环境没有 localStorage，用最小实现顶上 */
+  const store = new Map<string, string>();
+  const fakeStorage = {
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => void store.set(k, v),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+    key: (i: number) => [...store.keys()][i] ?? null,
+    get length() {
+      return store.size;
+    },
+  };
+
+  beforeEach(() => {
+    store.clear();
+    vi.stubGlobal("localStorage", fakeStorage);
+    vi.clearAllMocks();
+    useSettingsStore.setState({ settings: null });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("patch theme 成功后立刻写入 localStorage 的 va-theme", async () => {
+    const s = { ...makeSettings(), theme: "dark" };
+    mockedUpdate.mockResolvedValueOnce(s);
+    await useSettingsStore.getState().patch("theme", "dark");
+    expect(store.get("va-theme")).toBe("dark");
+  });
+
+  it("patch theme 切回 light 时同步改写为 light", async () => {
+    store.set("va-theme", "dark");
+    const s = { ...makeSettings(), theme: "light" };
+    mockedUpdate.mockResolvedValueOnce(s);
+    await useSettingsStore.getState().patch("theme", "light");
+    expect(store.get("va-theme")).toBe("light");
+  });
+
+  it("patch 后端失败时不写 localStorage（避免记住没生效的皮肤）", async () => {
+    mockedUpdate.mockRejectedValueOnce(new Error("写入失败"));
+    await expect(useSettingsStore.getState().patch("theme", "dark")).rejects.toThrow("写入失败");
+    expect(store.has("va-theme")).toBe(false);
+  });
+
+  it("setSettings 载入已存设置时也同步一次皮肤（覆盖升级后首次启动的路径）", () => {
+    useSettingsStore.getState().setSettings({ ...makeSettings(), theme: "dark" });
+    expect(store.get("va-theme")).toBe("dark");
+  });
+
+  it("patch 其他键不碰 localStorage", async () => {
+    const s = makeSettings();
+    mockedUpdate.mockResolvedValueOnce({ ...s, playback_volume: 0.5 });
+    await useSettingsStore.getState().patch("playback_volume", 0.5);
+    expect(store.size).toBe(0);
   });
 });
