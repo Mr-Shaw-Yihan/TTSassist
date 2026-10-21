@@ -27,10 +27,8 @@ use crate::storage::types::Settings;
 
 /// 解析三根（配置 / 内容 / 插件），路径来源收口到 `storage::paths`。
 ///
-/// ⚠ 行为不变约束：在迁移能力（`storage::migrate`，存储计划 Task 4）落地前，
-/// `exe_default` 传的是 **配置根**，即内容根默认 == 配置根 —— 本函数今天只收口“谁来定路径”，
-/// 不搬任何数据。翻默认（内容根 → `<exe>\data`）单独放在 Task 4 Step 6，与迁移提示同批发布；
-/// 否则用户会看到“消息/音频全空”（数据其实还在 AppData），等于我们自造一场数据丢失事故。
+/// 内容根默认 = 配置根（`%APPDATA%\com.voiceassist.app`），用户可用 `VA_STORAGE_DIR`
+/// 或 `storage.json` 指针自选位置；`<exe>\data` 只是 1.9.0 测试版的历史来源（见 A3 回迁）。
 fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths {
     use std::path::PathBuf;
     use storage::paths::*;
@@ -52,11 +50,12 @@ fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths
         .map(|a| PathBuf::from(a).join("com.voiceassist.app").join("data"))
         .unwrap_or_else(|| exe_dir.join("data-fallback"));
 
-    // 内容根默认跟随安装位置（存储计划 Task 4 Step 6：迁移能力、界面与急救程序都就位了才翻）。
-    // 装到不可写目录时 decide_content_root 会回退 LOCALAPPDATA 并置 fallback，界面必须向用户说明。
+    // 内容根默认 = 配置根（%APPDATA%）：数据不再放安装目录，覆盖升级/卸载不会连带删掉。
+    // 用户自选位置走 storage.json 指针；装到不可写目录时回退 LOCALAPPDATA 并置 fallback。
     let (content_root, fallback) = decide_content_root(
         env_dir,
         pointer,
+        Some(config_root.clone()),
         exe_dir.join("data"),
         local_fallback,
         &probe_writable,

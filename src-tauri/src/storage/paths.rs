@@ -122,11 +122,16 @@ impl StoragePaths {
     }
 }
 
-/// 决定内容根：环境变量 > 指针文件 > <exe>\data；被选位置不可写则回退 fallback。
+/// 决定内容根：环境变量 > 指针文件 > 配置根（新默认）> `<exe>\data`（仅历史兜底）；
+/// 被选位置不可写则回退 fallback。
+///
+/// `<exe>\data` 自 1.9.0 起**不再是默认落点**：数据在安装目录里会随卸载一起被删。
+/// 它只在 `default_root` 缺失（非正常启动路径）时兜底，正常启动总会传配置根。
 /// `writable` 注入以便单测（真实实现是 `probe_writable`）。
 pub fn decide_content_root(
     env_dir: Option<PathBuf>,
     pointer: Option<PathBuf>,
+    default_root: Option<PathBuf>,
     exe_default: PathBuf,
     fallback: PathBuf,
     writable: &dyn Fn(&Path) -> bool,
@@ -137,6 +142,9 @@ pub fn decide_content_root(
         return if writable(&p) { (p, false) } else { (fallback, true) };
     }
     if let Some(p) = pointer.filter(|p| !p.as_os_str().is_empty()) {
+        return if writable(&p) { (p, false) } else { (fallback, true) };
+    }
+    if let Some(p) = default_root.filter(|p| !p.as_os_str().is_empty()) {
         return if writable(&p) { (p, false) } else { (fallback, true) };
     }
     if writable(&exe_default) {
@@ -231,10 +239,29 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn decide_content_root_无env无指针时默认等于配置根() {
+        let cfg = PathBuf::from(r"C:\Users\u\AppData\Roaming\com.voiceassist.app");
+        let exe_default = PathBuf::from(r"C:\exe\data");
+        let fallback = PathBuf::from(r"C:\Users\u\AppData\Local\com.voiceassist.app\data");
+        let (root, used_fallback) = decide_content_root(None, None, Some(cfg.clone()), exe_default, fallback, &|_| true);
+        assert_eq!(root, cfg, "默认落点必须是配置根（%APPDATA%），不再是 <exe>\\data");
+        assert!(!used_fallback);
+    }
+
+    #[test]
+    fn decide_content_root_指针优先于默认() {
+        let cfg = PathBuf::from(r"C:\cfg");
+        let picked = PathBuf::from(r"D:\VoiceAssistData");
+        let (root, _) = decide_content_root(None, Some(picked.clone()), Some(cfg), PathBuf::from(r"C:\exe\data"), PathBuf::from(r"C:\fb"), &|_| true);
+        assert_eq!(root, picked, "用户自选位置（指针）最高优先（仅次于 env）");
+    }
+
+    #[test]
     fn 内容根优先级_环境变量高于指针高于默认() {
         let (root, fb) = decide_content_root(
             Some(PathBuf::from("E:\\env")),
             Some(PathBuf::from("D:\\pointer")),
+            Some(PathBuf::from("C:\\default")),
             PathBuf::from("C:\\exe\\data"),
             PathBuf::from("C:\\fallback"),
             &|_| true,
@@ -245,6 +272,7 @@ mod tests {
         let (root, fb) = decide_content_root(
             None,
             Some(PathBuf::from("D:\\pointer")),
+            Some(PathBuf::from("C:\\default")),
             PathBuf::from("C:\\exe\\data"),
             PathBuf::from("C:\\fallback"),
             &|_| true,
@@ -255,11 +283,12 @@ mod tests {
         let (root, _) = decide_content_root(
             None,
             None,
+            Some(PathBuf::from("C:\\default")),
             PathBuf::from("C:\\exe\\data"),
             PathBuf::from("C:\\fallback"),
             &|_| true,
         );
-        assert_eq!(root, PathBuf::from("C:\\exe\\data"));
+        assert_eq!(root, PathBuf::from("C:\\default"), "默认 = 配置根，不是安装目录");
     }
 
     #[test]
@@ -267,6 +296,7 @@ mod tests {
         let (root, fb) = decide_content_root(
             None,
             Some(PathBuf::from("E:\\gone")),
+            None,
             PathBuf::from("C:\\exe\\data"),
             PathBuf::from("C:\\Users\\x\\AppData\\Local\\com.voiceassist.app\\data"),
             &|p: &Path| p != Path::new("E:\\gone"),
