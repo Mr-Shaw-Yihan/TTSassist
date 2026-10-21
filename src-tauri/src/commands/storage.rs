@@ -604,12 +604,12 @@ pub fn pull_back_legacy_if_needed(paths: &StoragePaths) -> Option<String> {
     match move_content_with(exe_data, &paths.content_root, &backup, || Ok(())) {
         Ok(r) if r.moved_files > 0 => {
             let mb = r.moved_bytes as f64 / 1024.0 / 1024.0;
-            let text = format!(
+            let notice = format!(
                 "已把 1.9.0 测试版放在安装目录的消息与音频迁回默认位置（{} 个文件 / {:.1} MB），原件保留在 {}",
                 r.moved_files, mb, r.backup_dir
             );
-            log_info!("{text}");
-            Some(text)
+            log_info!("{notice}");
+            Some(notice)
         }
         Ok(_) => None,
         Err(e) => {

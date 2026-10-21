@@ -396,13 +396,13 @@ pub fn sweep_retired_plugins(plugins_root: &Path, plugin_data_root: &Path) -> Op
     if removed_ids.is_empty() {
         return None; // 目录早已不在（只清了注册表残留）时不打扰用户
     }
-    let text = format!(
+    let notice = format!(
         "已移除本地引擎 {}（正在重新设计，后续版本回归），释放 {:.1} MB",
         removed_ids.join(" / "),
         released as f64 / 1024.0 / 1024.0
     );
-    log_info!("[插件清理] {text}");
-    Some(text)
+    log_info!("[插件清理] {notice}");
+    Some(notice)
 }
 
 #[cfg(test)]
