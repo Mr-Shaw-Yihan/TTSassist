@@ -18,6 +18,7 @@ import { SubtitlePage } from "./components/Subtitle/SubtitlePage";
 import { SubtitleWindow } from "./components/Subtitle/SubtitleWindow";
 import { RemotePage } from "./components/Remote/RemotePage";
 import { UpdateDialog } from "./components/Settings/UpdateDialog";
+import { StorageFirstRunDialog } from "./components/Storage/StorageFirstRunDialog";
 import { useSettingsStore } from "./stores/settingsStore";
 import { useUpdateStore, shouldShowUpdateDot } from "./stores/updateStore";
 import { usePluginUpdateStore } from "./stores/pluginUpdateStore";
@@ -636,6 +637,9 @@ function App() {
       <TexDefs />
       <ToastHost />
       <ConfirmDialogHost />
+      {/* 首启询问「我的数据」存放位置：组件自管 pending 判定，故不传 props。
+          挂在皮肤 effect 之后、Tab 内容之前——嵌进页签里会在切页时被卸载，首启询问就丢了 */}
+      <StorageFirstRunDialog />
       {/* 自定义标题栏（系统标题栏已关）：品牌字 + 窗口控制，品牌区可拖拽移动窗口 */}
       <header
         data-tauri-drag-region
