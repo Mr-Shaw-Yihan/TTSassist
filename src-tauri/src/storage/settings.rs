@@ -92,6 +92,8 @@ pub fn load_settings(config_dir: &Path) -> Settings {
                 .and_then(|x| serde_json::from_value::<std::collections::HashMap<String, std::collections::HashMap<String, String>>>(x.clone()).ok())
                 .unwrap_or(default.fx_params),
             storage_choice_made: v.get("storage_choice_made").and_then(|x| x.as_bool()).unwrap_or(default.storage_choice_made),
+            window_width: v.get("window_width").and_then(|x| x.as_u64()).map(|x| x as u32).unwrap_or(default.window_width),
+            window_height: v.get("window_height").and_then(|x| x.as_u64()).map(|x| x as u32).unwrap_or(default.window_height),
         },
         Err(_) => default,
     };
@@ -220,6 +222,9 @@ pub fn update_setting(config_dir: &Path, key: &str, value: serde_json::Value) ->
         "fx_order" => if let Ok(list) = serde_json::from_value::<Vec<String>>(value.clone()) { s.fx_order = list },
         "fx_params" => if let Ok(map) = serde_json::from_value::<std::collections::HashMap<String, std::collections::HashMap<String, String>>>(value.clone()) { s.fx_params = map },
         "storage_choice_made" => if let Some(v) = value.as_bool() { s.storage_choice_made = v },
+        // 窗口尺寸记忆（物理像素，前端 onResized 防抖写入；0 保留为“无记忆”）
+        "window_width" => if let Some(v) = value.as_f64() { s.window_width = v as u32 },
+        "window_height" => if let Some(v) = value.as_f64() { s.window_height = v as u32 },
         _ => {} // 未知键忽略
     }
     save_settings(config_dir, &s)?;
@@ -443,6 +448,27 @@ mod tests {
         let back = update_setting(&d, "storage_choice_made", serde_json::json!(true)).unwrap();
         assert!(back.storage_choice_made);
         assert!(load_settings(&d).storage_choice_made, "选择结果要落盘");
+    }
+
+    #[test]
+    fn 窗口尺寸记忆可读写且非法值不生效() {
+        let dir = tempdir().unwrap();
+        let d = dir.path().to_path_buf();
+        let s = Settings::default();
+        assert_eq!((s.window_width, s.window_height), (0, 0), "缺省=无记忆");
+
+        update_setting(&d, "window_width", serde_json::json!(880)).unwrap();
+        let back = update_setting(&d, "window_height", serde_json::json!(1120)).unwrap();
+        assert_eq!((back.window_width, back.window_height), (880, 1120));
+        let loaded = load_settings(&d);
+        assert_eq!(
+            (loaded.window_width, loaded.window_height),
+            (880, 1120),
+            "重启后仍能读到"
+        );
+
+        let back = update_setting(&d, "window_width", serde_json::json!("宽")).unwrap();
+        assert_eq!(back.window_width, 880, "非法类型不生效");
     }
 
     #[test]

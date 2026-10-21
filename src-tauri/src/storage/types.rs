@@ -200,6 +200,13 @@ pub struct Settings {
     /// 老用户升级时缺省 false → 首启会问一次；自选/确认默认两条路径都置 true。
     #[serde(default)]
     pub storage_choice_made: bool,
+    // ── 窗口尺寸记忆（物理像素，0 = 无记忆） ──────────
+    /// 主窗口上次的宽（前端 innerSize 物理像素；0 = 用配置文件默认尺寸）
+    #[serde(default)]
+    pub window_width: u32,
+    /// 主窗口上次的高（同上）
+    #[serde(default)]
+    pub window_height: u32,
 }
 
 impl Default for Settings {
@@ -256,6 +263,8 @@ impl Default for Settings {
             fx_order: Vec::new(),
             fx_params: HashMap::new(),
             storage_choice_made: false,
+            window_width: 0,
+            window_height: 0,
         }
     }
 }

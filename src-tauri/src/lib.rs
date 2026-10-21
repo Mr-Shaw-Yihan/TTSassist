@@ -18,6 +18,7 @@ pub mod sync;
 pub mod tray;
 pub mod tts;
 pub mod win32;
+pub mod window_size;
 
 use std::sync::Mutex;
 use tauri::Manager;
@@ -187,6 +188,10 @@ pub fn run() {
                 // T-G：release 下前端首帧早于本 init，startup 埋点若已暂存则在此补写落盘
                 crate::perf::drain_startup_pending();
             }
+
+            // 主窗以 visible=false 创建：先按记忆尺寸定形再显示，避免“先竖版再变形”的跳动。
+            // 尺寸由前端在窗口变化后写入设置（物理像素），这里只负责启动首帧应用。
+            window_size::show_main_with_remembered_size(app.handle(), &settings);
 
             // asset: 协议必须放行内容根，否则 `<audio src>` 会被作用域直接拒掉，
             // 症状是“点了没声、按钮还卡在播放中”——翻默认后音频已经不住在 $APPDATA 里了
