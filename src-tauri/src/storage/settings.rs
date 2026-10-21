@@ -437,6 +437,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let d = dir.path().to_path_buf();
         assert!(!load_settings(&d).storage_choice_made, "缺省未选，首启应弹窗");
+        // 非法类型不得让首启弹窗“被确认”
+        let back = update_setting(&d, "storage_choice_made", serde_json::json!("yes")).unwrap();
+        assert!(!back.storage_choice_made, "非法值不生效");
         let back = update_setting(&d, "storage_choice_made", serde_json::json!(true)).unwrap();
         assert!(back.storage_choice_made);
         assert!(load_settings(&d).storage_choice_made, "选择结果要落盘");
