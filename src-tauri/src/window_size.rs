@@ -27,6 +27,17 @@ pub fn initial_window_size(
     ))
 }
 
+/// 首帧底色（RGB）：窗口 show 到 WebView 加载完 index.html 之间会露出 WebView2 的
+/// 默认背景（白），夜间用户因此先闪一帧日间。这里给出与记忆皮肤一致的底色，
+/// 与 index.html 内联脚本、前端 CSS 的 body 底色三者同值（B2 真机实测）。
+pub fn startup_background_rgb(theme: &str) -> (u8, u8, u8) {
+    if theme == "dark" {
+        (28, 27, 31)
+    } else {
+        (250, 248, 244)
+    }
+}
+
 /// 在显示前把记忆尺寸应用到主窗口，再显示。由 `run()` 的 setup 调用。
 /// 主窗以 `visible=false` 创建，因此这里不会出现“先按默认尺寸露脸再变形”。
 pub fn show_main_with_remembered_size(app: &tauri::AppHandle, settings: &Settings) {
@@ -63,6 +74,11 @@ pub fn show_main_with_remembered_size(app: &tauri::AppHandle, settings: &Setting
         if let Err(e) = win.set_size(tauri::PhysicalSize::new(w, h)) {
             log_warn!("应用记忆窗口尺寸失败: {e}");
         }
+    }
+    // 首帧底色：必须在 show 之前设，否则夜间用户会先看到 WebView2 的默认白底
+    let (r, g, b) = startup_background_rgb(&settings.theme);
+    if let Err(e) = win.set_background_color(Some(tauri::window::Color(r, g, b, 255))) {
+        log_warn!("设置首帧背景色失败: {e}");
     }
     if let Err(e) = win.show() {
         log_warn!("显示主窗口失败: {e}");
@@ -126,5 +142,14 @@ mod tests {
             initial_window_size(&remembered(4000, 3000), (360, 540), (1920, 1080)),
             Some((1920, 1080))
         );
+    }
+
+    #[test]
+    fn 首帧底色跟随记忆皮肤() {
+        // 夜间用户启动时窗口 show 到 WebView 加载完 index.html 之间会露出 WebView2 默认白底，
+        // 表现为「先闪一帧日间」。底色必须与 index.html 内联脚本、前端 CSS 的 body 底色同值。
+        assert_eq!(startup_background_rgb("dark"), (28, 27, 31));
+        assert_eq!(startup_background_rgb("light"), (250, 248, 244));
+        assert_eq!(startup_background_rgb(""), (250, 248, 244), "缺省/坏值回落日间底色");
     }
 }
