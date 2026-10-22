@@ -3,8 +3,8 @@
 // 设计文档 §六.3。挂在 `<Section title="存储">` 里即可——Section 收起时不渲染 children，
 // 所以体积扫描（递归求和，大目录可能数万文件）天然延迟到用户展开时才跑。
 //
-// 口径（D7）：界面分「配置」与「我的数据」两区；可清理的只有下载残留、日志与
-// 可重建的临时内容，消息 / 收藏 / 音频 / 克隆样本永远不在清理范围内。
+// 口径（D7）：界面分「配置」与「我的数据」两区；消息 / 收藏 / 音频 / 克隆样本是珍贵资产，
+// 界面不提供任何批量删除入口（曾有的一个清理按钮经用户裁定移除，见看板 10-23）。
 //
 // 诚实原则：界面只放后端真能执行的按钮。Conflict（新旧两处都有数据）在 1.9.0 没有对应的
 // 处置命令，因此这里只给说明与两个「打开位置」，不做点了没反应的「合并」按钮。
@@ -12,7 +12,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
-  cleanupStorageTemp,
   getStorageReport,
   migrateStorageNow,
   pickDirectory,
@@ -32,10 +31,6 @@ const BTN_PRIMARY =
   "rounded-lg bg-[var(--amber-500)] px-3 py-1.5 text-xs font-medium text-[var(--paper)] transition-opacity hover:opacity-90 disabled:opacity-50";
 const AMBER_NOTE =
   "rounded-lg border border-[var(--amber-500)]/40 bg-[var(--amber-500)]/10 px-3 py-2 text-[11px] leading-relaxed text-[var(--amber-600)]";
-
-/** 清理二次确认的固定文案：必须让用户一眼看到珍贵资产不会被删 */
-export const CLEANUP_CONFIRM_MESSAGE =
-  "将清理下载残留、日志与可重建的临时文件。\n\n不会删除消息、收藏、音频与克隆样本。";
 
 /** 后端的 cache 桶在界面上叫「临时文件」，避免用户误以为它和内容数据有关 */
 export function displayBucketLabel(kind: string, label: string): string {
@@ -76,27 +71,6 @@ export async function changeContentRootFlow(deps: ChangeContentRootDeps): Promis
     );
   } catch (e) {
     deps.notify(`更改位置失败：${e}`, "err");
-  } finally {
-    deps.setBusy(null);
-    deps.reload();
-  }
-}
-
-export interface CleanupTempDeps extends FlowDeps {
-  confirmCleanup: () => Promise<boolean>;
-  clean: () => Promise<number>;
-}
-
-/** 「清理临时文件」编排：确认 → 清理 → 提示释放体积 → 重新统计 */
-export async function cleanupTempFlow(deps: CleanupTempDeps): Promise<void> {
-  if (!(await deps.confirmCleanup())) return;
-
-  deps.setBusy("正在清理…");
-  try {
-    const bytes = await deps.clean();
-    deps.notify(bytes > 0 ? `已清理 ${formatBytes(bytes)} 临时文件` : "没有可清理的临时文件");
-  } catch (e) {
-    deps.notify(`清理失败：${e}`, "err");
   } finally {
     deps.setBusy(null);
     deps.reload();
@@ -149,7 +123,6 @@ export interface StoragePanelViewProps {
   report: StorageReport;
   busy: string | null;
   onChangeLocation: () => void;
-  onCleanup: () => void;
   onReload: () => void;
   onMigrate: () => void;
   onOpenPath: (path: string) => void;
@@ -160,7 +133,6 @@ export function StoragePanelView({
   report,
   busy,
   onChangeLocation,
-  onCleanup,
   onReload,
   onMigrate,
   onOpenPath,
@@ -246,9 +218,6 @@ export function StoragePanelView({
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-[10px] font-medium uppercase tracking-[0.25em] text-[var(--ink-300)]">各类占用</h3>
           <div className="flex gap-2">
-            <button onClick={onCleanup} disabled={!!busy} className={BTN_GHOST}>
-              清理临时文件
-            </button>
             <button onClick={onReload} disabled={!!busy} className={BTN_GHOST}>
               重新统计
             </button>
@@ -271,9 +240,6 @@ export function StoragePanelView({
             ))}
           </ul>
         )}
-        <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--ink-300)]">
-          「清理临时文件」只清理下载残留、日志与可重建的临时内容；不会删除消息、收藏、音频与克隆样本。
-        </p>
       </div>
 
       {report.orphans.length > 0 && (
@@ -359,22 +325,6 @@ export function StoragePanel() {
     });
   }
 
-  function doCleanup() {
-    void cleanupTempFlow({
-      confirmCleanup: () =>
-        confirm({
-          title: "清理临时文件",
-          message: CLEANUP_CONFIRM_MESSAGE,
-          confirmText: "开始清理",
-          danger: true,
-        }),
-      clean: cleanupStorageTemp,
-      setBusy,
-      notify,
-      reload: refresh,
-    });
-  }
-
   if (loading) {
     return <p className="text-xs text-[var(--ink-300)]">正在统计各目录占用…（首次可能慢一些）</p>;
   }
@@ -395,7 +345,6 @@ export function StoragePanel() {
       report={report}
       busy={busy}
       onChangeLocation={doChangeLocation}
-      onCleanup={doCleanup}
       onReload={refresh}
       onMigrate={() => void doMigrate()}
       onOpenPath={(path) => void revealItemInDir(path).catch(() => toast("打开位置失败", "err"))}

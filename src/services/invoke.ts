@@ -674,8 +674,3 @@ export async function migrateStorageNow(): Promise<string> {
 export async function takeStorageNotice(): Promise<string | null> {
   return invoke<string | null>("take_storage_notice");
 }
-
-/** 清理可重建的临时文件（下载残留 / 日志 / 临时内容），返回释放字节数 */
-export async function cleanupStorageTemp(): Promise<number> {
-  return invoke<number>("cleanup_storage_temp");
-}
