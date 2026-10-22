@@ -27,6 +27,16 @@ interface MmAccountVoice {
   created_time?: string;
 }
 
+/** 把本应用保存过的克隆音色排到列表顶部，其余保持原序。稳定排序，不改入参。
+ *  用户裁定（10-23）：音色管理列表里自己存过的克隆音色要一眼能看到。 */
+export function sortSavedVoicesFirst<T extends { voice_id: string }>(
+  list: T[],
+  savedIds: string[],
+): T[] {
+  const saved = new Set(savedIds);
+  return [...list].sort((a, b) => Number(saved.has(b.voice_id)) - Number(saved.has(a.voice_id)));
+}
+
 export function MinimaxVoicePanel({ plugin, voiceSelect }: { plugin: PluginInfo; voiceSelect?: ReactNode }) {
   const settings = useSettingsStore((s) => s.settings);
   const patch = useSettingsStore((s) => s.patch);
@@ -282,7 +292,7 @@ export function MinimaxVoicePanel({ plugin, voiceSelect }: { plugin: PluginInfo;
         {mmAccountVoices && (
           <div className="mt-2 space-y-2">
             {[
-              { title: "克隆音色", type: "voice_cloning", list: mmAccountVoices.cloning },
+              { title: "克隆音色", type: "voice_cloning", list: sortSavedVoicesFirst(mmAccountVoices.cloning, settings?.minimax_global_cloned_voices ?? []) },
               { title: "设计音色", type: "voice_generation", list: mmAccountVoices.generation },
             ].map((g) => (
               <div key={g.type}>
