@@ -258,19 +258,20 @@ export function VoiceSynthPanel() {
                     disabled={taskRunning}
                     className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)] disabled:opacity-60"
                   >
-                    {cur.voices.length > 0 && (
-                      <optgroup label="内置音色">
-                        {cur.voices.map((v) => (
-                          <option key={v.id} value={v.id}>{v.label}</option>
-                        ))}
-                      </optgroup>
-                    )}
+                    {/* 用户裁定（10-23）：保存的克隆音色排列表顶部，对所有走通用下拉的插件生效 */}
                     {(settings?.plugin_custom_voices?.[cur.id] ?? []).length > 0 && (
                       <optgroup label="我的音色">
                         {(settings?.plugin_custom_voices?.[cur.id] ?? []).map((cv) => (
                           <option key={`custom:${cv.id}`} value={cv.id}>
                             {cv.label}
                           </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {cur.voices.length > 0 && (
+                      <optgroup label="内置音色">
+                        {cur.voices.map((v) => (
+                          <option key={v.id} value={v.id}>{v.label}</option>
                         ))}
                       </optgroup>
                     )}
