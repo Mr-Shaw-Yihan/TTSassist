@@ -38,9 +38,41 @@ pub fn startup_background_rgb(theme: &str) -> (u8, u8, u8) {
     }
 }
 
-/// 在显示前把记忆尺寸应用到主窗口，再显示。由 `run()` 的 setup 调用。
-/// 主窗以 `visible=false` 创建，因此这里不会出现“先按默认尺寸露脸再变形”。
-pub fn show_main_with_remembered_size(app: &tauri::AppHandle, settings: &Settings) {
+/// 主窗显示兜底：前端若异常（首帧就绪信号发不出来），到点也必须把窗口露出来，
+/// 否则用户看到的是“进程在跑但没窗口”。
+const SHOW_FALLBACK_MS: u64 = 3000;
+
+/// 显示主窗（幂等：已可见就不再重复 show）。
+fn reveal<R: tauri::Runtime>(win: &tauri::WebviewWindow<R>) {
+    if win.is_visible().unwrap_or(false) {
+        return;
+    }
+    if let Err(e) = win.show() {
+        log_warn!("显示主窗口失败: {e}");
+        return;
+    }
+    let _ = win.set_focus();
+}
+
+/// 前端首帧就绪后调用：页面此时已按记忆皮肤渲染完，show 出来第一帧就是正确皮肤，
+/// 不再露出 WebView2 在“show→页面加载完”之间的默认白底（真机表现为先闪一帧日间）。
+pub fn show_main_now<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    use tauri::Manager;
+    if let Some(win) = app.get_webview_window("main") {
+        reveal(&win);
+    }
+}
+
+/// 前端首帧就绪信号（main.tsx 在 React 首次提交后调用）。前端异常时由兜底线程补位。
+#[tauri::command]
+pub fn main_window_ready(app: tauri::AppHandle) {
+    show_main_now(&app);
+}
+
+/// 把记忆尺寸应用到（隐藏的）主窗、预先铺好首帧底色，**显示推迟到前端就绪**。
+/// 由 `run()` 的 setup 调用。主窗以 `visible=false` 创建，因此既没有“先按默认尺寸
+/// 露脸再变形”，也不会先露 WebView2 白底。
+pub fn prepare_main_window(app: &tauri::AppHandle, settings: &Settings) {
     use tauri::Manager;
     let Some(win) = app.get_webview_window("main") else {
         return;
@@ -75,15 +107,17 @@ pub fn show_main_with_remembered_size(app: &tauri::AppHandle, settings: &Setting
             log_warn!("应用记忆窗口尺寸失败: {e}");
         }
     }
-    // 首帧底色：必须在 show 之前设，否则夜间用户会先看到 WebView2 的默认白底
+    // 首帧底色：仍保留作双保险（某些 WebView2 版本的第一帧早于页面绘制）
     let (r, g, b) = startup_background_rgb(&settings.theme);
     if let Err(e) = win.set_background_color(Some(tauri::window::Color(r, g, b, 255))) {
         log_warn!("设置首帧背景色失败: {e}");
     }
-    if let Err(e) = win.show() {
-        log_warn!("显示主窗口失败: {e}");
-    }
-    let _ = win.set_focus();
+    // 兜底：前端若没发出 main_window_ready（脚本异常/加载失败），到点强制显示
+    let app_fallback = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(SHOW_FALLBACK_MS));
+        show_main_now(&app_fallback);
+    });
 }
 
 #[cfg(test)]

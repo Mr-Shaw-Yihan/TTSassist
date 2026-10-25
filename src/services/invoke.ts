@@ -602,6 +602,13 @@ export interface DriveInfo {
   total_bytes: number;
 }
 
+/** 「搬家前留的原件」备份（软件自动只留最近一份，用户不需要操作它） */
+export interface BackupInfo {
+  name: string;
+  path: string;
+  bytes: number;
+}
+
 export interface StorageReport {
   config_root: string;
   content_root: string;
@@ -620,6 +627,9 @@ export interface StorageReport {
   plugins_root: string;
   /** true = 安装目录不可写，插件根已回退到 <我的数据>\plugins */
   plugins_fallback: boolean;
+  /** 搬家前留的原件（新→旧）与总体积；空数组 = 这台机器从没搬过家 */
+  backups: BackupInfo[];
+  backup_bytes: number;
 }
 
 /** 「更改数据位置」的执行结果 */
@@ -640,6 +650,17 @@ export async function getStorageReport(): Promise<StorageReport> {
 /** 首启弹窗是否还需要出现（用户没确认过位置 → true） */
 export async function storageChoicePending(): Promise<boolean> {
   return invoke<boolean>("storage_choice_pending");
+}
+
+/** 主窗首帧就绪：通知后端把隐藏的主窗显示出来
+ *  （主窗 visible=false 创建，等页面按记忆皮肤渲染完再 show，避免先闪一帧 WebView2 白底） */
+export async function mainWindowReady(): Promise<void> {
+  return invoke<void>("main_window_ready");
+}
+
+/** 搬家后重启软件：内容根只在启动时解析一次，不重启会一直读写旧位置 */
+export async function restartApp(): Promise<void> {
+  return invoke<void>("restart_app");
 }
 
 /** 确认「就用默认位置」：记下选择，首启弹窗不再出现 */

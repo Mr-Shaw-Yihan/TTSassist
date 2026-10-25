@@ -42,6 +42,7 @@ import {
   listPlugins,
   promptEngineWarmup,
   perfStartupDone,
+  mainWindowReady,
   takeStorageNotice,
   ttsStreamMute,
   ttsStreamStop,
@@ -119,6 +120,10 @@ function App() {
 
   // 启动时：加载设置 + 加载最近一页消息 + 收藏
   useEffect(() => {
+    // 首帧就绪：后端在 setup 里只把主窗定形+铺底色，不 show（visible=false）；
+    // 等这里 React 首次提交后再显，避免“show → 页面加载完”之间露 WebView2 白底。
+    // 用 setTimeout 而非 rAF：隐藏窗口下 rAF 可能被 Chromium 节流/暂停；后端另有 3s 兜底。
+    setTimeout(() => void mainWindowReady().catch(() => {}), 0);
     // [perf] main 窗口前端首帧回执（后端只记第一次；失败静默，不影响业务）
     void perfStartupDone().catch(() => {});
     // 首启自动搬家结果：后端在 setup 里搬完存在内存位上，这里取一次弹给用户（取走即清）。
@@ -191,8 +196,12 @@ function App() {
   // 皮肤同步到 <html data-theme>，整界面立刻换肤（入口：侧栏底部昼夜按钮）
   const theme = settings?.theme === "dark" ? "dark" : "light";
   useEffect(() => {
+    // settings 还没读回来时**不要动 data-theme**：index.html 的内联同步脚本已按
+    // localStorage 镜像定好首帧皮肤，这里拿「settings 缺省 = light」去覆盖，夜间用户
+    // 就会先被拉回日间、等 getSettings 返回才翻黑（真机复报的首帧闪变根因）。
+    if (settings === null) return;
     document.documentElement.setAttribute("data-theme", theme);
-  }, [theme]);
+  }, [settings, theme]);
 
   // 主窗口几何记忆：启动恢复上次尺寸/位置/最大化，拖动缩放防抖保存（仅 main 路径执行）
   useWindowState();
