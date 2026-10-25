@@ -56,6 +56,43 @@ const MESSAGE_PAGE_SIZE = 20;
 
 // 输入区高度默认/上下限常量集中在 utils/composerResize.ts（纯计算 + 单测）
 
+// ============================================================
+// 消息列表滚动控制：跟随最新 + 持续对账（10-26 第四版二轮简化）
+// 前三版（绝对 scrollTop / 距底距离 / 消息行锚点+逐帧钉位）都被真机推翻，取证结论：
+// 1) 主窗以 visible=false 创建、前端首帧就绪才 show——启动定位执行时窗口还隐藏着，
+//    WebView2 暂停渲染：rAF 停发、短定时器被节流，「只写一次 + 有限次补写」会整体打空；
+// 2) 启动后窗口尺寸还可能被几何记忆/最大化二次改变，任何“当下算准”的像素都会失效；
+// 3) 真机二轮实测：切页回来那一刻列表可能先空一拍——restore 锚点一次落空就被「缺行
+//    兜底」立即释放、不再重试，于是中段恢复全部落到顶部；而 bottom 意图因「达成也不
+//    释放」会被定时器链一路补到成功，所以贴底路径在真机始终是好的。
+// 结论（用户拍板）：不做中段恢复，**切回消息页一律贴底**。只剩一种意图：
+// 跟随最新（following）——启动、切页回来、发送、点定位按钮、用户手动滚回底部都置位；
+// 用户用滚轮/触摸/拖滚动条把视口带离底部即解除（读历史不被新消息拉走）。
+// 任何时候列表变高（新消息/失败气泡变高/跨窗合并）且在跟随中，就重新贴底。
+// ============================================================
+
+/** 列表底部垫高的自愈上限：再离谱的重叠也不把消息区整个垫空 */
+const BOTTOM_GUARD_MAX_RATIO = 0.6;
+
+/** 分隔条高度（JSX 里 resizer 是 h-2）：正常布局里 main 底边与输入面板顶边之间隔着它 */
+const RESIZER_H = 8;
+
+/** 对账定时器链（毫秒）：隐藏窗口下定时器仍会跑，作为 RO/事件之外的兜底节拍 */
+const RECONCILE_DELAYS = [120, 300, 700, 1500, 3000] as const;
+
+/**
+ * 底部垫高自愈：量「main 盒底边相对输入面板顶边」的几何关系。
+ * 正常 flex 布局里面板在分隔条之下（footerTop - mainBottom = +RESIZER_H），结果恒为 0；
+ * 真机出现过「滚到最大仍被面板盖住一部分」（DPI/最大化时序等导致盒子重叠），此时把
+ * 重叠量垫进列表末尾，滚动上限随之变大，最后一条气泡必然能完整露出。只依赖两个矩形，
+ * 与当前 scrollTop 无关，反复调用结果稳定、不会振荡。
+ */
+function measureBottomGuard(el: HTMLElement, footerTop: number | null): number {
+  if (footerTop === null) return 0;
+  const overlap = el.getBoundingClientRect().bottom - footerTop + RESIZER_H;
+  return Math.max(0, Math.min(overlap, el.clientHeight * BOTTOM_GUARD_MAX_RATIO));
+}
+
 function App() {
   // 多窗口路由：检查当前窗口 label
   const win = getCurrentWindow();
@@ -74,8 +111,6 @@ function App() {
   const hasMoreMessages = useChatStore((s) => s.hasMore);
   // 消息分页：翻页加载中（防重入）
   const loadingOlderRef = useRef(false);
-  // 首屏消息是否已加载完成（初始定位滚底的触发器）
-  const [initialLoaded, setInitialLoaded] = useState(false);
   // 视口是否贴近底部（新消息自动滚动判据 + 定位按钮显示条件）
   const [atBottom, setAtBottom] = useState(true);
   const [favorites, setFavorites] = useState<Favorite[]>([]);
@@ -146,9 +181,8 @@ function App() {
       try {
         const page = await listMessages(MESSAGE_PAGE_SIZE);
         useChatStore.getState().load(page.messages, page.has_more);
-        // 不在此处直接滚底：DOM 尚未提交新消息，滚的是旧高度；
-        // 置位后由下方初始定位 effect 在提交后可靠滚底
-        setInitialLoaded(true);
+        // 不在此处直接滚底：DOM 尚未提交新消息。跟随意图在消息页挂载时已置位，
+        // 这里的 load 触发 messages 变化 effect + 定时器链，会在提交后可靠贴底
       } catch (e) {
         console.error("加载消息失败", e);
       }
@@ -281,10 +315,14 @@ function App() {
       useChatStore.getState().setHasMore(page.has_more);
       if (page.messages.length > 0) {
         useChatStore.getState().prependOlder(page.messages);
-        requestAnimationFrame(() => {
+        // prepend 会把原视口内容整体下推，按“距底部距离”恢复；rAF 之外再补一次定时器——
+        // 隐藏/后台窗口下 rAF 可能停发（定时器也会被节流，但最终会跑）
+        const preserve = () => {
           const node = listRef.current;
           if (node) node.scrollTop = node.scrollHeight - distFromBottom;
-        });
+        };
+        requestAnimationFrame(preserve);
+        window.setTimeout(preserve, 120);
       }
     } catch (e) {
       console.error("加载更早消息失败", e);
@@ -294,59 +332,148 @@ function App() {
   }, []);
 
   /** 消息列表滚动：接近顶部时翻上一页；记录是否在底部（新消息自动滚动/定位按钮判据）；
-   *  持续记录滚动位置，供切 tab 回来后恢复（条件渲染重挂载会丢 scrollTop） */
+   *  持续记录「离开时视口在哪」（消息行锚点），供切 tab 回来恢复（条件渲染重挂载会丢 scrollTop） */
   function onMessagesScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
     setAtBottom(near);
-    savedScrollRef.current = el.scrollTop;
-    savedAtBottomRef.current = near;
     if (el.scrollTop < 80 && hasMoreMessages && !loadingOlderRef.current) {
       void loadOlderMessages(messages[0]?.id);
     }
+    // 用户手势期间绝不回写（否则和拖滚动条/滚轮打架）；手势把视口带离底部 = 停止跟随最新
+    // （读历史不被新消息拉走，「↓」按钮出现），带回底部 = 恢复跟随（QQ 式）。
+    // 非手势的滚动事件（外部重置、布局跳变）→ 跟随中就立即对账纠偏。
+    const gesturing =
+      pointerScrollingRef.current || performance.now() - lastUserScrollAtRef.current < 400;
+    if (gesturing) {
+      followingRef.current = near;
+      return;
+    }
+    if (followingRef.current) reconcileScroll();
   }
 
-  // 切回消息 tab 时恢复位置：列表 DOM 重建后 scrollTop 归零，
-  // 按离开前连续记录的位置恢复；离开前在底部则恢复为贴底（期间来了新消息也能看到最新）
-  const savedScrollRef = useRef<number | null>(null);
-  const savedAtBottomRef = useRef(false);
-  useEffect(() => {
-    if (tab !== "messages" || !initialLoaded) return;
-    const saved = savedScrollRef.current;
-    if (saved === null) return;
-    const run = () => {
-      const el = listRef.current;
-      if (!el) return;
-      el.scrollTop = savedAtBottomRef.current ? el.scrollHeight : saved;
-    };
-    run();
-    requestAnimationFrame(run);
-  }, [tab, initialLoaded]);
-
-  // 初始定位：首屏消息提交到 DOM 后滚到底（每次启动默认看最新），
-  // 150ms 后再补一次（音频/字体等内容异步撑高也能到底）
-  useEffect(() => {
-    if (!initialLoaded) return;
-    const run = () => {
-      const el = listRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
-    };
-    run();
-    const t = window.setTimeout(run, 150);
-    return () => window.clearTimeout(t);
-  }, [initialLoaded]);
-
-  // 滚动管理：滚到底工具（定位按钮/新消息用；翻页加载保持视口不用它）。
-  // 双保险：rAF 等一次布局，50ms 后再补一次（内容异步撑高时也能到底）
+  // ---- 跟随最新的滚动控制器（模块顶部有设计说明）----
   const listRef = useRef<HTMLDivElement | null>(null);
-  const scrollToBottom = useCallback(() => {
-    const run = () => {
-      const el = listRef.current;
-      if (el) el.scrollTop = el.scrollHeight;
-    };
-    requestAnimationFrame(run);
-    setTimeout(run, 50);
+  const footerRef = useRef<HTMLElement | null>(null);
+  const bottomGuardRef = useRef<HTMLDivElement | null>(null);
+  // 跟随最新意图：置位期间列表任何变高都重新贴底；用户手势带离底部即解除
+  const followingRef = useRef(false);
+  // 代数：每次置位跟随自增，让旧意图遗留的定时器链全部失效
+  const generationRef = useRef(0);
+  // 用户手势标记：指针按下列表（含拖滚动条）期间为真；滚轮/触摸只记时刻
+  const pointerScrollingRef = useRef(false);
+  const lastUserScrollAtRef = useRef(0);
+
+  /** 底部垫高自愈：见 measureBottomGuard。每次对账与盒子尺寸变化时重算，正常布局恒 0 */
+  const applyBottomGuard = useCallback(() => {
+    const el = listRef.current;
+    const guard = bottomGuardRef.current;
+    if (!el || !guard) return;
+    const need = measureBottomGuard(el, footerRef.current?.getBoundingClientRect().top ?? null);
+    const cur = parseFloat(guard.style.height) || 0;
+    if (Math.abs(cur - need) >= 1) guard.style.height = `${need}px`;
   }, []);
+
+  /** 按当前意图重写 scrollTop。幂等可重入：已到底就不再写（也不会再触发滚动事件） */
+  const reconcileScroll = useCallback(() => {
+    const el = listRef.current;
+    if (!el || !followingRef.current) return;
+    // 跟随意图不因「已到底」而释放：后续新消息/气泡变高要继续贴底，由手势负责解除。
+    // 这也是贴底路径在真机始终可靠的原因——列表先空一拍也没关系，定时器链会一路补到成功。
+    el.scrollTop = el.scrollHeight;
+    applyBottomGuard();
+  }, [applyBottomGuard]);
+
+  /** 兜底节拍：布局在挂载后仍可能继续变（字体/窗口尺寸/面板拖拽），退化间隔补对账几次 */
+  const startReconcileChain = useCallback(() => {
+    const gen = generationRef.current;
+    for (const d of RECONCILE_DELAYS) {
+      window.setTimeout(() => {
+        if (generationRef.current === gen) reconcileScroll();
+      }, d);
+    }
+  }, [reconcileScroll]);
+
+  /** 跟随最新：启动 / 切页回来 / 发送 / 定位按钮共用的入口 */
+  const pinBottom = useCallback(() => {
+    generationRef.current += 1;
+    followingRef.current = true;
+    reconcileScroll();
+    startReconcileChain();
+  }, [reconcileScroll, startReconcileChain]);
+
+  // 挂载消息页即置位跟随（启动 / 切页回来一律贴底——用户拍板的简化，不做中段恢复）。
+  // 此时列表可能还没内容/没布局好，写不进去也没关系：定时器链、消息变化 effect、
+  // RO 都会继续补，直到真正贴底。
+  useEffect(() => {
+    if (tab !== "messages") return;
+    pinBottom();
+  }, [tab, pinBottom]);
+
+  // 消息/合成态变化（发送占位、失败变高、跨窗合并）都会改变列表高度：
+  // 提交完 DOM 后跟随中就重新贴底；已被手势解除则不动（读历史不被拉走）。
+  useEffect(() => {
+    if (!followingRef.current) return;
+    reconcileScroll();
+  }, [messages, streamingIds, failedIds, reconcileScroll]);
+
+  // 列表盒子尺寸变化（窗口缩放、输入面板拖拽、滚动条出现）：重算垫高并跟随贴底。
+  // RO 只在消息页挂载（tab 变化时 main 随之挂/卸）。
+  useEffect(() => {
+    if (tab !== "messages") return;
+    const el = listRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      applyBottomGuard();
+      if (followingRef.current) reconcileScroll();
+    });
+    ro.observe(el);
+    // 字体晚到会整体撑高气泡：就绪后补一次对账（Promise 不受隐藏窗口 rAF 节流影响）
+    document.fonts.ready
+      .then(() => {
+        if (followingRef.current) reconcileScroll();
+      })
+      .catch(() => {});
+    return () => ro.disconnect();
+  }, [tab, applyBottomGuard, reconcileScroll]);
+
+  // 用户手势监听：滚轮/触摸记时刻，指针按下列表（含拖滚动条）置位、松开复位。
+  // onMessagesScroll 据此区分「用户在驱动」与「程序/异常导致的滚动」。
+  useEffect(() => {
+    if (tab !== "messages") return;
+    const el = listRef.current;
+    if (!el) return;
+    const mark = () => {
+      lastUserScrollAtRef.current = performance.now();
+    };
+    const down = () => {
+      pointerScrollingRef.current = true;
+      mark();
+    };
+    const up = () => {
+      pointerScrollingRef.current = false;
+    };
+    el.addEventListener("wheel", mark, { passive: true });
+    el.addEventListener("touchmove", mark, { passive: true });
+    el.addEventListener("pointerdown", down);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => {
+      el.removeEventListener("wheel", mark);
+      el.removeEventListener("touchmove", mark);
+      el.removeEventListener("pointerdown", down);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+    };
+  }, [tab]);
+
+  // 卸载时让遗留的定时器链全部失效（StrictMode 双挂载也安全）
+  useEffect(
+    () => () => {
+      generationRef.current += 1;
+    },
+    [],
+  );
 
   // 分隔条拖拽：调整输入区高度（向上拖增大），松开时记忆；双击复位。
   // 用 Pointer Capture：按下时捕获指针，后续 pointermove 全部派发给分隔条本身，
@@ -593,7 +720,7 @@ function App() {
       .getState()
       .beginPlaceholder({ id: tempId, content: text, audio_path: "", created_at: new Date().toISOString() });
     // 发送即定位最新（发送动作视为“要看这条”，不再受 atBottom 限制）
-    scrollToBottom();
+    pinBottom();
     void (async () => {
       try {
         const { message, hostPlayed } = await generateTTS(text);
@@ -757,12 +884,15 @@ function App() {
                   />
                 ))
               )}
+              {/* 底部垫高自愈（见 measureBottomGuard）：正常布局高度恒 0；真机若出现
+                  「滚到最大仍被输入面板盖住」的盒子重叠，这里垫进等高空间保证能滚出来 */}
+              <div ref={bottomGuardRef} aria-hidden style={{ height: 0 }} />
               </main>
 
               {/* 定位到底部（向上翻阅后一键回到最新消息） */}
               {messages.length > 0 && !atBottom && (
                 <button
-                  onClick={scrollToBottom}
+                  onClick={pinBottom}
                   title="定位到最新消息"
                   aria-label="定位到最新消息"
                   className="absolute bottom-4 left-4 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-[var(--ink-200)] bg-[var(--paper-card)] text-[var(--ink-500)] shadow-[0_2px_8px_rgba(26,24,22,0.08)] transition-colors hover:border-[var(--amber-500)] hover:text-[var(--amber-600)] animate-fade"
@@ -849,7 +979,7 @@ function App() {
               >
                 <span className="absolute left-1/2 top-1/2 h-[2px] w-9 -translate-x-1/2 -translate-y-1/2 rounded bg-[var(--ink-200)] transition-all group-hover:w-14 group-hover:bg-[var(--amber-500)]" aria-hidden />
               </div>
-              <footer style={{ height: composerH }} className="shrink-0 bg-[var(--paper-card)]">
+              <footer ref={footerRef} style={{ height: composerH }} className="shrink-0 bg-[var(--paper-card)]">
                 <InputBox
                   onSend={handleSend}
                   busy={streamingIds.length > 0}
