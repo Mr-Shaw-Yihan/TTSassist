@@ -1,6 +1,6 @@
 [package]
 name = "edge-tts"
-version = "0.1.0"
+version = "0.1.2"
 description = "Edge TTS 插件：免费、无需 Key 的微软 Edge 语音（非官方接口，可能不稳定）"
 edition = "2021"
 
@@ -10,7 +10,10 @@ crate-type = ["cdylib"]
 
 [dependencies]
 plugin-api = { path = "../../plugin-api" }
-kothok-edge-tts = "0.2"
+# 仓库内补丁副本：2026-10 微软 Sec-MS-GEC v2 校验上线后，crates.io 0.2.10 的 v1 令牌
+# 握手一律 403（rany2/edge-tts#490），此副本升级为 v2 令牌（详见该 crate 的 README）。
+# 不用 [patch.crates-io]：vendored 包同时是 workspace 成员时 patch 会被忽略，path 依赖无歧义。
+kothok-edge-tts = { path = "../../shared/kothok-edge-tts" }
 # 插件合成入口是同步 C ABI，内部用自建运行时跑异步合成
 tokio = { version = "1", features = ["rt-multi-thread"] }
 

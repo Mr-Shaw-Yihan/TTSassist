@@ -8,3 +8,4 @@ members = ["plugin-api", "engines/*", "shared/*", "tests/*"]
 # builtin-fx / genie-tts / hojo-tts 目录只剩插件拆除后的 dist 残留（无 Cargo.toml），排除以免 glob 报错。
 # 残留是 gitignore 产物，git 合并不会清掉，所以必须在这里挡住；将来重新引入本地引擎时要把对应条目从 exclude 移除。
 exclude = ["engines/builtin-fx", "engines/genie-tts", "engines/hojo-tts"]
+

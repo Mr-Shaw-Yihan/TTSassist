@@ -198,7 +198,7 @@ checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
 name = "edge-tts"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "kothok-edge-tts",
  "plugin-api",
@@ -586,9 +586,7 @@ dependencies = [
 
 [[package]]
 name = "kothok-edge-tts"
-version = "0.2.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bcde0e39e03615b18f0b505ea9d681894b4297acce0414aca380b1a078f9fc8"
+version = "0.2.11"
 dependencies = [
  "futures-util",
  "log",
@@ -596,7 +594,6 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
- "sha2",
  "thiserror 1.0.69",
  "tokio",
  "tokio-rustls",
@@ -718,7 +715,7 @@ dependencies = [
 
 [[package]]
 name = "moss-tts"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "plugin-api",
  "reqwest",
@@ -1081,17 +1078,6 @@ name = "sha1"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
-dependencies = [
- "cfg-if",
- "cpufeatures 0.2.17",
- "digest",
-]
-
-[[package]]
-name = "sha2"
-version = "0.10.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",

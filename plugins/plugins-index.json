@@ -3,10 +3,10 @@
     {
       "id": "edge-tts",
       "name": "Edge TTS（免费·微软）",
-      "version": "0.1.1",
-      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/edge-tts-0.1.1.zip",
-      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/edge-tts-0.1.1.zip",
-      "checksum": "e4b2f334c301952bec2af0111b21a4537912759f63910407d56fd008ddc3f1f4",
+      "version": "0.1.2",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/edge-tts-0.1.2.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/edge-tts-0.1.2.zip",
+      "checksum": "c29466d8c8af27f892c4f0d0f70057cdd80d13c53ef866796c3b01f83c64850e",
       "description": "免费、无需 Key 的微软 Edge 语音，非官方接口可能不稳定",
       "plugin_type": "tts_engine"
     },
