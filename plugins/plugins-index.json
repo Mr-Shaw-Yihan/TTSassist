@@ -56,7 +56,7 @@
       "version": "0.2.1",
       "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/moss-tts-0.2.1.zip",
       "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/moss-tts-0.2.1.zip",
-      "checksum": "39e847335caded6ff1e6b2cb0f75524c9ee4d2db23957d81ea80305074ff302a",
+      "checksum": "340abf9db47243690324359b5f7dde9aa6083da03ed921d2f1c946a1f5d24e69",
       "description": "Mossland MOSS 云端语音合成（流式版）：PCM 边合成边播、首响更快（非流式整段合成实测七八个字要等 5 秒），需 API Key；不自带音色，请到 Mossland 音色库复制 voice_id 后保存在「我的音色」里选用",
       "plugin_type": "tts_engine"
     }

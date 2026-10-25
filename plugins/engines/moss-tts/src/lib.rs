@@ -32,7 +32,7 @@ mod stream;
 plugin_api::va_tts_plugin! {
     id: "moss-tts",
     name: "MOSS TTS（Mossland）",
-    version: "0.2.0",
+    version: "0.2.1",
     audio_format: "mp3",
     // 空表是刻意选择：MOSS 音色 100% 来自宿主「我的音色」，见文件头注释
     voices_json: "[]",
