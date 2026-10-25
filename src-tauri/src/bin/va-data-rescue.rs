@@ -1,4 +1,4 @@
-// 数据回退急救程序（存储计划 Task 5b）。只干一件事：把 1.9 搬家搬走的用户数据放回配置根。
+// 数据回退急救程序（存储计划 Task 5b）。只干一件事：把 1.9 搬家搬走的用户数据放回内容根。
 //
 // 为什么不做成设置页里的按钮：内容根指向的盘没接上时，主程序自己都起不来，
 // 界面里的"回退"按钮根本点不到。独立小程序不看主程序脸色。
@@ -14,6 +14,7 @@
 //   va-data-rescue.exe --list              只看会回退什么，不动任何文件
 //   va-data-rescue.exe --yes               跳过回车确认（远程指导时用）
 //   va-data-rescue.exe --config-root <路径> 调试用：指定配置根
+//   va-data-rescue.exe --app-root <路径>    调试用：指定应用目录
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -23,21 +24,23 @@ use voiceassist_lib::storage::migrate;
 use voiceassist_lib::storage::paths;
 
 const USAGE: &str = "\
-用法：va-data-rescue.exe [--list] [--yes] [--config-root <路径>]
+用法：va-data-rescue.exe [--list] [--yes] [--app-root <路径>] [--config-root <路径>]
 
-把迁移到内容根的用户数据（消息/音频/克隆样本/日志等）复制回配置根，
-并把存储指针指回配置根，让 TTSassist 重新按老位置读数据。
+把迁移到内容根的用户数据（消息/音频/克隆样本/日志/引擎数据）复制回「我的数据」，
+并把存储指针指回该位置，让 TTSassist 重新按那里读数据。
 迁移备份一律保留，回退不满意还能再试。
 
   --list          只列出将要回退的条目与体积，不动任何文件
   --yes           跳过回车确认
-  --config-root   指定配置根（默认 %APPDATA%\\com.voiceassist.app），调试用
+  --app-root      指定应用目录（默认 %APPDATA%\\com.voiceassist.app），调试用
+  --config-root   指定配置根（默认 <应用目录>\\config，不存在时回退应用目录根），调试用
 ";
 
 struct Options {
     list_only: bool,
     assume_yes: bool,
     help: bool,
+    app_root: Option<PathBuf>,
     config_root: Option<PathBuf>,
 }
 
@@ -46,6 +49,7 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
         list_only: false,
         assume_yes: false,
         help: false,
+        app_root: None,
         config_root: None,
     };
     let mut i = 0;
@@ -54,6 +58,11 @@ fn parse_args(args: &[String]) -> Result<Options, String> {
             "--list" => o.list_only = true,
             "--yes" => o.assume_yes = true,
             "--help" | "-h" => o.help = true,
+            "--app-root" => {
+                i += 1;
+                let v = args.get(i).ok_or("--app-root 后面要跟一个路径")?;
+                o.app_root = Some(PathBuf::from(v));
+            }
             "--config-root" => {
                 i += 1;
                 let v = args.get(i).ok_or("--config-root 后面要跟一个路径")?;
@@ -71,20 +80,44 @@ fn mb(bytes: u64) -> f64 {
 }
 
 fn run(o: &Options) -> Result<(), String> {
-    let config_root = o
-        .config_root
+    let app_root = o
+        .app_root
         .clone()
-        .or_else(paths::config_root_from_env)
-        .ok_or("找不到配置根（环境变量 APPDATA 缺失），可以用 --config-root 指定")?;
+        .or_else(paths::app_root_from_env)
+        .ok_or("找不到应用目录（环境变量 APPDATA 缺失），可以用 --app-root 指定")?;
+    // 配置根：显式指定 > <应用目录>\config；若 config\ 还没有 settings.json（旧布局），
+    // 回退到应用目录根——与主程序 ensure_config_root 的口径一致。
+    let config_root = o.config_root.clone().unwrap_or_else(|| {
+        let c = app_root.join(paths::CONFIG_SUBDIR_NAME);
+        if c.join("settings.json").is_file() {
+            c
+        } else {
+            app_root.clone()
+        }
+    });
+    println!("应用目录：{}", app_root.display());
+    println!("配置根：{}", config_root.display());
 
-    println!("配置根（旧位置）：{}", config_root.display());
+    // 指针：config\storage.json 优先，旧布局应用目录根的 storage.json 兜底；
+    // 指向应用目录根的是旧默认（不是用户自选）→ 忽略，按新默认 data\ 处理。
     let pointer_path = config_root.join(paths::POINTER_FILE_NAME);
-    match paths::read_pointer(&pointer_path) {
-        Some(cur) => println!("指针记录的内容根（现在的位置）：{}", cur.display()),
-        None => println!("指针：无（软件按默认位置找数据）"),
-    }
+    let pointer = paths::read_pointer(&pointer_path)
+        .or_else(|| paths::read_pointer(&app_root.join(paths::POINTER_FILE_NAME)))
+        .filter(|p| *p != app_root);
+    let content_root = match pointer {
+        Some(cur) => {
+            println!("指针记录的「我的数据」：{}", cur.display());
+            cur
+        }
+        None => {
+            let d = app_root.join(paths::DATA_SUBDIR_NAME);
+            println!("指针：无（按默认位置处理）→ {}", d.display());
+            d
+        }
+    };
 
-    let backups = migrate::find_backups(&config_root);
+    // 备份放在应用目录根（既不属于配置也不属于「我的数据」），旧版本备份也在同一层
+    let backups = migrate::find_backups(&app_root);
     let Some(newest) = backups.last().cloned() else {
         println!("没有找到迁移备份目录（.migrated-backup-*），说明这台机器从没执行过搬家，无需回退。");
         return Ok(());
@@ -104,7 +137,7 @@ fn run(o: &Options) -> Result<(), String> {
         return Ok(());
     }
 
-    println!("将回退这些条目到配置根：");
+    println!("将回退这些条目到「我的数据」：");
     let mut total = 0u64;
     for it in &items {
         let size = migrate::path_size(&it.src);
@@ -123,10 +156,10 @@ fn run(o: &Options) -> Result<(), String> {
     }
     println!("合计 {:.1} MB", mb(total));
 
-    let conflicts = migrate::restore_conflicts(&newest, &config_root);
+    let conflicts = migrate::restore_conflicts(&newest, &content_root);
     if !conflicts.is_empty() {
         return Err(format!(
-            "配置根已经存在同名条目，回退会覆盖用户这半年新写的数据，已整批停止。请先手工处置再重试：{}",
+            "「我的数据」里已经存在同名条目，回退会覆盖用户这台机器上新写的数据，已整批停止。请先手工处置再重试：{}",
             conflicts.join("、")
         ));
     }
@@ -142,12 +175,12 @@ fn run(o: &Options) -> Result<(), String> {
         std::io::stdin().read_line(&mut line).map_err(|e| format!("读取输入失败: {e}"))?;
     }
 
-    let report = migrate::restore_items(&newest, &config_root)?;
+    let report = migrate::restore_items(&newest, &content_root)?;
 
-    // 指针必须指回配置根，而不是像设计 §五 那样"删掉指针"：
-    // 那是翻默认之前的写法。翻默认之后删指针 = 内容根退回 <exe>\data（空目录），
-    // 用户刚恢复回来的数据反而看不见，等于我们自造一场"消息全丢"。
-    let pointer = paths::pointer_json(&config_root, Some(&newest.display().to_string()));
+    // 指针指回本次回退的内容根，而不是像设计 §五 那样“删掉指针”：
+    // 删指针后内容根退回默认 data\，用户刚恢复回来的数据反而看不见，
+    // 等于我们自造一场“消息全丢”。
+    let pointer = paths::pointer_json(&content_root, Some(&newest.display().to_string()));
     atomic_write(&pointer_path, pointer.as_bytes())
         .map_err(|e| format!("数据已回退，但写指针失败（可手工把下面这句写进 {}）：{e}", pointer_path.display()))?;
 
@@ -157,7 +190,7 @@ fn run(o: &Options) -> Result<(), String> {
         mb(report.bytes),
         newest.display()
     );
-    println!("指针已指回配置根，现在重新打开 TTSassist，消息与音频应当都在。");
+    println!("指针已指回「我的数据」：{}，现在重新打开 TTSassist，消息与音频应当都在。", content_root.display());
     Ok(())
 }
 

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use super::paths::{
     StoragePaths, AUDIO_DIR_NAME, CACHE_DIR_NAME, DOWNLOADS_DIR_NAME, LOGS_DIR_NAME,
-    SAMPLES_DIR_NAME,
+    PLUGIN_DATA_DIR_NAME, SAMPLES_DIR_NAME,
 };
 
 /// 启动时的存储布局状态。
@@ -45,14 +45,17 @@ pub fn detect_state(content_has_data: bool, legacy_present: bool) -> StorageStat
 
 /// 内容类条目清单：**迁移与回退共用同一份**（两个方向各自维护的话，改一边漏一边）。
 /// **不含** `settings.json` / `remote-pairing.json` / `storage.json`：配置留在配置根，
-/// 把它们搬走会让下一次启动读不到配置（新旧布局共用同一个配置根目录）。
+/// 把它们搬走会让下一次启动读不到配置。
 const CONTENT_FILES: [&str; 3] = ["messages.json", "favorites.json", "subtitle_history.json"];
-const CONTENT_DIRS: [&str; 5] = [
+const CONTENT_DIRS: [&str; 6] = [
     AUDIO_DIR_NAME,
     SAMPLES_DIR_NAME,
     LOGS_DIR_NAME,
     CACHE_DIR_NAME,
     DOWNLOADS_DIR_NAME,
+    // 引擎数据（本地模型/音色包）也是「我的数据」，拆根时必须跟着走，
+    // 否则内容根一换，插件就找不到已下载的模型（表现为“又要重新下载”）。
+    PLUGIN_DATA_DIR_NAME,
 ];
 
 /// 待迁移清单 = 内容类条目。
@@ -80,17 +83,18 @@ fn dir_has_entries(p: &Path) -> bool {
 
 /// 按当前布局判定状态——启动日志与 `storage_report` 共用这一份逻辑，不分两头写。
 ///
-/// 两根相同时（默认落点 = 配置根）根本没“搬家”这回事，必须返回 Current：
+/// 内容根与应用目录根相同时（旧的默认落点）根本没“搬家”这回事，必须返回 Current：
 /// 否则 `messages.json` 会被同时看成“新位置已有”与“旧位置待迁”，误判成 Conflict。
 ///
 /// 旧位置仍有数据时，**不能拿“新位置已有数据”当冲突依据**：拷贝就是先填新位置的，
 /// 搬一半崩了新位置必然已有数据。设计 §五 承诺的“断电后重跑”要求这种情况仍判可迁移，
 /// 只有「同名且内容不同」（两边各自有新数据）才真需要人来处置。
 pub fn detect_in(paths: &StoragePaths) -> StorageState {
-    if paths.content_root == paths.config_root {
+    if paths.content_root == paths.app_root {
         return StorageState::Current;
     }
-    let legacy = legacy_items(&paths.config_root);
+    // 旧布局的「我的数据」直接放在应用目录根（不是配置根——配置根现在是 config\）
+    let legacy = legacy_items(&paths.app_root);
     if legacy.is_empty() {
         // 旧位置已清空：新位置有数据 = 已就位，没数据 = 全新安装
         return detect_state(content_has_data(&paths.content_root), false);
@@ -101,6 +105,159 @@ pub fn detect_in(paths: &StoragePaths) -> StorageState {
     } else {
         StorageState::Conflict
     }
+}
+
+/// 搬家备份只保留**最近一份**。
+///
+/// 为什么要删：每搬一次家就多一份“搬家前的完整原件”，不清就会在磁盘上越积越多，
+/// 而且它在设置页以外看不见、摸不着（真机上一台机器堆过 3 份 ≈ 300 MB，而实际数据只 50 MB）。
+/// 只留最近一份 = 既保住“事后退一次”的安全网，又不让它长成垃圾。
+///
+/// 安全线：只认 `.migrated-backup-<日期>` 这一种目录名，其他一概不碰；同一天多次搬家
+/// 本来就共用一个目录（份数 ≤1 时不删目录），不会误删本轮刚归档的原件。
+/// 删除失败只记日志：备份是额外保险，清不掉不影响正常使用。
+pub fn prune_backups(root: &Path) -> (Vec<String>, u64) {
+    let backups = find_backups(root);
+    let Some(newest) = backups.last().cloned() else {
+        return (Vec::new(), 0);
+    };
+    let mut removed = Vec::new();
+    let mut freed = 0u64;
+    // find_backups 按名字升序（名字就是日期），最后一个才是最新的一份
+    for dir in backups.iter().take(backups.len() - 1) {
+        let bytes = super::paths::dir_size(dir);
+        match std::fs::remove_dir_all(dir) {
+            Ok(()) => {
+                freed += bytes;
+                if let Some(n) = dir.file_name() {
+                    removed.push(n.to_string_lossy().into_owned());
+                }
+            }
+            Err(e) => log_warn!("清理旧搬家备份失败（不影响使用）：{} {e}", dir.display()),
+        }
+    }
+    // 留下的这份内部也要收：同一天搬两次会共存 messages.json 与 messages.json.1，
+    // 回退只取后缀最大的那份，旧世代永远用不到却照占磁盘（真机实测一天内 99→198 MB）。
+    freed += prune_stale_generations(&newest);
+    // 顶层往下还要再收一层：音频是逐文件归档的，旧世代堆在 audio\\ 里面，
+    // 只看顶层会漏（真机实测顶层已只留 .1，但 audio 里叠了两代 256 个文件）。
+    let kept: Vec<PathBuf> = backup_items(&newest).into_iter().map(|i| i.src).collect();
+    for kept_path in &kept {
+        if kept_path.is_dir() {
+            freed += prune_nested_generations(kept_path);
+        }
+    }
+    if !removed.is_empty() || freed > 0 {
+        log_info!(
+            "已清理旧搬家备份（{} 份目录，共释放 {:.1} MB），只保留最近一份",
+            removed.len(),
+            freed as f64 / 1024.0 / 1024.0
+        );
+    }
+    (removed, freed)
+}
+
+/// 只留每个逻辑名的最新世代，删掉备份目录里更旧的归档。
+///
+/// 判定直接复用 `backup_items`（它就是“取后缀最大的那份”的回退口径），
+/// 所以不会出现“清了但回退还需要它”。陌生文件（不在内容清单里）一律不碰。
+fn prune_stale_generations(dir: &Path) -> u64 {
+    let keep: Vec<PathBuf> = backup_items(dir).into_iter().map(|i| i.src).collect();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut freed = 0u64;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(raw) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        // 只处理我们归档过的内容条目（含 .N 世代），其他文件不动
+        if logical_name(&raw).is_none() {
+            continue;
+        }
+        if keep.iter().any(|k| k == &path) {
+            continue;
+        }
+        let bytes = path_size(&path);
+        let ok = if path.is_dir() {
+            std::fs::remove_dir_all(&path).is_ok()
+        } else {
+            std::fs::remove_file(&path).is_ok()
+        };
+        if ok {
+            freed += bytes;
+        }
+    }
+    freed
+}
+
+/// 归档目录**内部**的同名多世代清理（递归一层层走下去）。
+///
+/// `free_backup_target` 遇到重名时生成 `名字.1`、`名字.2`……对同一个音频文件来说，
+/// 旧世代就是纯占盘的重复件。规则只认“后缀是纯数字”这种我们自己造的名字
+///（如 `m_1.wav.1`）与它的裸名兄弟（`m_1.wav`），正常文件（`voice_1.wav` 这种
+/// 以字母扩展名结尾的）不会被误伤。有编号兄弟时裸名算最旧（它是第一次归档）。
+pub fn prune_nested_generations(dir: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    // (基名, 世代序号) -> 路径；裸名记作 -1（比任何 .N 都旧）
+    let mut groups: Vec<(String, i64, PathBuf)> = Vec::new();
+    let mut freed = 0u64;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            freed += prune_nested_generations(&path); // 目录先钻下去（archive 逐文件归档就嵌在这里）
+        }
+        let Some(raw) = path.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        match split_generation(&raw) {
+            Some((base, suffix)) => groups.push((base, suffix, path)),
+            None => groups.push((raw, -1, path)),
+        }
+    }
+    // 每个基名只留最大后缀，其余删掉
+    let bases: Vec<String> = {
+        let mut v: Vec<String> = groups.iter().map(|g| g.0.clone()).collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    for base in bases {
+        let members: Vec<(i64, PathBuf)> =
+            groups.iter().filter(|g| g.0 == base).map(|g| (g.1, g.2.clone())).collect();
+        if members.len() < 2 {
+            continue;
+        }
+        let newest = members.iter().map(|m| m.0).max().unwrap_or(-1);
+        for (suffix, path) in members {
+            if suffix >= newest {
+                continue;
+            }
+            let bytes = path_size(&path);
+            let ok = if path.is_dir() {
+                std::fs::remove_dir_all(&path).is_ok()
+            } else {
+                std::fs::remove_file(&path).is_ok()
+            };
+            if ok {
+                freed += bytes;
+            }
+        }
+    }
+    freed
+}
+
+/// 拆 `名字.N`（N 为纯数字）成 (基名, 后缀)。不是这个形式就返回 None。
+fn split_generation(name: &str) -> Option<(String, i64)> {
+    let (stem, tail) = name.rsplit_once('.')?;
+    if tail.is_empty() || !tail.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let suffix: i64 = tail.parse().ok()?;
+    Some((stem.to_string(), suffix))
 }
 
 /// 内容根是否已有内容类数据（判“新布局已就位”用）。
@@ -179,6 +336,10 @@ pub fn migrate_items_with_verify(
             Ok(()) => report.moved += 1,
             Err(e) => log_warn!("迁移原件入备份失败（数据已在新位置，原件保留）: {e}"),
         }
+    }
+    // 备份只留最近一份：更早的那份已被本次搬家取代，留着就是用户看不见也删不掉的磁盘垃圾
+    if let Some(parent) = backup.parent() {
+        prune_backups(parent);
     }
     Ok(report)
 }
@@ -491,6 +652,122 @@ mod tests {
     }
 
     #[test]
+    fn 归档目录内部的重复世代也会被收掉() {
+        // 真机形状：audio 里共存 m_1.wav（上一代）与 m_1.wav.1（最新一代）。
+        // 另外放两个形状相似但不该动的名字：voice_1.wav（字母扩展名）、only.wav（无兄弟）。
+        let dir = tempfile::tempdir().unwrap();
+        let audio = dir.path().join(AUDIO_DIR_NAME);
+        std::fs::create_dir_all(&audio).unwrap();
+        std::fs::write(audio.join("m_1.wav"), b"older").unwrap();
+        std::fs::write(audio.join("m_1.wav.1"), b"newest").unwrap();
+        std::fs::write(audio.join("voice_1.wav"), b"normal").unwrap();
+        std::fs::write(audio.join("only.wav"), b"single").unwrap();
+
+        let freed = prune_nested_generations(dir.path());
+
+        assert!(freed > 0, "应报出释放量");
+        assert!(!audio.join("m_1.wav").exists(), "旧世代应被清掉");
+        assert_eq!(std::fs::read(audio.join("m_1.wav.1")).unwrap(), b"newest", "最新一代必须保留");
+        assert!(audio.join("voice_1.wav").exists(), "字母扩展名的正常文件不得被误伤");
+        assert!(audio.join("only.wav").exists(), "没有兄弟归档的单文件不得被删");
+    }
+
+    #[test]
+    fn 同一天搬两次时旧世代也会被收掉() {
+        // 同一天共用一个备份目录，里面会同时存在 messages.json（旧）与
+        // messages.json.1（新）。回退只取 .1，所以旧那份就是纯占盘的垃圾。
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let only = root.join(".migrated-backup-20261023");
+        std::fs::create_dir_all(&only).unwrap();
+        std::fs::write(only.join("messages.json"), b"older-list").unwrap();
+        std::fs::write(only.join("messages.json.1"), b"newest-list").unwrap();
+        // 陌生文件不得被碰
+        std::fs::write(only.join("notes.txt"), b"keep me").unwrap();
+
+        let (removed, freed) = prune_backups(root);
+
+        assert!(removed.is_empty(), "只有一份目录时不删目录本身");
+        assert!(freed > 0, "应报出内部旧世代的释放量");
+        assert!(!only.join("messages.json").exists(), "旧世代应被清掉");
+        assert_eq!(std::fs::read(only.join("messages.json.1")).unwrap(), b"newest-list", "回退要用的那份必须保留");
+        assert!(only.join("notes.txt").exists(), "不属于内容清单的文件一律不碰");
+    }
+
+    #[test]
+    fn 备份清理只留最近一份且不碰其他目录() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        for name in ["20261011", "20261022", "20261023"] {
+            let b = root.join(format!(".migrated-backup-{name}"));
+            std::fs::create_dir_all(&b).unwrap();
+            std::fs::write(b.join("messages.json"), b"x").unwrap();
+        }
+        // 干扰项：名字相近但不是备份的目录一律不得碰
+        std::fs::create_dir_all(root.join("data")).unwrap();
+        std::fs::write(root.join("data").join("messages.json"), b"[]").unwrap();
+        std::fs::create_dir_all(root.join("backup-20261010-pre-engine-import")).unwrap();
+
+        let (removed, freed) = prune_backups(root);
+
+        assert_eq!(removed.len(), 2, "只留最新一份：{removed:?}");
+        assert!(removed.iter().any(|n| n.contains("20261011")));
+        assert!(removed.iter().any(|n| n.contains("20261022")));
+        assert!(root.join(".migrated-backup-20261023").is_dir(), "最新一份必须保留");
+        assert!(root.join("data").join("messages.json").is_file(), "非备份目录不得被碰");
+        assert!(root.join("backup-20261010-pre-engine-import").is_dir(), "旧式 backup-* 不在清理范围");
+        assert!(freed > 0, "应报出释放的字节数");
+    }
+
+    #[test]
+    fn 只有一份或零份备份时清理是空操作() {
+        let dir = tempfile::tempdir().unwrap();
+        let (removed, freed) = prune_backups(dir.path());
+        assert!(removed.is_empty() && freed == 0, "没有备份时不动任何东西");
+
+        std::fs::create_dir_all(dir.path().join(".migrated-backup-20261023")).unwrap();
+        let (removed, _) = prune_backups(dir.path());
+        assert!(removed.is_empty(), "只剩一份时不动");
+        assert!(dir.path().join(".migrated-backup-20261023").is_dir());
+    }
+
+    #[test]
+    fn 搬家成功后自动只留最近一份备份() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join("app");
+        let content = legacy.join("data");
+        std::fs::create_dir_all(&legacy).unwrap();
+        // 上一轮留下的旧备份
+        let old = legacy.join(".migrated-backup-20260101");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("messages.json"), b"old").unwrap();
+        // 本轮待迁移项
+        std::fs::write(legacy.join("messages.json"), b"new").unwrap();
+
+        let report = migrate_items(&legacy, &content, "20260202").unwrap();
+
+        assert_eq!(report.moved, 1);
+        assert!(!old.exists(), "旧备份应在搬家成功后被清掉");
+        assert!(legacy.join(".migrated-backup-20260202").join("messages.json").is_file());
+    }
+
+    #[test]
+    fn 引擎数据插件目录也算我的数据() {
+        // 拆根后内容根从应用目录根换成 data\，plugin-data 里的本地模型必须跟着走，
+        // 否则用户升级后会被要求重新下载（曾经扫清单就漏过这一项）。
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(PLUGIN_DATA_DIR_NAME).join("demo-tts")).unwrap();
+        std::fs::write(
+            dir.path().join(PLUGIN_DATA_DIR_NAME).join("demo-tts").join("model.bin"),
+            b"x",
+        )
+        .unwrap();
+        let items = legacy_items(dir.path());
+        assert_eq!(items.len(), 1);
+        assert!(items[0].ends_with(PLUGIN_DATA_DIR_NAME));
+    }
+
+    #[test]
     fn 迁移执行后原件进备份且记录可读() {
         let dir = tempfile::tempdir().unwrap();
         let legacy = dir.path().join("legacy");
@@ -553,7 +830,13 @@ mod tests {
         let content = dir.path().join("data");
         std::fs::create_dir_all(&cfg).unwrap();
         std::fs::create_dir_all(&content).unwrap();
-        let p = StoragePaths::from_dirs(cfg.clone(), content.clone(), dir.path().join("plugins"), false);
+        let p = StoragePaths::from_dirs(
+            cfg.clone(),
+            cfg.join("config"),
+            content.clone(),
+            dir.path().join("plugins"),
+            false,
+        );
 
         // 旧位置有数据、新位置空 → 可迁移
         std::fs::write(cfg.join("messages.json"), b"same-bytes").unwrap();
@@ -569,7 +852,7 @@ mod tests {
     }
 
     #[test]
-    fn 原件入备份遇同名时改名不覆盖不静默丢弃() {
+    fn 原件入备份遇同名时改名不覆盖且旧世代被收掉() {
         // 回退过又重搬（或同一天多次搬迁）时，备份目录里可能已有同名项。
         // Windows 上 rename 到已存在的文件会直接失败；若只记一条警告跳过，
         // 原件就留在旧位置 → 下次仍判待迁移 → **每次启动重搬一遍、永远不收敛**。
@@ -590,15 +873,16 @@ mod tests {
 
         assert_eq!(report.moved, 1, "原件必须被收走，否则迁移永不收敛");
         assert!(!legacy.join("messages.json").exists(), "旧位置不该还留着它");
-        // 两份都在：上一轮的归档没被动过，这一轮的改名存放
-        assert_eq!(std::fs::read(backup.join("messages.json")).unwrap(), b"archived", "已有归档不得被覆盖");
-        let extra: Vec<String> = (std::fs::read_dir(&backup).unwrap())
-            .flatten()
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .filter(|n| n != "messages.json")
-            .collect();
-        assert_eq!(extra.len(), 1, "本轮回退件应改名归档：{extra:?}");
-        assert_eq!(std::fs::read(backup.join(&extra[0])).unwrap(), b"same-bytes");
+        // 归档当下绝不覆盖上一轮同名件（Windows rename 到已存在文件会失败）→ 本轮改名 .1
+        assert_eq!(
+            std::fs::read(backup.join("messages.json.1")).unwrap(),
+            b"same-bytes",
+            "本轮原件应改名入备份，不被上一轮盖掉"
+        );
+        // 搬完后的清理只留最新世代：backup_items 回退时取后缀最大的那份，
+        // 上一轮的裸名件永远用不到，留着就是同一天越堆越大的磁盘垃圾。
+        assert!(!backup.join("messages.json").exists(), "旧世代应在搬家后被清掉");
+        assert_eq!(find_backups(&legacy).len(), 1, "备份目录本身也只留最新一份");
     }
 
     #[test]

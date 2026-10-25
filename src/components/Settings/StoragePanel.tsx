@@ -15,12 +15,13 @@ import {
   getStorageReport,
   migrateStorageNow,
   pickDirectory,
+  restartApp,
   setContentRoot,
   type StorageMoveReport,
   type StorageReport,
 } from "../../services/invoke";
 import { formatBytes } from "../../utils/format";
-import { confirm } from "../common/ConfirmDialog";
+import { confirm, showInfo } from "../common/ConfirmDialog";
 import { toast } from "../common/Toast";
 import { SubPanel } from "../common/SettingsSection";
 import { OrphanRows } from "../Plugins/OrphanDataSection";
@@ -47,9 +48,13 @@ export interface ChangeContentRootDeps extends FlowDeps {
   pickDir: () => Promise<string | null>;
   confirmMove: (target: string) => Promise<boolean>;
   move: (target: string) => Promise<StorageMoveReport>;
+  /** 搬家成功后告知“要重启”：用户点掉或超时都继续往下走 */
+  noticeRestart: (message: string) => Promise<void>;
+  /** 真正重启软件 */
+  restart: () => Promise<void>;
 }
 
-/** 「更改数据位置」编排：选目录 → 确认 → 迁移 → 提示 → 重新统计（纯逻辑，便于单测） */
+/** 「更改数据位置」编排：选目录 → 确认 → 迁移 → 重启生效（纯逻辑，便于单测） */
 export async function changeContentRootFlow(deps: ChangeContentRootDeps): Promise<void> {
   let target: string | null;
   try {
@@ -64,11 +69,18 @@ export async function changeContentRootFlow(deps: ChangeContentRootDeps): Promis
   deps.setBusy("正在迁移…");
   try {
     const report = await deps.move(target);
-    deps.notify(
-      report.need_restart
-        ? `已迁移 ${report.moved_files} 个文件（${formatBytes(report.moved_bytes)}），重启后生效`
-        : "已更新「我的数据」位置",
-    );
+    if (report.need_restart) {
+      // 内容根是启动时一次性解析的：不重启就仍在读写旧位置，搬家后新发的消息会被
+      // 留在旧目录、下次启动“看不见”（足够像丢数据）。所以不给“以后再说”的选项，
+      // 说明完就重启（用户点一下“立即重启”）。
+      await deps.noticeRestart(
+        "已把「我的数据」搬到 " + target + "\n（迁移 " + report.moved_files + " 个文件 / " + formatBytes(report.moved_bytes) + "）。"
+          + "\n\n软件要重启一次才会开始读写新位置，现在为你重启；若没有自动打开，请手动再启动一次。",
+      );
+      await deps.restart();
+      return;
+    }
+    deps.notify("已更新「我的数据」位置");
   } catch (e) {
     deps.notify(`更改位置失败：${e}`, "err");
   } finally {
@@ -139,9 +151,9 @@ export function StoragePanelView({
 }: StoragePanelViewProps) {
   return (
     <div className="space-y-4">
-      <SubPanel title="配置" desc="设置、快捷键、API Key、音色与数据位置指针；卸载时默认保留">
+      <SubPanel title="配置" desc="设置、快捷键、API Key、音色与数据位置指针；与「我的数据」分开存放，卸载时默认保留">
         <div className="space-y-3">
-          <PathRow label="配置根" path={report.config_root} onOpen={onOpenPath} />
+          <PathRow label="配置文件夹" path={report.config_root} onOpen={onOpenPath} />
           <PathRow label="插件" path={report.plugins_root} onOpen={onOpenPath} />
           {report.plugins_fallback && (
             <p className={AMBER_NOTE}>
@@ -153,7 +165,7 @@ export function StoragePanelView({
 
       <SubPanel
         title="我的数据"
-        desc="消息记录、合成音频、收藏夹、克隆样本与引擎数据"
+        desc="消息记录、合成音频、收藏夹、克隆样本与引擎数据；与配置分开存放"
         right={
           <button onClick={onChangeLocation} disabled={!!busy} className={BTN_PRIMARY}>
             更改数据位置
@@ -161,7 +173,7 @@ export function StoragePanelView({
         }
       >
         <div className="space-y-3">
-          <PathRow label="当前位置" path={report.content_root} onOpen={onOpenPath} />
+          <PathRow label="数据文件夹" path={report.content_root} onOpen={onOpenPath} />
           {busy && <p className="text-[11px] text-[var(--amber-600)]">{busy}</p>}
           {report.content_fallback && (
             <p className={AMBER_NOTE}>
@@ -170,6 +182,30 @@ export function StoragePanelView({
           )}
         </div>
       </SubPanel>
+
+      {/* 搬家前留的原件：用户不需要操作它，但必须看得见它是什么、占多少
+          （软件自动只留最近一份，不然就是磁盘上 invisible 的垃圾） */}
+      {report.backups.length > 0 && (
+        <div className="rounded-xl border border-[var(--ink-200)]/70 bg-[var(--ink-100)]/25 px-3.5 py-3">
+          <p className="text-xs font-medium text-[var(--ink-700)]">
+            搬家前留的原件（共 {report.backups.length} 份 / {formatBytes(report.backup_bytes)}）
+          </p>
+          <p className="mt-1 text-[11px] leading-relaxed text-[var(--ink-500)]">
+            更改数据位置、或升级时自动搬家，软件会把搬家前的原样文件留一份，万一事后发现数据不对可以退回来。
+            它不影响正常使用，只占磁盘空间；软件只保留最近一次的原件，更早的会在下次搬家后自动删除。
+          </p>
+          <div className="mt-2 space-y-2">
+            {report.backups.map((b, i) => (
+              <PathRow
+                key={b.path}
+                label={(i === 0 ? "最近一份 · " : "更早一份 · ") + formatBytes(b.bytes)}
+                path={b.path}
+                onOpen={onOpenPath}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {report.drives.length > 0 && (
         <div>
@@ -281,6 +317,15 @@ export function StoragePanel() {
   }, [reload]);
 
   const notify = useCallback((message: string, tone: "ok" | "err" = "ok") => toast(message, tone), []);
+
+  /** 搬家后的重启告知：**必须用户点一下「立即重启」才走**。
+   *  真机实测加 5 秒超时的话，人还没看清窗口就没了；而这个框是模态的（遮住输入），
+   *  所以也不存在“看完继续发消息、写到旧位置”的窗口期。 */
+  const noticeRestart = useCallback(
+    (message: string) =>
+      showInfo({ title: "数据已搬家，需要重启一次", message, confirmText: "立即重启" }),
+    [],
+  );
   const refresh = useCallback(() => {
     void reload();
   }, [reload]);
@@ -291,7 +336,7 @@ export function StoragePanel() {
       title: "迁移旧位置数据",
       message:
         `将把旧位置的数据（约 ${formatBytes(report.legacy_bytes)}）复制到新位置：\n${report.content_root}\n\n` +
-        "原件不删除，会移入配置根的备份目录保留。迁移期间请不要关闭软件。",
+        "原件不删除，会移入应用目录下的备份文件夹保留。迁移期间请不要关闭软件。",
       confirmText: "开始迁移",
     });
     if (!ok) return;
@@ -315,12 +360,14 @@ export function StoragePanel() {
           title: "更改「我的数据」位置",
           message:
             `消息、收藏、音频、样本与引擎数据将迁移到：\n${target}\n\n` +
-            "迁移期间请不要关闭软件。旧位置的原件会保留在备份目录，可随时找回。",
+            "迁移期间请不要关闭软件。旧位置的原件会保留一份在备份目录，可用来退回；软件只留最近一次的备份。",
           confirmText: "开始迁移",
         }),
       move: setContentRoot,
       setBusy,
       notify,
+      noticeRestart,
+      restart: restartApp,
       reload: refresh,
     });
   }

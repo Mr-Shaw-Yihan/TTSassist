@@ -43,19 +43,26 @@ pub fn audio_rel(id: &str, ext: &str) -> String { format!("{AUDIO_DIR_NAME}/{id}
 /// 记录里用的相对克隆样本路径
 pub fn samples_rel(name: &str, ext: &str) -> String { format!("{SAMPLES_DIR_NAME}/{name}.{ext}") }
 
-/// 应用标识符，同时是配置根目录名。主程序走 Tauri 的 `app_data_dir()`，
+/// 应用标识符，同时是应用目录名（容器）。主程序走 Tauri 的 `app_data_dir()`，
 /// 命令行急救程序没有 AppHandle、只能自己按 `%APPDATA%\<这个名>` 拼，
 /// 所以用一条单测把它钉在 tauri.conf.json 上，防止两边拼错到不同目录。
 pub const CONFIG_DIR_NAME: &str = "com.voiceassist.app";
 /// 内容根指针的文件名（字面量只存这一份，`pointer_file()` 与急救程序都用它）
 pub const POINTER_FILE_NAME: &str = "storage.json";
+/// 应用目录下的配置子目录名：配置文件全部在这里，应用目录根只做容器
+pub const CONFIG_SUBDIR_NAME: &str = "config";
+/// 应用目录下的默认「我的数据」子目录名（用户未自选时的落点）
+pub const DATA_SUBDIR_NAME: &str = "data";
 
 /// 三根的持有者。由 `lib.rs` 的 `resolve_storage_paths` 在启动时构造一次，之后只读。
 #[derive(Debug, Clone, PartialEq)]
 pub struct StoragePaths {
-    /// %APPDATA%\com.voiceassist.app —— 只放小而敏感的配置文件
+    /// 应用目录：`%APPDATA%\com.voiceassist.app` —— 只做容器。
+    /// 旧布局的配置与「我的数据」曾直接放在这里（启动时搬进 config\ 与 data\）。
+    pub app_root: PathBuf,
+    /// 配置根：`<app_root>\config` —— 只放小而敏感的配置文件
     pub config_root: PathBuf,
-    /// 内容与重数据的根，默认等于配置根；用户可自选（storage.json 指针）
+    /// 内容与重数据的根，默认为 `<app_root>\data`；用户可自选（storage.json 指针）
     pub content_root: PathBuf,
     /// 插件代码根（manifest + dll + registry），跟随安装位置
     pub plugins_root: PathBuf,
@@ -71,12 +78,14 @@ pub struct StoragePaths {
 impl StoragePaths {
     /// 测试与非注入场景用的直构器
     pub fn from_dirs(
+        app_root: PathBuf,
         config_root: PathBuf,
         content_root: PathBuf,
         plugins_root: PathBuf,
         content_fallback: bool,
     ) -> Self {
         Self {
+            app_root,
             config_root,
             content_root,
             plugins_root,
@@ -91,12 +100,17 @@ impl StoragePaths {
     pub fn pairing_file(&self) -> PathBuf { self.config_root.join("remote-pairing.json") }
     /// 内容根指针（用户改过位置或迁移过才存在）
     pub fn pointer_file(&self) -> PathBuf { self.config_root.join(POINTER_FILE_NAME) }
-    /// 迁移中间产物（原件移入、不删除，可回退）
+    /// 迁移中间产物（原件移入、不删除，可回退）。放在应用目录根：它既不是配置也不是
+    /// 「我的数据」，且旧版本的备份也在同一层，急救工具扫一处就能找到全部。
     pub fn backup_dir(&self, stamp: &str) -> PathBuf {
-        self.config_root.join(format!(".migrated-backup-{stamp}"))
+        self.app_root.join(format!(".migrated-backup-{stamp}"))
     }
 
     // ── 内容根下的条目 ────────────────────────
+    /// 默认「我的数据」位置：`<app_root>\data`
+    pub fn default_content_root(&self) -> PathBuf { self.app_root.join(DATA_SUBDIR_NAME) }
+    /// 内容根是否仍是默认位置（用于“用户自选过没有”的判定）
+    pub fn content_is_default(&self) -> bool { self.content_root == self.default_content_root() }
     pub fn messages_file(&self) -> PathBuf { self.content_root.join("messages.json") }
     pub fn favorites_file(&self) -> PathBuf { self.content_root.join("favorites.json") }
     pub fn subtitle_history_file(&self) -> PathBuf {
@@ -180,14 +194,73 @@ pub fn decide_plugins_root(
     (content_root.join("plugins"), true)
 }
 
-/// 由 `%APPDATA%` 拼配置根（拆成纯函数以便单测，不读环境变量）
-pub fn config_root_from(appdata: Option<PathBuf>) -> Option<PathBuf> {
+/// 由 `%APPDATA%` 拼应用目录（拆成纯函数以便单测，不读环境变量）
+pub fn app_root_from(appdata: Option<PathBuf>) -> Option<PathBuf> {
     appdata.map(|a| a.join(CONFIG_DIR_NAME))
 }
 
-/// 急救程序用的配置根解析。拿不到 `APPDATA` 时返回 None，由调用方说明原因而不是猜一个。
+/// 由 `%APPDATA%` 拼配置根（应用目录下的 config\）
+pub fn config_root_from(appdata: Option<PathBuf>) -> Option<PathBuf> {
+    app_root_from(appdata).map(|a| a.join(CONFIG_SUBDIR_NAME))
+}
+
+/// 急救程序用的应用目录解析。拿不到 `APPDATA` 时返回 None，由调用方说明原因而不是猜一个。
+pub fn app_root_from_env() -> Option<PathBuf> {
+    app_root_from(std::env::var_os("APPDATA").map(PathBuf::from))
+}
+
+/// 急救程序用的配置根解析（config\）
 pub fn config_root_from_env() -> Option<PathBuf> {
     config_root_from(std::env::var_os("APPDATA").map(PathBuf::from))
+}
+
+/// 旧布局直接放在应用目录根的配置文件名（新布局全部进 config\）。
+const CONFIG_FILES: [&str; 4] = [
+    "settings.json",
+    "remote-pairing.json",
+    "remote-config-cache.json",
+    POINTER_FILE_NAME,
+];
+
+/// 解析并（首次启动时）把旧布局的配置搬进 `config\`，返回本次要用的配置根。
+///
+/// 安全底线：新位置没有 settings.json 就**绝不擅自切换**——建目录/搬迁失败时
+/// 继续用应用目录根（旧布局），保证设置始终读得到；复制失败时原件保留。
+pub fn ensure_config_root(app_root: &Path) -> PathBuf {
+    let config_dir = app_root.join(CONFIG_SUBDIR_NAME);
+    if config_dir.join("settings.json").is_file() {
+        return config_dir;
+    }
+    if std::fs::create_dir_all(&config_dir).is_err() {
+        return app_root.to_path_buf();
+    }
+    // 全新安装：应用目录根没有 settings.json → 直接用新目录
+    if !app_root.join("settings.json").is_file() {
+        return config_dir;
+    }
+    for name in CONFIG_FILES {
+        let src = app_root.join(name);
+        let dst = config_dir.join(name);
+        if src.is_file() && !dst.exists() {
+            if let Err(e) = relocate(&src, &dst) {
+                log_warn!("配置迁移失败（{name}）：{e}");
+            }
+        }
+    }
+    if config_dir.join("settings.json").is_file() {
+        config_dir
+    } else {
+        log_warn!("配置未能搬入 config\\，本次继续使用旧配置根：{}", app_root.display());
+        app_root.to_path_buf()
+    }
+}
+
+/// 搬单个配置：同卷 rename；跨卷/被占用时复制（原件保留，旧根从此不再被读）。
+fn relocate(src: &Path, dst: &Path) -> std::io::Result<()> {
+    match std::fs::rename(src, dst) {
+        Ok(()) => Ok(()),
+        Err(_) => std::fs::copy(src, dst).map(|_| ()),
+    }
 }
 
 /// 读指针文件；不存在 / JSON 坏 / 值为空都返回 None（= 走默认位置，不报错不崩）。
@@ -386,12 +459,14 @@ mod tests {
     #[test]
     fn 各归属路径不共用根() {
         let p = StoragePaths::from_dirs(
-            PathBuf::from("C:\\cfg"),
+            PathBuf::from("C:\\app"),
+            PathBuf::from("C:\\app\\config"),
             PathBuf::from("D:\\app\\data"),
             PathBuf::from("D:\\app\\plugins"),
             false,
         );
-        assert_eq!(p.settings_file(), PathBuf::from("C:\\cfg\\settings.json"));
+        assert_eq!(p.settings_file(), PathBuf::from("C:\\app\\config\\settings.json"));
+        assert_eq!(p.pointer_file(), PathBuf::from("C:\\app\\config\\storage.json"));
         assert_eq!(p.messages_file(), PathBuf::from("D:\\app\\data\\messages.json"));
         assert_eq!(p.audio_dir(), PathBuf::from("D:\\app\\data\\audio"));
         assert_eq!(
@@ -400,8 +475,10 @@ mod tests {
         );
         assert_eq!(
             p.backup_dir("20261011"),
-            PathBuf::from("C:\\cfg\\.migrated-backup-20261011")
+            PathBuf::from("C:\\app\\.migrated-backup-20261011"),
+            "备份既不属于配置也不属于我的数据，放在应用目录根"
         );
+        assert_eq!(p.default_content_root(), PathBuf::from("C:\\app\\data"));
     }
 
     #[test]
@@ -409,6 +486,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = StoragePaths::from_dirs(
             dir.path().join("cfg"),
+            dir.path().join("cfg").join(CONFIG_SUBDIR_NAME),
             dir.path().join("data"),
             dir.path().join("plugins"),
             false,
@@ -455,13 +533,18 @@ mod tests {
 
     #[test]
     fn 配置根拼接与标识符对齐配置文件() {
-        // 急救程序自己拼配置根，拼错就等于“找不到用户的备份”。
+        // 急救程序自己拼应用目录，拼错就等于“找不到用户的备份”。
         // 不靠人记，直接拿 tauri.conf.json 的 identifier 对账。
         assert_eq!(
-            config_root_from(Some(PathBuf::from("C:\\Users\\x\\AppData\\Roaming"))),
+            app_root_from(Some(PathBuf::from("C:\\Users\\x\\AppData\\Roaming"))),
             Some(PathBuf::from("C:\\Users\\x\\AppData\\Roaming\\com.voiceassist.app"))
         );
-        assert!(config_root_from(None).is_none(), "拿不到 APPDATA 就给 None，不猜路径");
+        assert_eq!(
+            config_root_from(Some(PathBuf::from("C:\\Users\\x\\AppData\\Roaming"))),
+            Some(PathBuf::from("C:\\Users\\x\\AppData\\Roaming\\com.voiceassist.app\\config")),
+            "配置根是应用目录下的 config\\"
+        );
+        assert!(app_root_from(None).is_none(), "拿不到 APPDATA 就给 None，不猜路径");
 
         let conf = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tauri.conf.json"))
             .expect("读不到 tauri.conf.json");
@@ -470,7 +553,88 @@ mod tests {
         assert_eq!(
             v["identifier"].as_str(),
             Some(CONFIG_DIR_NAME),
-            "配置根目录名与 tauri.conf.json 的 identifier 不一致，急救程序会找错地方"
+            "应用目录名与 tauri.conf.json 的 identifier 不一致，急救程序会找错地方"
         );
+    }
+
+    #[test]
+    fn 旧布局配置搬进config子目录且幂等() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path();
+        std::fs::write(app.join("settings.json"), b"{\"a\":1}").unwrap();
+        std::fs::write(app.join("storage.json"), b"{}").unwrap();
+        std::fs::write(app.join("messages.json"), b"[]").unwrap();
+
+        let cfg = ensure_config_root(app);
+
+        assert_eq!(cfg, app.join(CONFIG_SUBDIR_NAME));
+        assert!(cfg.join("settings.json").is_file(), "配置必须进 config\\");
+        assert!(cfg.join("storage.json").is_file());
+        assert!(!cfg.join("messages.json").exists(), "内容不能被当成配置搬走");
+        assert!(app.join("messages.json").exists(), "内容留在应用目录根，交给内容迁移");
+        // 幂等：第二次直接命中
+        assert_eq!(ensure_config_root(app), cfg);
+    }
+
+    #[test]
+    fn 全新安装直接使用config子目录() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = ensure_config_root(dir.path());
+        assert_eq!(cfg, dir.path().join(CONFIG_SUBDIR_NAME));
+        assert!(cfg.is_dir());
+    }
+
+    #[test]
+    fn 旧布局升级到config与data完整走通() {
+        use crate::storage::migrate::{detect_in, migrate_items, StorageState};
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path();
+        // 旧布局：配置与「我的数据」都直接放在应用目录根
+        std::fs::write(app.join("settings.json"), b"{\"theme\":\"dark\"}").unwrap();
+        std::fs::write(app.join(POINTER_FILE_NAME), pointer_json(app, None)).unwrap();
+        std::fs::write(app.join("messages.json"), b"[]").unwrap();
+        std::fs::create_dir_all(app.join(AUDIO_DIR_NAME)).unwrap();
+        std::fs::write(app.join(AUDIO_DIR_NAME).join("m.wav"), b"x").unwrap();
+        std::fs::create_dir_all(app.join(PLUGIN_DATA_DIR_NAME).join("demo-tts")).unwrap();
+        std::fs::write(
+            app.join(PLUGIN_DATA_DIR_NAME).join("demo-tts").join("model.bin"),
+            b"m",
+        )
+        .unwrap();
+
+        // 1) 配置搬进 config\
+        let cfg = ensure_config_root(app);
+        assert_eq!(cfg, app.join(CONFIG_SUBDIR_NAME));
+        assert!(cfg.join("settings.json").is_file());
+        assert!(!app.join("settings.json").exists(), "配置应从旧根移走");
+
+        // 2) 指针指向旧默认 → 视为未自选，内容根用 data\
+        assert_eq!(
+            read_pointer(&cfg.join(POINTER_FILE_NAME)).as_deref(),
+            Some(app),
+            "旧指针被搬进了 config\\"
+        );
+        let content = app.join(DATA_SUBDIR_NAME);
+        let paths = StoragePaths::from_dirs(
+            app.to_path_buf(),
+            cfg.clone(),
+            content.clone(),
+            dir.path().join("plugins"),
+            false,
+        );
+        assert!(paths.content_is_default());
+        assert_eq!(detect_in(&paths), StorageState::Migratable);
+
+        // 3) 自动迁移：内容进 data\，引擎数据跟上，原件进备份
+        let report = migrate_items(app, &content, "20261023").unwrap();
+        assert!(content.join("messages.json").is_file());
+        assert!(content.join(AUDIO_DIR_NAME).join("m.wav").is_file());
+        assert!(
+            content.join(PLUGIN_DATA_DIR_NAME).join("demo-tts").join("model.bin").is_file(),
+            "引擎数据必须跟着走，否则升级后要重新下载模型"
+        );
+        assert!(!app.join("messages.json").exists(), "旧根内容应清空");
+        assert!(report.backup.join("messages.json").is_file(), "原件进备份可回退");
+        assert_eq!(detect_in(&paths), StorageState::Current);
     }
 }

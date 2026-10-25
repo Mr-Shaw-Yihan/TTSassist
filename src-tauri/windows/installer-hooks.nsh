@@ -10,6 +10,7 @@
 ; 卸载：自定义一页两个勾选框（默认都不勾），分别删除「配置」与「我的数据」。
 ;   - 「我的数据」的真实位置写在 storage.json 指针里（可能在其他盘），用 PowerShell
 ;     解析后写成 UTF-16 临时文件再读回，避免 NSIS 直接读 UTF-8 中文路径乱码。
+;     指针本身在新布局的 config\ 下，旧布局的应用目录根也兼容。
 ;   - 只删固定清单（消息/收藏/字幕历史/音频/样本）与迁移备份目录，绝不整根递归删除，
 ;     删除目标先写入 $INSTDIR\uninstall-cleanup.log 便于事后追查。
 ;   - Tauri 内置的「删除应用数据」勾选框会递归删整个配置根，语义过粗；本钩子把它
@@ -21,6 +22,9 @@
 !include "FileFunc.nsh"
 
 !define VA_CONFIG_ROOT "$APPDATA\com.voiceassist.app"
+; 新布局：配置进 config\，我的数据在 data\（应用目录根只做容器）
+!define VA_CONFIG_DIR  "${VA_CONFIG_ROOT}\config"
+!define VA_DATA_ROOT   "${VA_CONFIG_ROOT}\data"
 
 Var VaDeleteConfigCheckbox
 Var VaDeleteDataCheckbox
@@ -63,7 +67,7 @@ Function un.VaCleanupPage
   ${NSD_CreateCheckBox} 0 46u 100% 12u "删除我的数据（消息记录、合成音频、收藏夹、克隆样本）"
   Pop $VaDeleteDataCheckbox
 
-  ${If} $VaContentRoot == "${VA_CONFIG_ROOT}"
+  ${If} $VaContentRoot == "${VA_DATA_ROOT}"
     ${NSD_CreateLabel} 0 62u 100% 18u "「我的数据」当前位置：$VaContentRoot（默认位置）"
     Pop $0
   ${Else}
@@ -85,11 +89,23 @@ FunctionEnd
 ; 解析「我的数据」位置：storage.json 指针 -> 配置根（解析失败时的安全回退）。
 ; 输出 $0；结果同时留在 $VaContentRoot 之外的寄存器里由调用方取走。
 Function un.VaResolveContentRoot
-  StrCpy $0 "${VA_CONFIG_ROOT}"
-  IfFileExists "${VA_CONFIG_ROOT}\storage.json" 0 va_resolve_done
+  StrCpy $0 "${VA_DATA_ROOT}"
+  ; 指针：新布局 config\storage.json 优先，旧布局应用目录根兜底
+  StrCpy $4 "${VA_CONFIG_DIR}\storage.json"
+  IfFileExists "$4" va_resolve_pointer
+  StrCpy $4 "${VA_CONFIG_ROOT}\storage.json"
+  IfFileExists "$4" va_resolve_pointer
 
+  ; 没有指针：应用目录根若还留着旧布局的「我的数据」（尚未迁移），删的就是它
+  ${If} ${FileExists} "${VA_CONFIG_ROOT}\messages.json"
+  ${OrIf} ${FileExists} "${VA_CONFIG_ROOT}\audio\*.*"
+    StrCpy $0 "${VA_CONFIG_ROOT}"
+  ${EndIf}
+  Goto va_resolve_done
+
+  va_resolve_pointer:
   Delete "${VA_CONFIG_ROOT}\_uninstall-content-root.txt"
-  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$ErrorActionPreference='Stop'; $$j=Get-Content -LiteralPath (Join-Path $$env:APPDATA 'com.voiceassist.app\storage.json') -Raw -Encoding UTF8 | ConvertFrom-Json; if ($$j.content_root) { [IO.File]::WriteAllText((Join-Path $$env:APPDATA 'com.voiceassist.app\_uninstall-content-root.txt'), [string]$$j.content_root, [Text.Encoding]::Unicode) }"`
+  nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$$ErrorActionPreference='Stop'; $$j=Get-Content -LiteralPath '$4' -Raw -Encoding UTF8 | ConvertFrom-Json; if ($$j.content_root) { [IO.File]::WriteAllText('${VA_CONFIG_ROOT}\_uninstall-content-root.txt', [string]$$j.content_root, [Text.Encoding]::Unicode) }"`
   Pop $1
   Pop $2
 
@@ -110,7 +126,10 @@ Function un.VaResolveContentRoot
     ${OrIf} $3 == "$\n"
       StrCpy $2 $2 -1
     ${EndIf}
-    ${If} $2 != ""
+    ${If} $2 == "${VA_CONFIG_ROOT}"
+      ; 指向应用目录根 = 旧默认（不是自选）→ 用新默认 data\
+      StrCpy $0 "${VA_DATA_ROOT}"
+    ${ElseIf} $2 != ""
       StrCpy $0 $2
     ${EndIf}
 
@@ -136,7 +155,8 @@ Function un.VaInitCleanupLog
     Return
   ${EndIf}
   FileWriteUTF16LE /BOM $VaLogHandle "TTSassist 卸载清理记录$\r$\n"
-  FileWriteUTF16LE $VaLogHandle "配置根：${VA_CONFIG_ROOT}$\r$\n"
+  FileWriteUTF16LE $VaLogHandle "应用目录：${VA_CONFIG_ROOT}$\r$\n"
+  FileWriteUTF16LE $VaLogHandle "配置根：${VA_CONFIG_DIR}$\r$\n"
   FileWriteUTF16LE $VaLogHandle "我的数据：$VaContentRoot$\r$\n"
   FileWriteUTF16LE $VaLogHandle "删除配置：$VaDeleteConfigState  删除我的数据：$VaDeleteDataState（1=勾选）$\r$\n"
 FunctionEnd
@@ -149,25 +169,29 @@ Function un.VaDeleteConfig
   StrCpy $R9 "== 删除配置 =="
   !insertmacro VA_LOG_LINE
 
-  StrCpy $R9 "删除文件：${VA_CONFIG_ROOT}\settings.json"
+  ; 新布局在 config\，旧布局在应用目录根（升级后尚未迁移的残留也一并清）
+  StrCpy $R9 "删除文件：${VA_CONFIG_DIR}\settings.json（同时清理应用目录根旧布局残留）"
   !insertmacro VA_LOG_LINE
+  Delete "${VA_CONFIG_DIR}\settings.json"
   Delete "${VA_CONFIG_ROOT}\settings.json"
 
-  StrCpy $R9 "删除文件：${VA_CONFIG_ROOT}\remote-pairing.json"
+  StrCpy $R9 "删除文件：${VA_CONFIG_DIR}\remote-pairing.json"
   !insertmacro VA_LOG_LINE
+  Delete "${VA_CONFIG_DIR}\remote-pairing.json"
   Delete "${VA_CONFIG_ROOT}\remote-pairing.json"
 
-  StrCpy $R9 "删除文件：${VA_CONFIG_ROOT}\remote-config-cache.json"
+  StrCpy $R9 "删除文件：${VA_CONFIG_DIR}\remote-config-cache.json"
   !insertmacro VA_LOG_LINE
+  Delete "${VA_CONFIG_DIR}\remote-config-cache.json"
   Delete "${VA_CONFIG_ROOT}\remote-config-cache.json"
 
-  StrCpy $R9 "删除文件：${VA_CONFIG_ROOT}\storage.json"
+  StrCpy $R9 "删除文件：${VA_CONFIG_DIR}\storage.json"
   !insertmacro VA_LOG_LINE
+  Delete "${VA_CONFIG_DIR}\storage.json"
   Delete "${VA_CONFIG_ROOT}\storage.json"
 
-  StrCpy $R9 "删除目录：${VA_CONFIG_ROOT}\logs"
-  !insertmacro VA_LOG_LINE
-  RMDir /r "${VA_CONFIG_ROOT}\logs"
+  ; 配置目录空了一并移除，不留空壳
+  RMDir "${VA_CONFIG_DIR}"
 FunctionEnd
 
 Function un.VaDeleteData
@@ -224,6 +248,11 @@ Function un.VaDeleteData
   StrCpy $R9 "删除目录：$VaContentRoot\voice_samples"
   !insertmacro VA_LOG_LINE
   RMDir /r "$VaContentRoot\voice_samples"
+
+  ; 日志属于「我的数据」（新布局在 data\logs），不跟配置一起删
+  StrCpy $R9 "删除目录：$VaContentRoot\logs"
+  !insertmacro VA_LOG_LINE
+  RMDir /r "$VaContentRoot\logs"
 
   Call un.VaDeleteBackups
 FunctionEnd

@@ -41,6 +41,15 @@ pub struct DriveInfo {
     pub total_bytes: u64,
 }
 
+/// 「搬家前留的原件」备份目录（可退的安全网）。用户不需要操作它，
+/// 但界面得用大白话告诉他“这是什么、占多少”，否则就是看不见的磁盘垃圾。
+#[derive(Serialize)]
+pub struct BackupInfo {
+    pub name: String,
+    pub path: String,
+    pub bytes: u64,
+}
+
 #[derive(Serialize)]
 pub struct StorageReport {
     pub config_root: String,
@@ -63,6 +72,9 @@ pub struct StorageReport {
     pub plugins_root: String,
     /// true = 安装目录不可写，插件根已回退到 `<我的数据>\plugins`
     pub plugins_fallback: bool,
+    /// 搬家前留的原件（新→旧）及其总体积
+    pub backups: Vec<BackupInfo>,
+    pub backup_bytes: u64,
 }
 
 /// 「更改数据位置」的执行结果（前端据此提示搬了多少、原件在哪、要不要重启）
@@ -128,6 +140,24 @@ pub fn orphan_plugin_data(plugin_data_root: &Path, installed: &[String]) -> Resu
     Ok(out)
 }
 
+/// 列出「搬家前留的原件」备份（新→旧），给界面说“留了几份、占多少、在哪”用。
+fn list_backups(paths: &StoragePaths) -> Vec<BackupInfo> {
+    let mut v: Vec<BackupInfo> = migrate::find_backups(&paths.app_root)
+        .iter()
+        .map(|p| BackupInfo {
+            name: p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            path: p.display().to_string(),
+            bytes: paths::dir_size(p),
+        })
+        .collect();
+    // find_backups 是名字升序，界面想先看到最新的一份
+    v.reverse();
+    v
+}
+
 /// 汇总存储报告。纯函数（状态都从参数进来），便于单测与在 blocking 线程里跑。
 /// 磁盘容量来自系统查询，单测走 `build_report_with_drives` 注入。
 pub fn build_report(paths: &StoragePaths, installed: &[String], storage_choice_made: bool) -> StorageReport {
@@ -181,10 +211,12 @@ fn build_report_with_drives(
         .collect();
 
     let state = migrate::detect_in(paths);
-    let legacy_bytes = migrate::legacy_items(&paths.config_root)
+    let legacy_bytes = migrate::legacy_items(&paths.app_root)
         .iter()
         .map(|p| migrate::path_size(p))
         .sum();
+    let backups = list_backups(paths);
+    let backup_bytes = backups.iter().map(|b| b.bytes).sum();
 
     StorageReport {
         config_root: paths.config_root.display().to_string(),
@@ -199,6 +231,8 @@ fn build_report_with_drives(
         drives,
         plugins_root: paths.plugins_root.display().to_string(),
         plugins_fallback: paths.plugins_fallback,
+        backups,
+        backup_bytes,
     }
 }
 
@@ -325,17 +359,28 @@ pub fn take_storage_notice(state: State<'_, MigrationNotice>) -> Option<String> 
 }
 
 /// 存储页打开时读一次：两根位置、各类占用、残留清单、能否搬家。
+///
+/// 状态一律 `try_state` 取并明式报错，**不用 `state()`**：本命令会在启动早期被首启
+/// 弹窗调用，而 AppState / PluginManager 是 setup 后半段才 manage 的，`state()` 在拿不到时
+/// 会 panic。未就绪就返回 Err，由前端重试；绝不能拿“空插件表”去算残留清单，
+/// 那会把全部 plugin-data 误报成可删的垃圾。
 #[tauri::command]
 pub async fn storage_report(app: AppHandle) -> Result<StorageReport, String> {
-    let paths = app.state::<StoragePaths>().inner().clone();
+    let paths = app
+        .try_state::<StoragePaths>()
+        .ok_or("存储路径尚未就绪")?
+        .inner()
+        .clone();
     let installed: Vec<String> = app
-        .state::<PluginManager>()
+        .try_state::<PluginManager>()
+        .ok_or("插件列表尚未就绪")?
         .list()
         .iter()
         .map(|p| p.id.clone())
         .collect();
     let choice_made = app
-        .state::<AppState>()
+        .try_state::<AppState>()
+        .ok_or("设置尚未就绪")?
         .settings
         .read()
         .map(|s| s.storage_choice_made)
@@ -347,13 +392,22 @@ pub async fn storage_report(app: AppHandle) -> Result<StorageReport, String> {
 
 /// 首启弹窗是否还需要出现：用户没确认过位置就为 true。
 /// 老用户升级时字段缺失 → false（未选）→ 弹一次，之后不再打扰。
+///
+/// **只读最早就绪的 StoragePaths + 磁盘，不依赖 AppState**：本命令是前端最早发出的
+/// IPC 之一，而 setup 里的 AppState 是刻意晚 manage 的（搬家期间禁止前端往内容根写数据），
+/// 用 `State<AppState>` 必然撞上 “state not managed”（真机表现：首启弹窗静默不出现）。
+/// settings.json 由 update_setting 先落盘再更新内存，读盘与读内存等价。
 #[tauri::command]
-pub fn storage_choice_pending(state: State<'_, AppState>) -> Result<bool, String> {
-    state
-        .settings
-        .read()
-        .map(|s| !s.storage_choice_made)
-        .map_err(|e| format!("读取设置失败: {e}"))
+pub fn storage_choice_pending(app: AppHandle) -> Result<bool, String> {
+    let paths = app
+        .try_state::<StoragePaths>()
+        .ok_or("存储路径尚未就绪")?
+        .inner()
+        .clone();
+    let made = crate::storage::settings::load_settings(&paths.config_root).storage_choice_made;
+    // 取证日志：首启弹窗不出现时，靠这行断定后端到底返回了什么（true=该弹）
+    log_info!("[storage] storage_choice_pending: storage_choice_made={made} -> pending={}", !made);
+    Ok(!made)
 }
 
 /// 用户确认「就用默认位置」：记下选择，首启弹窗不再出现。
@@ -559,6 +613,10 @@ fn move_content_with(
     let outcome = copy_content_verified(src, dst, &plan)?;
     after_copy()?;
     archive_sources(src, backup, &outcome.copied);
+    // 备份只留最近一份（与自动迁移同口径）：旧的那份已被本次搬家取代
+    if let Some(parent) = backup.parent() {
+        migrate::prune_backups(parent);
+    }
 
     let mut skipped = plan.skipped;
     skipped.extend(outcome.skipped);
@@ -587,10 +645,10 @@ pub fn should_pull_back_legacy(exe_data: &Path, content_root: &Path) -> bool {
 
 /// 启动时回迁测试版遗留数据，返回给用户看的一句话（无需回迁则 None）。
 ///
-/// 用户自选过位置（content_root != config_root）时绝不回迁：数据不能悄悄搬到他没选的地方，
+/// 用户自选过位置（内容根不是 `<应用目录>\data`）时绝不回迁：数据不能悄悄搬到他没选的地方，
 /// 否则 D 盘用户升级后会看到另一份空列表。失败只记日志，绝不影响启动。
 pub fn pull_back_legacy_if_needed(paths: &StoragePaths) -> Option<String> {
-    if paths.content_root != paths.config_root {
+    if !paths.content_is_default() {
         return None;
     }
     let exe_data = paths.legacy_exe_data.as_deref()?;
@@ -598,9 +656,9 @@ pub fn pull_back_legacy_if_needed(paths: &StoragePaths) -> Option<String> {
         return None;
     }
 
-    let stamp = chrono::Utc::now().format("%Y%m%d").to_string();
+    let stamp = chrono::Local::now().format("%Y%m%d").to_string();
     let backup = paths.backup_dir(&stamp);
-    // 回迁不写指针：默认位置就是配置根，指针只在用户自选后才需要
+    // 回迁不写指针：默认位置就是 `<应用目录>\data`，指针只在用户自选后才需要
     match move_content_with(exe_data, &paths.content_root, &backup, || Ok(())) {
         Ok(r) if r.moved_files > 0 => {
             let mb = r.moved_bytes as f64 / 1024.0 / 1024.0;
@@ -632,7 +690,9 @@ pub async fn set_content_root(path: String, app: AppHandle) -> Result<StorageMov
     let paths = app.state::<StoragePaths>().inner().clone();
     let src = paths.content_root.clone();
     let pointer_file = paths.pointer_file();
-    let backup_root = paths.backup_dir(&chrono::Utc::now().format("%Y%m%d").to_string());
+    // 备份目录名用**本地日期**（不是 UTC）：它会直接显示在设置页上，
+    // 用 UTC 会让凌晨搬家的用户看到“昨天的日期”（真机实测报过）。
+    let backup_root = paths.backup_dir(&chrono::Local::now().format("%Y%m%d").to_string());
 
     let report = tauri::async_runtime::spawn_blocking(move || {
         if !paths::probe_writable(&target) {
@@ -669,6 +729,87 @@ pub async fn set_content_root(path: String, app: AppHandle) -> Result<StorageMov
     Ok(report)
 }
 
+/// 搬家后立刻重启软件。
+///
+/// 为什么必须重启：内容根是启动时**一次性解析**的（StoragePaths 之后只读），
+/// 不重启就一直读写旧位置——用户搬家后新发的消息会落在旧目录里，下次启动改读
+/// 新位置后界面上就“看不见”了（文件在，但足够像丢数据）。
+///
+/// 为什么不用 `tauri::process::restart`：它先 spawn 新进程、再 exit 旧进程，
+/// 而本应用挂着 single-instance 插件（见 lib.rs）——新进程会撞上还没释放的单实例锁，
+/// 被当成第二个实例转交前台后自行退出，软件就再也起不来了。
+/// 所以派生一个“等本进程退出后再拉起”的分离进程，本进程再退出。
+#[tauri::command]
+pub fn restart_app() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| format!("找不到自身路径，请手动重新打开软件：{e}"))?;
+    schedule_relaunch(&exe)?;
+    log_info!("数据位置已改，正在重启软件让新位置生效");
+    std::process::exit(0);
+}
+
+/// Windows：把“等本进程退出后再拉起”写成 .bat 再执行。
+///
+/// 为什么不能像通常那样把整串命令塞进 `cmd /C`：Rust 会给含空格/引号的参数
+/// 再加一层 `\"` 转义，而 cmd 根本不认反斜杠转义引号，两层叠加会把路径拆坏
+/// （真机上 `start` 只收到一个 `\\`，弹“Windows 找不到文件”后软件再也没回来，比“不重启”更糟）。
+/// 命令写进文件后不经过任何再转义，`start ""` 才能正确解析。
+#[cfg(windows)]
+fn schedule_relaunch(exe: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let bat = std::env::temp_dir().join(format!("va-relaunch-{}.bat", std::process::id()));
+    std::fs::write(&bat, relaunch_script(exe))
+        .map_err(|e| format!("写重启脚本失败，请手动重新打开软件：{e}"))?;
+    std::process::Command::new("cmd.exe")
+        .args(["/C", &bat.display().to_string()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map_err(|e| format!("安排重启失败，请稍后手动打开软件：{e}"))?;
+    Ok(())
+}
+
+/// 重启脚本内容（纯函数，单测钉住格式）：约 1 秒延时→拉起主程序→自删。
+/// 延时用 `ping` 而不是 `timeout`（后者在非交互 shell 里因没 stdin 会报错）。
+pub fn relaunch_script(exe: &Path) -> String {
+    format!(
+        "@echo off\r\nping -n 3 127.0.0.1 >nul\r\nstart \"\" \"{exe}\"\r\ndel \"%~f0\"\r\n",
+        exe = exe.display()
+    )
+}
+
+/// 非 Windows（尽力支持）：没有单实例锁的时序问题，延时后直接拉起自身。
+#[cfg(not(windows))]
+fn schedule_relaunch(exe: &Path) -> Result<(), String> {
+    let line = format!("sleep 1; exec '{}'", exe.display());
+    std::process::Command::new("sh")
+        .args(["-c", &line])
+        .spawn()
+        .map_err(|e| format!("安排重启失败，请稍后手动打开软件：{e}"))?;
+    Ok(())
+}
+
+/// 重启脚本内容的格式守卫（真机回归过的坑，单测钉住）
+#[cfg(test)]
+mod relaunch_tests {
+    use super::relaunch_script;
+    use std::path::Path;
+
+    #[test]
+    fn 重启脚本按cmd语法原样写路径不做二次转义() {
+        // 真机回归：把整串命令塞进 `cmd /C` 时，Rust 的参数转义与 cmd 的引号规则叠加，
+        // start 只收到 `\\`，软件关掉后再也没回来。改成 .bat 后脚本内容必须是下面的样子。
+        let s = relaunch_script(Path::new(r"D:\Apps\Tool\TTSassist\voiceassist.exe"));
+        assert!(
+            s.contains("start \"\" \"D:\\Apps\\Tool\\TTSassist\\voiceassist.exe\""),
+            "start 行不对：{s}"
+        );
+        assert!(s.contains("del \"%~f0\""), "脚本必须自删，不留临时文件：{s}");
+        assert!(s.contains("ping -n 3 127.0.0.1 >nul"), "用 ping 延时（timeout 在非交互 shell 会报错）：{s}");
+        // 绝不能出现 Rust 风格的转义引号（那正是上次坏掉的原因）
+        assert!(!s.contains("\\\\\""), "脚本里不该有反斜杠转义引号：{s}");
+    }
+}
+
 /// 删除某个「插件已不在」的残留引擎数据目录，返回释放的字节数。
 /// 仍安装的插件一律拒绝：数据只能随卸载弹窗一起处置（设计 §六.1，默认保留）。
 #[tauri::command]
@@ -702,8 +843,9 @@ pub async fn migrate_storage_now(app: AppHandle) -> Result<String, String> {
         }
         _ => return Err("没有需要迁移的旧位置数据".to_string()),
     }
-    let stamp = chrono::Utc::now().format("%Y%m%d").to_string();
-    let legacy_root = paths.config_root.clone();
+    let stamp = chrono::Local::now().format("%Y%m%d").to_string();
+    // 旧布局的「我的数据」在应用目录根（配置根现在是 config\）
+    let legacy_root = paths.app_root.clone();
     let content_root = paths.content_root.clone();
     let report = tauri::async_runtime::spawn_blocking(move || {
         migrate::migrate_items(&legacy_root, &content_root, &stamp)
@@ -775,6 +917,7 @@ mod tests {
 
         let p = StoragePaths::from_dirs(
             content.to_path_buf(),
+            content.join("config"),
             content.to_path_buf(),
             content.join("plugins"),
             false,
@@ -813,7 +956,7 @@ mod tests {
         std::fs::create_dir_all(&exe_data).unwrap();
         std::fs::write(exe_data.join("messages.json"), b"12345").unwrap();
 
-        let mut p = StoragePaths::from_dirs(cfg, content, plugins.clone(), false);
+        let mut p = StoragePaths::from_dirs(cfg.clone(), cfg.join("config"), content, plugins.clone(), false);
         p.legacy_exe_data = Some(exe_data);
         let drives = vec![DriveInfo { letter: "C:".into(), free_bytes: 100, total_bytes: 200 }];
         let r = build_report_with_drives(&p, &[], true, drives);
@@ -836,6 +979,7 @@ mod tests {
         std::fs::write(content.join("messages.json"), b"12345").unwrap();
         let mut p = StoragePaths::from_dirs(
             dir.path().join("cfg"),
+            dir.path().join("cfg").join("config"),
             content.clone(),
             dir.path().join("plugins"),
             false,
@@ -956,17 +1100,22 @@ mod tests {
 
     #[test]
     fn 用户自选位置时不回迁测试版数据() {
-        // 三条件之「用户没自选位置」：content_root != config_root 时，数据不能搬到他没选的地方。
+        // 三条件之「用户没自选位置」：内容根不是默认的 `<应用目录>\data` 时，
+        // 数据不能搬到他没选的地方。
         let dir = tempfile::tempdir().unwrap();
-        let cfg = dir.path().join("cfg");
+        let app = dir.path().join("app");
+        let cfg = app.join("config");
+        let default_content = app.join("data");
         let chosen = dir.path().join("D-data");
         let exe_data = dir.path().join("exe").join("data");
         std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::create_dir_all(&default_content).unwrap();
         std::fs::create_dir_all(&chosen).unwrap();
         std::fs::create_dir_all(&exe_data).unwrap();
         std::fs::write(exe_data.join("messages.json"), b"[1]").unwrap();
 
         let mut custom = StoragePaths::from_dirs(
+            app.clone(),
             cfg.clone(),
             chosen.clone(),
             dir.path().join("plugins"),
@@ -977,10 +1126,11 @@ mod tests {
         assert!(exe_data.join("messages.json").exists(), "自选位置时不得搬动测试版数据");
         assert!(!chosen.join("messages.json").exists());
 
-        // 默认位置（content == config）→ 回迁并给出通知，原件转备份
+        // 默认位置（content == <应用目录>\data）→ 回迁并给出通知，原件转备份
         let mut default = StoragePaths::from_dirs(
+            app.clone(),
             cfg.clone(),
-            cfg.clone(),
+            default_content.clone(),
             dir.path().join("plugins"),
             false,
         );
@@ -988,8 +1138,8 @@ mod tests {
         let notice = pull_back_legacy_if_needed(&default).expect("应回迁并返回通知");
         assert!(notice.contains("测试版"), "通知要说明数据从哪来：{notice}");
         assert!(!exe_data.join("messages.json").exists(), "回迁后原件应收进备份");
-        assert_eq!(std::fs::read(cfg.join("messages.json")).unwrap(), b"[1]");
-        let backups = migrate::find_backups(&cfg);
+        assert_eq!(std::fs::read(default_content.join("messages.json")).unwrap(), b"[1]");
+        let backups = migrate::find_backups(&app);
         assert_eq!(backups.len(), 1, "原件必须留一份备份");
         assert!(backups[0].join("messages.json").exists());
     }

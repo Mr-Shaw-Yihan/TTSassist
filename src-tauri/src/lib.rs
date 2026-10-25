@@ -28,35 +28,43 @@ use crate::storage::types::Settings;
 
 /// 解析三根（配置 / 内容 / 插件），路径来源收口到 `storage::paths`。
 ///
-/// 内容根默认 = 配置根（`%APPDATA%\com.voiceassist.app`），用户可用 `VA_STORAGE_DIR`
-/// 或 `storage.json` 指针自选位置；`<exe>\data` 只是 1.9.0 测试版的历史来源（见 A3 回迁）。
+/// 内容根默认 = `<应用目录>\data`，用户可用 `VA_STORAGE_DIR` 或 `storage.json` 指针自选；
+/// `<exe>\data` 只是 1.9.0 测试版的历史来源（见 A3 回迁）。
 fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths {
     use std::path::PathBuf;
     use storage::paths::*;
     // 存储契约要拦的是“业务代码自己向系统要数据目录”，而这里就是那个唯一解析入口本身
     //（下游一律拿 StoragePaths，不再自己调）。注意豁免只认本行与紧邻上一行，
     //  所以 `storageok:` 必须写在调用正上方，不能放在多行说明的第一行。
-    // storageok: 全项目唯一合法的取配置根处
-    let config_root = app.path().app_data_dir().expect("无法获取配置目录");
+    // storageok: 全项目唯一合法的取应用目录处
+    let app_root = app.path().app_data_dir().expect("无法获取应用目录");
     let exe_dir = std::env::current_exe()
         .expect("无法获取 exe 路径")
         .parent()
         .expect("exe 无父目录")
         .to_path_buf();
 
+    // 新布局：配置进 `<应用目录>\config`。首次启动时把旧布局（直接放应用目录根）
+    // 的配置文件搬进去；搬不动就继续用旧根，保证设置始终读得到。
+    let config_root = ensure_config_root(&app_root);
+
     let env_dir = std::env::var("VA_STORAGE_DIR").ok().map(PathBuf::from);
-    let pointer = read_pointer(&config_root.join(POINTER_FILE_NAME));
+    // 指针优先读 config\storage.json；旧布局的指针可能还在应用目录根。
+    // 指向应用目录根的指针 = 旧默认位置（不是用户自选）→ 忽略，改走新默认 data\。
+    let pointer = read_pointer(&config_root.join(POINTER_FILE_NAME))
+        .or_else(|| read_pointer(&app_root.join(POINTER_FILE_NAME)))
+        .filter(|p| *p != app_root);
     let local_fallback = std::env::var("LOCALAPPDATA")
         .ok()
         .map(|a| PathBuf::from(a).join("com.voiceassist.app").join("data"))
         .unwrap_or_else(|| exe_dir.join("data-fallback"));
 
-    // 内容根默认 = 配置根（%APPDATA%）：数据不再放安装目录，覆盖升级/卸载不会连带删掉。
+    // 内容根默认 = `<应用目录>\data`：数据不再放安装目录，覆盖升级/卸载不会连带删掉。
     // 用户自选位置走 storage.json 指针；装到不可写目录时回退 LOCALAPPDATA 并置 fallback。
     let (content_root, fallback) = decide_content_root(
         env_dir,
         pointer,
-        Some(config_root.clone()),
+        Some(app_root.join(DATA_SUBDIR_NAME)),
         exe_dir.join("data"),
         local_fallback,
         &probe_writable,
@@ -72,6 +80,7 @@ fn resolve_storage_paths(app: &tauri::AppHandle) -> storage::paths::StoragePaths
     );
 
     let mut paths = storage::paths::StoragePaths::from_dirs(
+        app_root,
         config_root,
         content_root,
         plugins_root,
@@ -189,9 +198,10 @@ pub fn run() {
                 crate::perf::drain_startup_pending();
             }
 
-            // 主窗以 visible=false 创建：先按记忆尺寸定形再显示，避免“先竖版再变形”的跳动。
-            // 尺寸由前端在窗口变化后写入设置（物理像素），这里只负责启动首帧应用。
-            window_size::show_main_with_remembered_size(app.handle(), &settings);
+            // 主窗以 visible=false 创建：先按记忆尺寸定形、铺好首帧底色，
+            // **显示推迟到前端首帧就绪**（main_window_ready），否则会在
+            // “show → 页面加载完”之间露出 WebView2 白底（先闪一帧日间）。
+            window_size::prepare_main_window(app.handle(), &settings);
 
             // asset: 协议必须放行内容根，否则 `<audio src>` 会被作用域直接拒掉，
             // 症状是“点了没声、按钮还卡在播放中”——翻默认后音频已经不住在 $APPDATA 里了
@@ -211,9 +221,10 @@ pub fn run() {
             app.manage(commands::storage::MigrationNotice::default());
             match storage::migrate::detect_in(&paths) {
                 storage::migrate::StorageState::Migratable => {
-                    let legacy = paths.config_root.clone();
+                    // 旧布局的「我的数据」直接在应用目录根（配置根现在是 config\\，不是旧位置）
+                    let legacy = paths.app_root.clone();
                     let content = paths.content_root.clone();
-                    let stamp = chrono::Utc::now().format("%Y%m%d").to_string();
+                    let stamp = chrono::Local::now().format("%Y%m%d").to_string();
                     match storage::migrate::migrate_items(&legacy, &content, &stamp) {
                         Ok(r) => {
                             let mb = r.bytes as f64 / 1024.0 / 1024.0;
@@ -513,6 +524,7 @@ pub fn run() {
             crate::commands::storage::plugin_data_size,
             crate::commands::storage::delete_plugin_data,
             crate::commands::storage::migrate_storage_now,
+            crate::commands::storage::restart_app,
             crate::commands::audio::resolve_audio_url,
             crate::commands::clone_voice::import_clone_voice,
             crate::commands::clone_voice::remove_clone_voice,
@@ -543,6 +555,7 @@ pub fn run() {
             crate::hotkey::set_mic_toggle_hotkey,
             crate::hotkey::focus_quick_input_content,
             crate::show_main_window,
+            crate::window_size::main_window_ready,
         ])
         .run(tauri::generate_context!())
         .expect("VoiceAssist 启动失败");
