@@ -3,10 +3,10 @@
     {
       "id": "edge-tts",
       "name": "Edge TTS（免费·微软）",
-      "version": "0.1.0",
-      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/edge-tts-0.1.0.zip",
-      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/edge-tts-0.1.0.zip",
-      "checksum": "2ad55b2da020266137e8eb7ba6872b776d82a04e31eb27c88e2b386b55665323",
+      "version": "0.1.1",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/edge-tts-0.1.1.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/edge-tts-0.1.1.zip",
+      "checksum": "e4b2f334c301952bec2af0111b21a4537912759f63910407d56fd008ddc3f1f4",
       "description": "免费、无需 Key 的微软 Edge 语音，非官方接口可能不稳定",
       "plugin_type": "tts_engine"
     },
@@ -16,8 +16,8 @@
       "version": "0.1.1",
       "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/mimo-asr-0.1.1.zip",
       "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/mimo-asr-0.1.1.zip",
-      "checksum": "e08480fd12640d884c369f46e15d5bbdfa44b8d6b9b9d7bd6f1a77b43db54a7c",
-      "description": "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测（v0.1.1 起 API Key 改走通用插件配置声明）",
+      "checksum": "ca47dd6b442d1fc65b959c0a2b6142dcb5bc10381f6eab1c34515e775042ee3f",
+      "description": "小米 MiMo-V2.5-ASR 云端语音识别，支持中英文及自动语种检测",
       "plugin_type": "asr_engine"
     },
     {
@@ -26,18 +26,8 @@
       "version": "0.1.0",
       "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/mimo-tts-0.1.0.zip",
       "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/mimo-tts-0.1.0.zip",
-      "checksum": "47d76f45f35afcc346a03d4f4cf2050661d114b6cd2c49388129feb8ede74e6d",
-      "description": "小米 MiMo 云端语音合成（流式版）：SSE 边合成边播、首响更快，需 API Key，预置音色 + 本地样本音色克隆（本体内置自动安装，可卸载）",
-      "plugin_type": "tts_engine"
-    },
-    {
-      "id": "minimax-tts-stream",
-      "name": "MiniMax TTS（国内版）",
-      "version": "0.3.1",
-      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-stream-0.3.1.zip",
-      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-stream-0.3.1.zip",
-      "checksum": "1d9e1ce76557c0251030b42f4ef7998c41f96b48ae941ca0bdcf27efb95b56e4",
-      "description": "MiniMax 云端语音合成流式版（国内版）：WebSocket 边合成边出块、首响更快，直接使用流式，需 API Key，50+ 系统音色 + 账号克隆音色（本体内置自动安装，可卸载）",
+      "checksum": "cb90164709edaef3d28f02328f063522c6f0c5e6839730d09532e37ff82e8eea",
+      "description": "小米 MiMo 云端语音合成（流式版）：SSE 边合成边播，首响更快。需 API Key，预置音色 + 本地样本音色克隆（克隆由服务端退化为兼容模式，首响较慢）",
       "plugin_type": "tts_engine"
     },
     {
@@ -46,17 +36,27 @@
       "version": "0.2.1",
       "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-global-0.2.1.zip",
       "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-global-0.2.1.zip",
-      "checksum": "5c344b74599a00b1820d8dcd38b83fcd30860695dd0b1a2de1647bdef160853d",
+      "checksum": "0c9eb859d4240401bc696af74f69707047e5ce5a79ae8526fd718bdcaa38aec3",
       "description": "MiniMax 云端语音合成（国际版），需 API Key，50+ 音色、40 种语言，支持音色克隆与音色管理",
+      "plugin_type": "tts_engine"
+    },
+    {
+      "id": "minimax-tts-stream",
+      "name": "MiniMax TTS（国内版）",
+      "version": "0.3.1",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-stream-0.3.1.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-stream-0.3.1.zip",
+      "checksum": "aee3ac47be692543786e4981e57a43e93553c7960efbc32ff0d17466c0e47d98",
+      "description": "MiniMax 云端语音合成流式版（国内版）：WebSocket 边合成边出块，首响更快、直接使用流式。需 API Key，50+ 系统音色 + 账号克隆音色",
       "plugin_type": "tts_engine"
     },
     {
       "id": "moss-tts",
       "name": "MOSS TTS（Mossland）",
-      "version": "0.2.0",
-      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/moss-tts-0.2.0.zip",
-      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/moss-tts-0.2.0.zip",
-      "checksum": "6c8876ebff107cfef871e2b35cce5af5f776e2bd88d222eb07705dce53eda501",
+      "version": "0.2.1",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/moss-tts-0.2.1.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/moss-tts-0.2.1.zip",
+      "checksum": "39e847335caded6ff1e6b2cb0f75524c9ee4d2db23957d81ea80305074ff302a",
       "description": "Mossland MOSS 云端语音合成（流式版）：PCM 边合成边播、首响更快（非流式整段合成实测七八个字要等 5 秒），需 API Key；不自带音色，请到 Mossland 音色库复制 voice_id 后保存在「我的音色」里选用",
       "plugin_type": "tts_engine"
     }

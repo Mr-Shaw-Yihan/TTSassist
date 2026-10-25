@@ -104,9 +104,15 @@ export function PluginConfigPanel({
 
   if (fields === null || fields.length === 0) return null;
 
-  // display 字段为插件回写的只读展示，不参与编辑与必填校验
+  // display 字段为插件回写的只读展示，不参与编辑与必填校验；
+  // secret 的 draft 永远为空（值存在服务端，输入框靠 placeholder 提示“已设置”），
+  // 所以已有值的 secret 绝不能算缺填——真机出现过「API Key 未填写」与「已设置」同屏自相矛盾。
   const missingRequired = fields.filter(
-    (f) => f.type !== "display" && f.required && !(draft[f.key] ?? "").trim(),
+    (f) =>
+      f.type !== "display" &&
+      f.required &&
+      !(draft[f.key] ?? "").trim() &&
+      !(f.type === "secret" && hadSecret[f.key]),
   );
   // 全部为 display 时无用户可编辑项（纯上屏卡）
   const hasEditable = fields.some((f) => f.type !== "display");

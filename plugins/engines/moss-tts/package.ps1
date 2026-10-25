@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 
 $PluginId   = "moss-tts"
 $PluginName = "MOSS TTS（Mossland）"
-$Version    = "0.2.0"
+$Version    = "0.2.1"
 # 与 fish/mimo 同口径取 1.8.0：宿主 1.8.7 起就有通用插件配置与「我的音色」，
 # 写 1.9.0 会让当前开发树（版本号在 P6 发布时才 bump）直接拒载、无法真机验收
 $MinAppVer  = "1.8.0"
@@ -93,6 +93,10 @@ $Manifest = [ordered]@{
     # 宿主默认 60 秒会在插件自己报错之前先放弃，而阻塞 FFI 无法取消 → 放宽到 120
     timeout_secs    = 120
     config          = $ConfigDecl
+    # 能力位（基座合同：界面只看插件自述，不按引擎 id 写死）。本引擎没有服务端默认音色、
+    # voices_json 恒为空表，voice_id 要用户从 Mossland 音色库复制——缺这个字段的话，
+    # 通用「音色管理」卡会因「无内置音色且无音色库」整块不渲染，用户连填 voice_id 的地方都没（真机复报过）。
+    capabilities    = @{ voice_library = $true }
 }
 # 必须 -Depth 6：默认 Depth=2 会把 config.fields 的嵌套结构截成字符串
 [System.IO.File]::WriteAllText(

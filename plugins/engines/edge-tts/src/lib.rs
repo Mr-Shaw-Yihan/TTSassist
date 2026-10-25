@@ -50,29 +50,62 @@ fn synthesize(text: &str, voice: Option<&str>) -> Result<Vec<u8>, String> {
 
         let lang = lang_from_voice(&voice);
 
-        // 合成（流式返回 MP3 分片）
-        let events = EdgeTts
-            .synthesize(&text, &voice, "+0%", &lang)
-            .await
-            .map_err(|e| format!("Edge TTS 合成失败: {e}"))?;
-
-        // 拼接所有音频分片成完整 MP3
-        let mut audio = Vec::new();
-        for ev in events {
-            if let TtsEvent::Audio(bytes) = ev {
-                audio.extend_from_slice(&bytes);
+        // 合成（流式返回 MP3 分片）。微软这个免费接口会偶发拒绝握手（403），
+        // 重试一次能挡掉不少偶发；只重试 403，其他错误直接上报不反复撞。
+        let mut audio: Option<Vec<u8>> = None;
+        let mut last_err = String::new();
+        for attempt in 0..2u8 {
+            match EdgeTts.synthesize(&text, &voice, "+0%", &lang).await {
+                Ok(events) => {
+                    let mut buf = Vec::new();
+                    for ev in events {
+                        if let TtsEvent::Audio(bytes) = ev {
+                            buf.extend_from_slice(&bytes);
+                        }
+                    }
+                    if buf.is_empty() {
+                        return Err("Edge TTS 未返回音频（可能地区受限或网络异常）".to_string());
+                    }
+                    audio = Some(buf);
+                    break;
+                }
+                Err(e) => {
+                    last_err = format!("{e}");
+                    if attempt == 0 && last_err.contains("403") {
+                        continue;
+                    }
+                    break;
+                }
             }
         }
-        if audio.is_empty() {
-            return Err("Edge TTS 未返回音频（可能地区受限或网络异常）".to_string());
-        }
-        Ok(audio)
+        audio.ok_or_else(|| edge_error_text(&last_err))
     })
+}
+
+/// 把微软的英文黑话翻成用户能照做的中文。不承诺能修好：这是非官方免费接口，
+/// 微软会不定期收紧校验或对部分出口限流（界面文案已声明“失效不属于软件 bug”）。
+pub fn edge_error_text(raw: &str) -> String {
+    if raw.contains("403") {
+        format!("Edge TTS 被微软拒绝连接（403）。这是免费的非官方接口，微软会不定期收紧校验、或对部分网络出口限流，与你的文字和音色无关。可以稍后再试一次、换个网络，或先在语音页改用其他引擎继续用。原始信息：{raw}")
+    } else {
+        format!("Edge TTS 合成失败: {raw}")
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 四百零三给人话指引而非英文黑话() {
+        let s = edge_error_text("ws connect failed after retries: HTTP error: 403 Forbidden");
+        assert!(s.contains("非官方接口"), "实际: {s}");
+        assert!(s.contains("改用其他引擎"), "要给可执行动作：{s}");
+        assert!(s.contains("403 Forbidden"), "原始信息要留着便于排查：{s}");
+        // 非 403 不得改写语义，原文透传
+        let other = edge_error_text("timed out");
+        assert_eq!(other, "Edge TTS 合成失败: timed out");
+    }
 
     #[test]
     fn lang_推导正确() {

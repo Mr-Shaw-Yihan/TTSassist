@@ -10,7 +10,7 @@ import {
   preloadVoice,
   promptEngineWarmup,
 } from "../../services/invoke";
-import type { PluginInfo } from "../../types";
+import type { CustomVoiceItem, PluginInfo } from "../../types";
 import { hasVoiceLibrary } from "../../utils/pluginCapability";
 import { Field, SubPanel } from "../common/SettingsSection";
 import { CustomVoicePanel } from "./CustomVoicePanel";
@@ -20,6 +20,48 @@ import { CloneSamplePanel } from "./CloneSamplePanel";
 import { PluginSetupPanel } from "../Plugins/PluginSetupPanel";
 import { PluginConfigPanel } from "../Settings/PluginConfigPanel";
 import { VoiceManager } from "../Settings/VoiceManager";
+
+/** 一份音色下拉的分组结果（「我的音色」置顶 + 剩下的真·内置音色） */
+export interface VoiceGrouping {
+  /** 引擎音色表里属于「我的」的条目（如宿主克隆音色 id="clone"） */
+  mineFromBuiltIn: { id: string; label: string }[];
+  /** 用户在「我的音色」里保存的条目 */
+  custom: CustomVoiceItem[];
+  /** 本地持久化过、但云端账号列表里还查不到的克隆音色 id */
+  orphanClones: string[];
+  /** 真·内置音色 */
+  builtin: { id: string; label: string }[];
+  /** 「我的音色」是否有内容（空组不渲染） */
+  hasMine: boolean;
+}
+
+/**
+ * 音色分组（纯函数）：把「我的音色」从引擎内置表里挑出来置顶。
+ *
+ * 归入「我的音色」的三类来源：宿主克隆音色（id="clone"，走克隆样本导入那条路径）、
+ * 用户保存的自定义音色、以及本地持久化过但云端列表暂时拉不到的克隆音色。
+ *
+ * 为什么要单独抽出来：界面上有**两份**音色下拉（通用「音色管理」分区卡与
+ * voiceSelectNode 插槽），而哪些引擎走哪一份取决于插件自述的能力位。真机连踩两轮
+ * “只给一份分组、另一份漏掉”，所以把判定收在唯一一处，两份共用，
+ * 以后再加渲染路径也不会漏。
+ */
+export function classifyVoices(
+  voices: readonly { id: string; label: string }[],
+  custom: CustomVoiceItem[],
+  orphanClones: readonly string[],
+): VoiceGrouping {
+  const mineIds = new Set<string>(["clone", ...custom.map((c) => c.id), ...orphanClones]);
+  const mineFromBuiltIn = voices.filter((v) => mineIds.has(v.id));
+  const builtin = voices.filter((v) => !mineIds.has(v.id));
+  return {
+    mineFromBuiltIn,
+    custom,
+    orphanClones: [...orphanClones],
+    builtin,
+    hasMine: mineFromBuiltIn.length + custom.length + orphanClones.length > 0,
+  };
+}
 
 export function VoiceSynthPanel() {
   const settings = useSettingsStore((s) => s.settings);
@@ -173,7 +215,21 @@ export function VoiceSynthPanel() {
           );
         }
 
-        // 当前音色下拉：MiniMax 国际版并入「音色管理」卡内（经 voiceSelect 插槽），其余引擎就地渲染
+        // 当前音色下拉：带音色管理的插件并入「音色管理」卡内（经 voiceSelect 插槽），其余引擎就地渲染。
+        // 用户裁定（10-23 第二轮）：这份下拉也要分组，「我的音色」置顶。
+        const isMinimax = cur.id === "minimax-tts-global" || cur.id === "minimax-tts-stream";
+        // 保存过但账号列表查不到的账号克隆音色（首次合成前云端拉不到）
+        const orphanClones = isMinimax
+          ? (settings?.minimax_global_cloned_voices ?? []).filter(
+              (id) => !cur.voices.some((v) => v.id === id),
+            )
+          : [];
+        // 分组判定只有一份：与下面通用分支共用 classifyVoices
+        const grouped = classifyVoices(
+          cur.voices,
+          settings?.plugin_custom_voices?.[cur.id] ?? [],
+          orphanClones,
+        );
         const voiceSelectNode = (
           <Field label="当前音色">
             <select
@@ -182,16 +238,26 @@ export function VoiceSynthPanel() {
               disabled={taskRunning}
               className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)] disabled:opacity-60"
             >
-              {cur.voices.map((v) => (
-                <option key={v.id} value={v.id}>{v.label}</option>
-              ))}
-              {/* MiniMax（国际版/国内流式版）：合并本地持久化的克隆音色（首次合成前账号列表查不到） */}
-              {(cur.id === "minimax-tts-global" || cur.id === "minimax-tts-stream") &&
-                (settings?.minimax_global_cloned_voices ?? [])
-                  .filter((id) => !cur.voices.some((v) => v.id === id))
-                  .map((id) => (
+              {grouped.hasMine && (
+                <optgroup label="我的音色">
+                  {grouped.mineFromBuiltIn.map((v) => (
+                    <option key={v.id} value={v.id}>{v.label}</option>
+                  ))}
+                  {grouped.custom.map((cv) => (
+                    <option key={`custom:${cv.id}`} value={cv.id}>{cv.label}</option>
+                  ))}
+                  {grouped.orphanClones.map((id) => (
                     <option key={`clone:${id}`} value={id}>克隆·{id}</option>
                   ))}
+                </optgroup>
+              )}
+              {grouped.builtin.length > 0 && (
+                <optgroup label="内置音色">
+                  {grouped.builtin.map((v) => (
+                    <option key={v.id} value={v.id}>{v.label}</option>
+                  ))}
+                </optgroup>
+              )}
             </select>
             {preloadingVoice !== null && (
               <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-[var(--ink-500)]">
@@ -218,12 +284,16 @@ export function VoiceSynthPanel() {
               </div>
             )}
 
-            {/* 通用插件配置卡（manifest 声明驱动，保存即生效）：标题统一为「API 密钥」 */}
-            {cur.config && <PluginConfigPanel pluginId={cur.id} pluginName={cur.name} title="API 密钥" />}
+            {/* 通用插件配置卡（manifest 声明驱动，保存即生效）：标题统一为「API 密钥」。
+                key 按引擎重挂：否则切引擎时 React 会复用同一批 DOM 输入框，
+                上一个引擎的输入值会残留在可访问性名称里（真机出现过）。 */}
+            {cur.config && (
+              <PluginConfigPanel key={cur.id} pluginId={cur.id} pluginName={cur.name} title="API 密钥" />
+            )}
 
-            {/* 音色管理区（含「当前音色」下拉）：MiniMax 国际版/国内流式版走 MinimaxVoicePanel（克隆+账号管理），
+            {/* 音色管理区（含「当前音色」下拉）：有账号/克隆管理的引擎走专用面板，
                 本地引擎并入 VoiceManager（装/卸/导入音色包），其余云引擎用「音色管理」分区卡 */}
-            {cur.id === "minimax-tts-global" || cur.id === "minimax-tts-stream" ? (
+            {isMinimax ? (
               <MinimaxVoicePanel plugin={cur} voiceSelect={voiceSelectNode} />
             ) : cur.has_voice_management ? (
               <VoiceManager
@@ -245,7 +315,7 @@ export function VoiceSynthPanel() {
                 // 文案按插件自述的音色表与能力位决定，不认引擎身份
                 desc={
                   !hasVoiceLibrary(cur)
-                    ? "选择引擎内置音色。"
+                    ? "选择引擎音色（自己的克隆音色在「我的音色」组里）。"
                     : cur.voices.length > 0
                       ? "选择引擎内置音色，或维护你自己的「我的音色」（如克隆音色 ID）。"
                       : "该引擎不自带音色：请在下方「我的音色」保存音色 ID，再回这里选用。"
@@ -258,19 +328,26 @@ export function VoiceSynthPanel() {
                     disabled={taskRunning}
                     className="w-full rounded-xl border border-[var(--ink-200)] bg-[var(--paper-card)] px-3 py-2 text-sm outline-none focus:border-[var(--amber-500)] disabled:opacity-60"
                   >
-                    {/* 用户裁定（10-23）：保存的克隆音色排列表顶部，对所有走通用下拉的插件生效 */}
-                    {(settings?.plugin_custom_voices?.[cur.id] ?? []).length > 0 && (
+                    {/* 与 voiceSelectNode 共用 grouped：宿主克隆音色与保存过的音色都置顶
+                        （用户裁定 10-23：不只某一个引擎，所有走通用下拉的插件一致） */}
+                    {grouped.hasMine && (
                       <optgroup label="我的音色">
-                        {(settings?.plugin_custom_voices?.[cur.id] ?? []).map((cv) => (
+                        {grouped.mineFromBuiltIn.map((v) => (
+                          <option key={v.id} value={v.id}>{v.label}</option>
+                        ))}
+                        {grouped.custom.map((cv) => (
                           <option key={`custom:${cv.id}`} value={cv.id}>
                             {cv.label}
                           </option>
                         ))}
+                        {grouped.orphanClones.map((id) => (
+                          <option key={`clone:${id}`} value={id}>克隆·{id}</option>
+                        ))}
                       </optgroup>
                     )}
-                    {cur.voices.length > 0 && (
+                    {grouped.builtin.length > 0 && (
                       <optgroup label="内置音色">
-                        {cur.voices.map((v) => (
+                        {grouped.builtin.map((v) => (
                           <option key={v.id} value={v.id}>{v.label}</option>
                         ))}
                       </optgroup>
