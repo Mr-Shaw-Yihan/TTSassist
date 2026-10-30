@@ -6,8 +6,18 @@
       "version": "0.1.2",
       "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/edge-tts-0.1.2.zip",
       "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/edge-tts-0.1.2.zip",
-      "checksum": "c29466d8c8af27f892c4f0d0f70057cdd80d13c53ef866796c3b01f83c64850e",
+      "checksum": "2300d164b16dee54c6b26b809cfeebc0a3099037fa208bbe4c8a2002f5e0e75f",
       "description": "免费、无需 Key 的微软 Edge 语音，非官方接口可能不稳定",
+      "plugin_type": "tts_engine"
+    },
+    {
+      "id": "fish-audio-tts",
+      "name": "Fish Audio TTS",
+      "version": "0.2.0",
+      "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/fish-audio-tts-0.2.0.zip",
+      "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/fish-audio-tts-0.2.0.zip",
+      "checksum": "c3aee24edbc71b30a13102fdfb6c2ffa2eab925d44f4de24f8bce82470dedaf0",
+      "description": "Fish Audio 云端语音合成（S2.1 系列·流式边合边播），千款社区音色，支持「我的音色」保存克隆 ID，需 API Key；默认免费模型 s2.1-pro-free，国内直连常超时、支持自动探测系统代理",
       "plugin_type": "tts_engine"
     },
     {
@@ -36,7 +46,7 @@
       "version": "0.2.1",
       "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-global-0.2.1.zip",
       "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-global-0.2.1.zip",
-      "checksum": "0c9eb859d4240401bc696af74f69707047e5ce5a79ae8526fd718bdcaa38aec3",
+      "checksum": "b03a9577e8bd16293cc2abf0e605723466c95df7335619981bd7ba203c4a78f0",
       "description": "MiniMax 云端语音合成（国际版），需 API Key，50+ 音色、40 种语言，支持音色克隆与音色管理",
       "plugin_type": "tts_engine"
     },
@@ -46,7 +56,7 @@
       "version": "0.3.1",
       "download_url": "https://github.com/Mr-Shaw-Yihan/TTSassist/releases/latest/download/minimax-tts-stream-0.3.1.zip",
       "mirror_url": "https://gitee.com/yihwan/TTSassist/raw/dist/minimax-tts-stream-0.3.1.zip",
-      "checksum": "aee3ac47be692543786e4981e57a43e93553c7960efbc32ff0d17466c0e47d98",
+      "checksum": "2c7576fcb7fca251bd108581340a2eea49431a023262fd453ea09ac9460220e5",
       "description": "MiniMax 云端语音合成流式版（国内版）：WebSocket 边合成边出块，首响更快、直接使用流式。需 API Key，50+ 系统音色 + 账号克隆音色",
       "plugin_type": "tts_engine"
     },

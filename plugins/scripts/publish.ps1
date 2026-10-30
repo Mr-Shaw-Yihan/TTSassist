@@ -43,13 +43,42 @@ $ResourcesDir = Join-Path $RepoRoot 'src-tauri\resources\plugins'
 #     索引字段（name/version/type/description）全部从各插件 manifest.json 派生（单一权威源），
 #     杜绝手工清单漂移（v1.8.2 事故根因：硬编码数组漏了 hojo-tts、lan-remote 名字陈旧）。
 #     $BuiltinOnly：仅随安装包内置分发的插件，不进在线索引（与 verify-index.ps1 的豁免清单同口径）。
+#     ⚠ 1.9.0 事故：fish-audio-tts 因缺 dist 产物被本脚本**静默跳过**，索引里消失、
+#       新装用户再也装不到。现在改为：缺产物 = 直接中止；并断言“必须上架”的 id 全在索引里。
 $BuiltinOnly = @('builtin-fx')
-$PluginDirs = Get-ChildItem $EnginesDir -Directory | Where-Object {
+# 必须上架（在线索引必须包含）的插件：少一个就中止发布
+$MustPublish = @(
+    'edge-tts', 'mimo-tts', 'mimo-asr',
+    'minimax-tts-global', 'minimax-tts-stream',
+    'moss-tts', 'fish-audio-tts'
+)
+# 明确不发布的目录（已下架 / 被替代）：缺 dist 属正常，不视为异常
+$NoDistExpected = @('minimax-tts')
+
+$PkgDirs = Get-ChildItem $EnginesDir -Directory | Where-Object {
+    Test-Path (Join-Path $_.FullName 'package.ps1')
+}
+$MissingDist = $PkgDirs | Where-Object {
+    ($NoDistExpected -notcontains $_.Name) -and
+    -not (Test-Path (Join-Path $_.FullName 'dist\package\manifest.json'))
+}
+if ($MissingDist) {
+    throw ("以下插件有 package.ps1 但没有 dist 产物，发布会把它们从索引里丢掉：" +
+        (($MissingDist | ForEach-Object { $_.Name }) -join ', ') +
+        "。请先分别运行它们的 package.ps1（或去掉 -SkipBuild 重跑）")
+}
+
+$PluginDirs = $PkgDirs | Where-Object {
     ($BuiltinOnly -notcontains $_.Name) -and
-    (Test-Path (Join-Path $_.FullName 'package.ps1')) -and
     (Test-Path (Join-Path $_.FullName 'dist\package\manifest.json'))
 } | Sort-Object Name
 if (-not $PluginDirs) { throw "未发现任何可发布插件（plugins/engines/*/dist/package/manifest.json）" }
+
+$PublishableIds = @($PluginDirs | ForEach-Object { $_.Name })
+$Absent = @($MustPublish | Where-Object { $PublishableIds -notcontains $_ })
+if ($Absent.Count -gt 0) {
+    throw "以下插件未进入可发布集合（会被索引丢掉）：$($Absent -join ', ')"
+}
 
 $Entries = @()
 $Assets  = @()
