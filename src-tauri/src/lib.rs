@@ -323,10 +323,13 @@ pub fn run() {
             // 老用户本地会残留其目录与注册表条目、与承接者并存。按表在 load_all 前一次性清走并迁移设置。
             plugins::sweep_replaced_plugins(&plugins_root, &config_dir);
 
-            // 已下线的本地引擎（见 plugins::RETIRED_PLUGIN_IDS）：清走插件目录与引擎数据并提示一次。
-            if let Some(text) =
-                plugins::sweep_retired_plugins(&plugins_root, &paths.plugin_data_root())
-            {
+            // 已下线的本地引擎（见 plugins::RETIRED_PLUGIN_IDS）：清走插件目录与引擎数据、
+            // 并删掉安装目录里残留的旧内置 zip（否则 bootstrap 会把它们反复装回来）。
+            if let Some(text) = plugins::sweep_retired_plugins(
+                &plugins_root,
+                &paths.plugin_data_root(),
+                &plugins::bundled_zip_dirs(Some(app.handle())),
+            ) {
                 app.state::<commands::storage::MigrationNotice>().set(text);
             }
 

@@ -103,21 +103,8 @@ impl PluginManager {
         };
 
         let mut reg = registry::load_registry(&manager.plugins_root);
-        // 内置 zip 的候选落盘目录：Tauri 在 Windows 把 resource_dir 解析为 exe 根，
-        // 而 resources 按源相对路径落盘为 <exe>/resources/plugins——两个层级都探测，
-        // 存在即用（避免依赖 resource_dir 的精确语义）。
-        let mut bundled_dirs: Vec<PathBuf> = Vec::new();
-        if let Some(a) = app {
-            if let Ok(rd) = tauri::Manager::path(a).resource_dir() {
-                bundled_dirs.push(rd.join("plugins"));
-                bundled_dirs.push(rd.join("resources").join("plugins"));
-            }
-        }
-        bundled_dirs.dedup();
-        let bundled_dirs: Vec<PathBuf> = bundled_dirs
-            .into_iter()
-            .filter(|d| d.is_dir())
-            .collect();
+        // 候选目录的推导抽到 super::bundled_zip_dirs（与启动清理共用同一份口径）
+        let bundled_dirs = super::bundled_zip_dirs(app);
         let bootstrapped_loaded =
             manager.bootstrap_bundled_zips(&mut reg, &bundled_dirs);
         // 先把旧布局的插件重数据（plugins/<id>/data）搬到独立根（<内容根>\plugin-data）。
@@ -220,6 +207,16 @@ impl PluginManager {
             best.len()
         );
         for (manifest, zip_path) in best {
+            // 已下架 / 已被替代的 id：即使安装目录里残留旧 zip（NSIS 覆盖安装不删），
+            // 也绝不再装回来——否则会与启动清理互相拉锯、每启动一次就重下模型（1.9.0 事故）
+            if super::is_retired_or_replaced(&manifest.id) {
+                log_info!(
+                    "[plugins] 内置引导跳过已下架插件 {} v{}（残留包由启动清理删除）",
+                    manifest.id,
+                    manifest.version
+                );
+                continue;
+            }
             // 用户曾主动卸载过该内置插件 → 不再自动重装（本体自带插件可卸载的落地）
             if reg.suppressed.iter().any(|s| s == &manifest.id) {
                 continue;

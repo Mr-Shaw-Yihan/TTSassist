@@ -354,14 +354,54 @@ pub fn find_retired_plugins(plugins_root: &Path) -> Vec<String> {
         .collect()
 }
 
-/// 启动期清理已下线插件（须在 PluginManager::load_all 之前调用）：
-/// 删插件代码目录 + 引擎数据目录 + 注册表条目；删除失败只记日志、不 panic。
-/// 有目录被清走时返回一次性提示（含释放空间），否则 None。幂等。
-pub fn sweep_retired_plugins(plugins_root: &Path, plugin_data_root: &Path) -> Option<String> {
+/// 该 id 是否已被下架或被替代（启动清理与内置引导共用一张口径，避免两处漂移）
+pub fn is_retired_or_replaced(id: &str) -> bool {
+    RETIRED_PLUGIN_IDS.contains(&id) || REPLACED_PLUGINS.iter().any(|(old, _)| *old == id)
+}
+
+/// 内置 zip 的候选落盘目录：Tauri 在 Windows 把 resource_dir 解析为 exe 根，
+/// 而 resources 按源相对路径落盘为 <exe>/resources/plugins——两个层级都探测，
+/// 存在即用（避免依赖 resource_dir 的精确语义）。bootstrap 与清理共用同一份。
+pub fn bundled_zip_dirs(app: Option<&tauri::AppHandle>) -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(a) = app {
+        if let Ok(rd) = tauri::Manager::path(a).resource_dir() {
+            dirs.push(rd.join("plugins"));
+            dirs.push(rd.join("resources").join("plugins"));
+        }
+    }
+    dirs.dedup();
+    dirs.into_iter().filter(|d| d.is_dir()).collect()
+}
+
+/// 启动期清理已下架/已被替代的插件（须在 PluginManager::load_all 之前调用）。
+///
+/// 1) 删遗留插件代码目录（plugins/<id>）与引擎数据目录（plugin-data/<id>）；
+/// 2) 删**安装目录内置资源里**属于这些 id 的残留 zip —— 1.9.0 的真实事故：
+///    NSIS 覆盖安装不删新包里已不存在的文件，bootstrap 会把这些旧 zip 反复装回来，
+///    表现为「清理一次 → 立刻装回 → 每启动一次就重新下载一遍模型」；
+/// 3) 顺带删掉**被更高版本取代**的同 id 旧 zip（只会带来 pending 循环与磁盘浪费）；
+/// 4) 清注册表里已无对应目录的条目（含已下架/被替代的）。
+///
+/// 删除失败只记日志、不 panic；有东西被清走时返回一次性提示（含释放空间），否则 None。幂等。
+pub fn sweep_retired_plugins(
+    plugins_root: &Path,
+    plugin_data_root: &Path,
+    bundled_dirs: &[std::path::PathBuf],
+) -> Option<String> {
+    // 下架 + 被替代的旧 id 用同一份口径，避免启动清理与内置引导两处漂移
+    let mut legacy_ids: Vec<&str> = RETIRED_PLUGIN_IDS.to_vec();
+    for (old, _) in REPLACED_PLUGINS {
+        if !legacy_ids.contains(old) {
+            legacy_ids.push(old);
+        }
+    }
+
     let mut removed_ids: Vec<&str> = Vec::new();
+    let mut removed_zips = 0usize;
     let mut released = 0u64;
 
-    for &id in RETIRED_PLUGIN_IDS {
+    for &id in &legacy_ids {
         let code_dir = plugins_root.join(id);
         let data_dir = plugin_data_root.join(id);
         let mut removed_any = false;
@@ -383,22 +423,87 @@ pub fn sweep_retired_plugins(plugins_root: &Path, plugin_data_root: &Path) -> Op
         }
     }
 
-    // 注册表条目即使目录已不在也要清（否则 load_all 仍会去加载已空的目录）
-    let mut reg = registry::load_registry(plugins_root);
-    let before = reg.plugins.len();
-    reg.plugins.retain(|e| !RETIRED_PLUGIN_IDS.contains(&e.id.as_str()));
-    if reg.plugins.len() != before {
-        if let Err(e) = registry::save_registry(plugins_root, &reg) {
-            log_warn!("[插件清理] 移除已下线引擎注册表条目失败：{e}");
+    // 内置资源里的残留 zip：下架/被替代的一律删；同名多版本的只留最高版本。
+    // 顺带清「旧版本被新版本取代」的包：bootstrap 只装最高版，留着只会占盘。
+    let mut candidates: Vec<(String, String, std::path::PathBuf)> = Vec::new();
+    for dir in bundled_dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for p in entries.filter_map(|e| e.ok().map(|e| e.path())) {
+            if !p.is_file() || p.extension().and_then(|s| s.to_str()) != Some("zip") {
+                continue;
+            }
+            // 解析不了的 zip 留给 bootstrap 记日志，不在这里动
+            if let Ok(m) = install::peek_zip_manifest(&p) {
+                candidates.push((m.id, m.version, p));
+            }
+        }
+    }
+    let mut keep: std::collections::HashMap<String, (String, std::path::PathBuf)> =
+        std::collections::HashMap::new();
+    for (id, version, path) in candidates {
+        if legacy_ids.contains(&id.as_str()) {
+            match std::fs::remove_file(&path) {
+                Ok(()) => {
+                    removed_zips += 1;
+                    log_info!("[插件清理] 已删除残留内置包 {}", path.display());
+                }
+                Err(e) => log_warn!(
+                    "[插件清理] 删除残留内置包失败 {}：{e}",
+                    path.display()
+                ),
+            }
+            continue;
+        }
+        match keep.get(&id) {
+            Some((kept_ver, _)) if !manifest::version_less_than(kept_ver, &version) => {
+                match std::fs::remove_file(&path) {
+                    Ok(()) => removed_zips += 1,
+                    Err(e) => log_warn!(
+                        "[插件清理] 删除旧版本内置包失败 {}：{e}",
+                        path.display()
+                    ),
+                }
+            }
+            _ => {
+                if let Some((_, old_path)) = keep.insert(id.clone(), (version, path)) {
+                    match std::fs::remove_file(&old_path) {
+                        Ok(()) => removed_zips += 1,
+                        Err(e) => log_warn!(
+                            "[插件清理] 删除旧版本内置包失败 {}：{e}",
+                            old_path.display()
+                        ),
+                    }
+                }
+            }
         }
     }
 
-    if removed_ids.is_empty() {
-        return None; // 目录早已不在（只清了注册表残留）时不打扰用户
+    // 注册表：下架/被替代的条目 + 目录已不存在的孤儿条目
+    let mut reg = registry::load_registry(plugins_root);
+    let before = reg.plugins.len();
+    reg.plugins
+        .retain(|e| !legacy_ids.contains(&e.id.as_str()) && plugins_root.join(&e.id).is_dir());
+    if reg.plugins.len() != before {
+        if let Err(e) = registry::save_registry(plugins_root, &reg) {
+            log_warn!("[插件清理] 清理注册表条目失败：{e}");
+        }
+    }
+
+    if removed_ids.is_empty() && removed_zips == 0 {
+        return None; // 早已清完（只动了注册表残留）时不打扰用户
+    }
+    let mut parts: Vec<String> = Vec::new();
+    if !removed_ids.is_empty() {
+        parts.push(format!("本地引擎 {}", removed_ids.join(" / ")));
+    }
+    if removed_zips > 0 {
+        parts.push(format!("{removed_zips} 个残留内置包"));
     }
     let notice = format!(
-        "已移除本地引擎 {}（正在重新设计，后续版本回归），释放 {:.1} MB",
-        removed_ids.join(" / "),
+        "已清理{}（这些引擎已下架或已被新版替代），释放 {:.1} MB",
+        parts.join(" 与 "),
         released as f64 / 1024.0 / 1024.0
     );
     log_info!("[插件清理] {notice}");
@@ -795,7 +900,7 @@ mod tests {
         )
         .unwrap();
 
-        let notice = sweep_retired_plugins(&plugins, &data).expect("应给出一次性提示");
+        let notice = sweep_retired_plugins(&plugins, &data, &[]).expect("应给出一次性提示");
         // baseok: 提示与断言必须点名被清理的引擎 id
         assert!(notice.contains("genie-tts"), "提示应点名被清理的引擎：{notice}");
         assert!(notice.contains("MB"), "提示应给出释放空间：{notice}");
@@ -806,6 +911,74 @@ mod tests {
         assert!(!reg.contains("genie-tts"), "注册表不应再有下线插件：{reg}");
         assert!(reg.contains("edge-tts"), "无关插件的注册表条目不能被误删");
 
-        assert!(sweep_retired_plugins(&plugins, &data).is_none(), "再跑一次应为空操作");
+        assert!(
+            sweep_retired_plugins(&plugins, &data, &[]).is_none(),
+            "再跑一次应为空操作"
+        );
+    }
+
+    #[test]
+    fn 清理会删下架插件的残留内置包并保留最高版本() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = root.path().join("plugins");
+        let data = root.path().join("pd");
+        let bundled = root.path().join("bundled");
+        std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&bundled).unwrap();
+
+        // 造最小可解析的插件包（peek_zip_manifest 只读 manifest.json，不校验 checksum）
+        fn mk_zip(dir: &Path, file: &str, id: &str, ver: &str) {
+            use std::io::Write;
+            let f = std::fs::File::create(dir.join(file)).unwrap();
+            let mut zw = zip::ZipWriter::new(f);
+            let opts = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Stored);
+            zw.start_file("manifest.json", opts).unwrap();
+            write!(
+                zw,
+                r#"{{"id":"{id}","name":"{id}","version":"{ver}","type":"tts_engine","platform":["windows"],"entry":"plugin.dll","min_app_version":"1.0.0","checksum":"x"}}"#
+            )
+            .unwrap();
+            zw.finish().unwrap();
+        }
+        // 用清单里的常量构造，避免在测试里硬写引擎名（基座护栏：本体不得出现引擎身份）
+        let retired = RETIRED_PLUGIN_IDS[0];
+        let replaced_old = REPLACED_PLUGINS[0].0;
+        mk_zip(&bundled, "a.zip", retired, "0.1.0");
+        mk_zip(&bundled, "b.zip", replaced_old, "0.2.1");
+        mk_zip(&bundled, "c.zip", "zeta-tts", "0.1.0");
+        mk_zip(&bundled, "d.zip", "zeta-tts", "0.1.2");
+
+        let notice = sweep_retired_plugins(&plugins, &data, &[bundled.clone()])
+            .expect("删了残留包也应提示");
+        assert!(
+            !bundled.join("a.zip").exists(),
+            "已下架引擎的残留内置包必须删（否则 bootstrap 会装回来）：{notice}"
+        );
+        assert!(
+            !bundled.join("b.zip").exists(),
+            "已被替代的旧 id 内置包必须删"
+        );
+        assert!(
+            !bundled.join("c.zip").exists(),
+            "被更高版本取代的旧包应删"
+        );
+        assert!(
+            bundled.join("d.zip").exists(),
+            "最高版本的包必须保留"
+        );
+    }
+
+    #[test]
+    fn 下架与替代的id口径一致() {
+        for id in RETIRED_PLUGIN_IDS {
+            assert!(is_retired_or_replaced(id), "下架 id 必须判为 legacy：{id}");
+        }
+        for (old, _new) in REPLACED_PLUGINS {
+            assert!(is_retired_or_replaced(old), "被替代的旧 id 也算：{old}");
+        }
+        assert!(!is_retired_or_replaced("zeta-tts"));
+        assert!(!is_retired_or_replaced("zeta-tts-global"));
     }
 }

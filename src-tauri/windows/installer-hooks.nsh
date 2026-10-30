@@ -284,6 +284,13 @@ Function un.VaDeleteBackups
 FunctionEnd
 
 !macro NSIS_HOOK_POSTINSTALL
+  ; 删掉已下架本地引擎的遗留内置包：NSIS 覆盖安装不会删新包里已不存在的文件，
+  ; 残留的 genie/hojo zip 会被启动引导反复装回来（1.9.0 事故）。
+  ; 注：minimax-tts（国内整段版）的精确清理交给本体启动清理（按 manifest id 判断，
+  ; 不会误删 minimax-tts-global / minimax-tts-stream）。
+  Delete "$INSTDIR\resources\plugins\genie-tts-*.zip"
+  Delete "$INSTDIR\resources\plugins\hojo-tts-*.zip"
+
   ExecShellWait runas "$SYSDIR\cmd.exe" '/c netsh advfirewall firewall delete rule name="VoiceAssist Remote TCP 45271" >nul 2>&1 & netsh advfirewall firewall add rule name="VoiceAssist Remote TCP 45271" dir=in action=allow protocol=TCP localport=45271 profile=any & netsh advfirewall firewall delete rule name="VoiceAssist mDNS UDP 5353" >nul 2>&1 & netsh advfirewall firewall add rule name="VoiceAssist mDNS UDP 5353" dir=in action=allow protocol=UDP localport=5353 profile=any' SW_HIDE
 !macroend
 
